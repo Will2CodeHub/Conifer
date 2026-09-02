@@ -8,6 +8,7 @@ if (!hasPermission('scraper.use') && !isAdmin()) {
     exit();
 }
 
+$currentUser = getCurrentUser();
 $projects = scraper_get_projects();
 $canManage = hasPermission('scraper.manage') || isAdmin();
 $activeType = $_GET['project'] ?? ($projects[0]['type'] ?? 'news_collation');
@@ -21,7 +22,7 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>News Scraper — <?php echo SITE_NAME; ?></title>
+    <title>Data Scraper — <?php echo SITE_NAME; ?></title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/backend-style.css">
     <style>
@@ -66,7 +67,7 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
     <div class="main-content">
         <?php include 'includes/header.php'; ?>
         <div class="content-wrapper" style="padding:24px;">
-            <h1 style="font-size:22px;margin-bottom:6px;"><i class="fas fa-newspaper"></i> News Scraper</h1>
+            <h1 style="font-size:22px;margin-bottom:6px;"><i class="fas fa-database"></i> Data Scraper</h1>
             <p class="scraper-placeholder" style="margin-bottom:20px;">
                 Collate sources and generate original, SEO-optimised articles per publication and section.
             </p>

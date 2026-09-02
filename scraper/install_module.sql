@@ -3,7 +3,7 @@
 INSERT INTO `ten_modules`
   (`module_key`,`module_name`,`module_description`,`module_icon`,`module_url`,`module_group`,`is_enabled`,`is_system`,`display_order`,`required_permission`)
 VALUES
-  ('scraper','News Scraper','Collate sources and generate original articles','fa-newspaper','/management/module-scraper.php','content',1,0,50,'scraper.use')
+  ('scraper','Data Scraper','Multi-project data collation (news, cafe/restaurant emails, and more)','fa-database','/management/module-scraper.php','content',1,0,50,'scraper.use')
 ON DUPLICATE KEY UPDATE
   `module_name`=VALUES(`module_name`),
   `module_description`=VALUES(`module_description`),
