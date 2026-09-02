@@ -158,8 +158,8 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
                         <div id="scOverlay" class="sc-overlay" style="display:none;"></div>
                         <div id="scModal" class="sc-modal" style="display:none;"><div id="scModalBody"></div></div>
 
-                        <script src="js/scraper_review.js"></script>
-                        <?php if ($canManage): ?><script src="js/scraper_config.js"></script><?php endif; ?>
+                        <script src="js/scraper_review.js?v=<?php echo @filemtime(__DIR__ . '/js/scraper_review.js'); ?>"></script>
+                        <?php if ($canManage): ?><script src="js/scraper_config.js?v=<?php echo @filemtime(__DIR__ . '/js/scraper_config.js'); ?>"></script><?php endif; ?>
                         <script>
                         (function () {
                             var tabs = document.querySelectorAll('.sc-subtab');
