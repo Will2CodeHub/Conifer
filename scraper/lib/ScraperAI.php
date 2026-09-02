@@ -188,9 +188,13 @@ function scraper_ai_write_article(string $provider, string $model, string $promp
     if (!$decoded) {
         throw new RuntimeException('AI did not return valid JSON article. Raw start: ' . substr($text, 0, 200));
     }
+    $body = (string)($decoded['body_html'] ?? $decoded['body'] ?? '');
+    // The AI uses <h2> subheadings a lot; the site styles h2 near h1 size, so
+    // give them an explicit smaller size inline (scoped to scraped articles).
+    $body = preg_replace('/<h2(\s[^>]*)?>/i', '<h2 style="font-size:1.4rem;line-height:1.3;margin:1.1em 0 .45em;font-weight:700;">', $body);
     return [
         'title' => (string)($decoded['title'] ?? ''),
-        'body_html' => (string)($decoded['body_html'] ?? $decoded['body'] ?? ''),
+        'body_html' => $body,
         'meta_title' => (string)($decoded['meta_title'] ?? ''),
         'meta_description' => (string)($decoded['meta_description'] ?? ''),
         'meta_keywords' => (string)($decoded['meta_keywords'] ?? ''),
