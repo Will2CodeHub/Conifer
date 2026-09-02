@@ -26,27 +26,27 @@
             .then(function (j) { if (!j.success) throw new Error(j.message || "Request failed"); return j; });
     }
 
-    function scCloseModal() {
-        document.getElementById("scOverlay").style.display = "none";
-        document.getElementById("scModal").style.display = "none";
-        document.getElementById("scModalBody").innerHTML = "";
+    // Styled confirm via SweetAlert2 (bundled locally); falls back to native confirm.
+    function scConfirm(title, message, confirmLabel, danger, onYes) {
+        if (typeof Swal === "undefined") {
+            if (confirm(title)) onYes();
+            return;
+        }
+        Swal.fire({
+            title: title,
+            html: message,
+            icon: danger ? "warning" : "question",
+            showCancelButton: true,
+            confirmButtonText: confirmLabel,
+            cancelButtonText: "Cancel",
+            confirmButtonColor: danger ? "#dc2626" : "#2563eb",
+            reverseButtons: true
+        }).then(function (res) { if (res.isConfirmed) onYes(); });
     }
 
-    // Styled confirm using the shared modal, with an optional warning note.
-    function scConfirm(title, message, confirmLabel, danger, onYes) {
-        var body = document.getElementById("scModalBody");
-        body.innerHTML =
-            "<h3>" + esc(title) + "</h3>" +
-            '<p style="font-size:14px;color:#374151;line-height:1.5;margin-bottom:18px;">' + message + "</p>" +
-            '<div class="sc-modal-actions">' +
-                '<button class="sc-btn secondary" id="scCfgNo">Cancel</button>' +
-                '<button class="sc-btn' + (danger ? " danger" : "") + '" id="scCfgYes">' + esc(confirmLabel) + "</button>" +
-            "</div>";
-        document.getElementById("scOverlay").style.display = "block";
-        document.getElementById("scModal").style.display = "block";
-        document.getElementById("scOverlay").onclick = scCloseModal;
-        document.getElementById("scCfgNo").onclick = scCloseModal;
-        document.getElementById("scCfgYes").onclick = function () { scCloseModal(); onYes(); };
+    function scToast(text, icon) {
+        if (typeof Swal === "undefined") { alert(text); return; }
+        Swal.fire({ toast: true, position: "top-end", timer: 2600, showConfirmButton: false, icon: icon || "info", title: text });
     }
 
     function loadSections() {
@@ -139,7 +139,7 @@
             var count = Object.keys(state.selected).length;
             if (state.dailyCount > 0 && count >= state.dailyCount) {
                 cb.checked = false;
-                alert("You can select at most " + state.dailyCount + " (this section's daily count).");
+                scToast("You can select at most " + state.dailyCount + " (this section's daily count).", "warning");
                 return;
             }
             state.selected[id] = true;
