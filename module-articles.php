@@ -3660,5 +3660,6 @@ document.getElementById('modal_publish_now').addEventListener('change', function
 
 
     </script>
+    <script src="js/scraper_image_suggest.js?v=<?php echo @filemtime(__DIR__ . '/js/scraper_image_suggest.js'); ?>"></script>
 </body>
 </html>

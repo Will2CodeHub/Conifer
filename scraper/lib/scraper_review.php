@@ -6,6 +6,7 @@
 require_once __DIR__ . '/scraper_crud.php';     // scraper_get_section, scraper_get_project
 require_once __DIR__ . '/news_sites_db.php';     // ns_publication_language
 require_once __DIR__ . '/ScraperAI.php';         // scraper_ai_translate, scraper_ai_write_article
+require_once __DIR__ . '/ImageSearch.php';       // scraper_image_search (royalty-free suggestions)
 
 /** Resolve effective AI provider/model/prompt for a section (section overrides project). */
 function scraper_effective_ai(array $section): array {
@@ -209,6 +210,20 @@ function scraper_promote_items(int $pubSectionId, array $itemIds): array {
 
             $articleId = scraper_insert_article($section, $article, $item, $journalistId, $autoPublish);
             scraper_record_draft($conn, $itemId, $article, $ai, $journalistId, $articleId);
+
+            // Best-effort royalty-free image suggestions for the editor sidebar.
+            try {
+                $suggestions = scraper_image_search(scraper_image_query_from_article($article), 4);
+                if (!empty($suggestions)) {
+                    $sjson = json_encode($suggestions, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                    $ui = $conn->prepare("UPDATE ten_scraper_items SET image_suggestions=? WHERE id=?");
+                    $ui->bind_param('si', $sjson, $itemId);
+                    $ui->execute();
+                    $ui->close();
+                }
+            } catch (Throwable $imgEx) {
+                // ignore — suggestions are optional
+            }
 
             $up = $conn->prepare("UPDATE ten_scraper_items SET status='promoted' WHERE id=?");
             $up->bind_param('i', $itemId); $up->execute(); $up->close();
