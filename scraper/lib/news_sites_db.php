@@ -20,7 +20,7 @@ function ns_list_publications(): array {
     $conn = getDBConnection_TENAdmin();
     if (!$conn) return [];
     $out = [];
-    $res = $conn->query("SELECT id, publication, title, url, pub_live, target_language FROM publications ORDER BY title ASC");
+    $res = $conn->query("SELECT id, publication, title, url, pub_live, target_language, max_daily_translations FROM publications ORDER BY title ASC");
     if ($res) {
         while ($row = $res->fetch_assoc()) { $out[] = $row; }
     }
@@ -28,10 +28,23 @@ function ns_list_publications(): array {
     return $out;
 }
 
+/** Max translations/day for a publication key (0 = unlimited). */
+function ns_publication_daily_cap(string $publicationKey): int {
+    $conn = getDBConnection_TENAdmin();
+    if (!$conn) return 0;
+    $stmt = $conn->prepare("SELECT max_daily_translations FROM publications WHERE publication = ? LIMIT 1");
+    $stmt->bind_param('s', $publicationKey);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    $conn->close();
+    return (int)($row['max_daily_translations'] ?? 0);
+}
+
 function ns_get_publication(int $id): ?array {
     $conn = getDBConnection_TENAdmin();
     if (!$conn) return null;
-    $stmt = $conn->prepare("SELECT id, publication, title, url, pub_live, target_language FROM publications WHERE id = ?");
+    $stmt = $conn->prepare("SELECT id, publication, title, url, pub_live, target_language, max_daily_translations FROM publications WHERE id = ?");
     $stmt->bind_param('i', $id);
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
@@ -63,15 +76,16 @@ function ns_save_publication(array $d): int {
     $url      = trim((string)($d['url'] ?? ''));
     $live     = !empty($d['pub_live']) ? 1 : 0;
     $lang     = trim((string)($d['target_language'] ?? '')) ?: 'English';
+    $cap      = isset($d['max_daily_translations']) && $d['max_daily_translations'] !== '' ? (int)$d['max_daily_translations'] : 0;
 
     if ($id > 0) {
-        $stmt = $conn->prepare("UPDATE publications SET publication=?, title=?, url=?, pub_live=?, target_language=? WHERE id=?");
-        $stmt->bind_param('sssisi', $acronym, $title, $url, $live, $lang, $id);
+        $stmt = $conn->prepare("UPDATE publications SET publication=?, title=?, url=?, pub_live=?, target_language=?, max_daily_translations=? WHERE id=?");
+        $stmt->bind_param('sssisii', $acronym, $title, $url, $live, $lang, $cap, $id);
         $stmt->execute();
         $stmt->close();
     } else {
-        $stmt = $conn->prepare("INSERT INTO publications (publication, title, url, pub_live, target_language) VALUES (?,?,?,?,?)");
-        $stmt->bind_param('sssis', $acronym, $title, $url, $live, $lang);
+        $stmt = $conn->prepare("INSERT INTO publications (publication, title, url, pub_live, target_language, max_daily_translations) VALUES (?,?,?,?,?,?)");
+        $stmt->bind_param('sssisi', $acronym, $title, $url, $live, $lang, $cap);
         $stmt->execute();
         $id = $stmt->insert_id;
         $stmt->close();

@@ -133,11 +133,13 @@ try {
             break;
         case 'prompt.update':
             scraper_require_manage($canManage);
-            $ok = scraper_update_project_prompt(
+            $ok = scraper_update_project_settings(
                 (int)$_POST['project_id'],
                 (string)($_POST['prompt'] ?? ''),
                 (string)($_POST['provider'] ?? 'anthropic'),
-                (string)($_POST['model'] ?? 'claude-sonnet-5')
+                (string)($_POST['model'] ?? 'claude-sonnet-5'),
+                (string)($_POST['translation_provider'] ?? 'anthropic'),
+                (string)($_POST['translation_model'] ?? 'claude-haiku-4-5')
             );
             echo json_encode(['success' => $ok]);
             break;

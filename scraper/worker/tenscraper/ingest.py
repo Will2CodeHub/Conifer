@@ -32,6 +32,7 @@ class FeedConfig:
     respect_robots: bool = True
     robots_override_reason: Optional[str] = None
     rate_limit_seconds: Optional[float] = None
+    max_items: Optional[int] = None            # cap items pulled per fetch
 
 
 @dataclass
@@ -96,6 +97,10 @@ def run_ingest(
             items = html_lister(content, feed.feed_url, feed.source_category_label)
         else:
             items = parse_feed(content, feed.source_category_label)
+
+        # Per-feed cap on how many (newest) items we consider.
+        if feed.max_items and feed.max_items > 0:
+            items = items[:feed.max_items]
 
         result.items_found += len(items)
 

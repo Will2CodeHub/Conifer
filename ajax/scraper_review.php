@@ -49,9 +49,16 @@ try {
                 'items' => $r['items'],
                 'language' => $r['language'],
                 'translate_error' => $r['translate_error'] ?? null,
+                'cap_note' => $r['cap_note'] ?? null,
                 'daily_count' => $section ? (int)$section['daily_count'] : 0,
                 'auto_publish' => $section ? (int)$section['auto_publish'] : 0,
             ]);
+            break;
+
+        case 'history':
+            $pubSectionId = (int)($_POST['pub_section_id'] ?? $_GET['pub_section_id'] ?? 0);
+            $days = (int)($_POST['days'] ?? $_GET['days'] ?? 30);
+            echo json_encode(['success' => true, 'history' => scraper_history($pubSectionId, $days)]);
             break;
 
         case 'promote':
