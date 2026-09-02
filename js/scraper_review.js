@@ -26,6 +26,29 @@
             .then(function (j) { if (!j.success) throw new Error(j.message || "Request failed"); return j; });
     }
 
+    function scCloseModal() {
+        document.getElementById("scOverlay").style.display = "none";
+        document.getElementById("scModal").style.display = "none";
+        document.getElementById("scModalBody").innerHTML = "";
+    }
+
+    // Styled confirm using the shared modal, with an optional warning note.
+    function scConfirm(title, message, confirmLabel, danger, onYes) {
+        var body = document.getElementById("scModalBody");
+        body.innerHTML =
+            "<h3>" + esc(title) + "</h3>" +
+            '<p style="font-size:14px;color:#374151;line-height:1.5;margin-bottom:18px;">' + message + "</p>" +
+            '<div class="sc-modal-actions">' +
+                '<button class="sc-btn secondary" id="scCfgNo">Cancel</button>' +
+                '<button class="sc-btn' + (danger ? " danger" : "") + '" id="scCfgYes">' + esc(confirmLabel) + "</button>" +
+            "</div>";
+        document.getElementById("scOverlay").style.display = "block";
+        document.getElementById("scModal").style.display = "block";
+        document.getElementById("scOverlay").onclick = scCloseModal;
+        document.getElementById("scCfgNo").onclick = scCloseModal;
+        document.getElementById("scCfgYes").onclick = function () { scCloseModal(); onYes(); };
+    }
+
     function loadSections() {
         api("sections", { project_id: PROJECT_ID }).then(function (j) {
             var sel = document.getElementById("scReviewSection");
@@ -152,9 +175,19 @@
     function promote() {
         var ids = Object.keys(state.selected);
         if (!ids.length) return;
-        var verb = state.autoPublish ? "write & PUBLISH" : "write as a draft";
-        if (!confirm("Promote " + ids.length + " article(s)? Each will be AI-" + verb + " in " + state.language + ". This can take a few seconds each.")) return;
+        var msg = "Each of the <strong>" + ids.length + "</strong> selected article(s) will be written by AI as " +
+            (state.autoPublish ? '<strong style="color:#b91c1c;">a PUBLISHED article</strong>' : "a <strong>draft</strong>") +
+            " in <strong>" + esc(state.language) + "</strong> and sent to the Article Tool. This can take a few seconds each.";
+        scConfirm(
+            "Promote " + ids.length + " article(s)?",
+            msg,
+            state.autoPublish ? "Write & publish" : "Write drafts",
+            state.autoPublish,
+            function () { runPromote(ids); }
+        );
+    }
 
+    function runPromote(ids) {
         document.getElementById("scPromoteLog").innerHTML = "";
         var btn = document.getElementById("scPromote");
         btn.disabled = true;
