@@ -79,6 +79,10 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
         .sc-spinner-wrap { color:#6b7280; font-size:14px; padding:20px 0; }
         .sc-spinner { display:inline-block; width:16px; height:16px; border:2px solid #cbd5e1; border-top-color:#2563eb; border-radius:50%; animation:sc-spin .8s linear infinite; vertical-align:middle; margin-right:6px; }
         @keyframes sc-spin { to { transform:rotate(360deg); } }
+        .sc-htable { width:100%; border-collapse:collapse; font-size:13px; }
+        .sc-htable th, .sc-htable td { text-align:left; padding:8px 10px; border-bottom:1px solid #eef2f7; vertical-align:top; }
+        .sc-htable th { color:#6b7280; font-weight:600; font-size:12px; }
+        .sc-htable a { color:#2563eb; }
     </style>
 </head>
 <body>
@@ -110,6 +114,7 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
                     <?php if ($active['type'] === 'news_collation'): ?>
                         <div class="sc-subtabs">
                             <button class="sc-subtab active" data-view="review"><i class="fas fa-list-check"></i> Review &amp; Promote</button>
+                            <button class="sc-subtab" data-view="history"><i class="fas fa-clock-rotate-left"></i> History</button>
                             <?php if ($canManage): ?><button class="sc-subtab" data-view="configure"><i class="fas fa-sliders"></i> Configure</button><?php endif; ?>
                         </div>
 
@@ -125,6 +130,16 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
                             <div id="scReviewList"><p class="scraper-placeholder">Choose a section to review its collated articles.</p></div>
                         </div>
 
+                        <div id="scViewHistory" data-project-id="<?php echo (int)$active['id']; ?>" style="display:none;">
+                            <div class="sc-toolbar" style="align-items:center;">
+                                <label style="font-size:13px;font-weight:600;color:#374151;">Section:
+                                    <select id="scHistorySection" style="margin-left:6px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;"><option value="">Loading…</option></select>
+                                </label>
+                                <span class="scraper-placeholder">Last 30 days — what was collated, from where, and what was promoted.</span>
+                            </div>
+                            <div id="scHistoryList"><p class="scraper-placeholder">Choose a section to see its recent history.</p></div>
+                        </div>
+
                         <?php if ($canManage): ?>
                         <div id="scViewConfigure" style="display:none;">
                             <div id="scraperManage" data-project-id="<?php echo (int)$active['id']; ?>"
@@ -132,7 +147,7 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
                                  data-model="<?php echo htmlspecialchars($active['default_ai_model']); ?>">
                                 <div class="sc-toolbar">
                                     <button class="sc-btn" id="scAddSection"><i class="fas fa-plus"></i> Add publication / section</button>
-                                    <button class="sc-btn secondary" id="scEditPrompt"><i class="fas fa-wand-magic-sparkles"></i> Edit project prompt</button>
+                                    <button class="sc-btn secondary" id="scEditPrompt"><i class="fas fa-gear"></i> Project settings</button>
                                     <button class="sc-btn secondary" id="scManageVpn"><i class="fas fa-shield-halved"></i> VPN profiles</button>
                                 </div>
                                 <div id="scSections"><p class="scraper-placeholder">Loading…</p></div>
@@ -154,6 +169,8 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
                                     t.classList.add('active');
                                     var v = t.getAttribute('data-view');
                                     document.getElementById('scViewReview').style.display = (v === 'review') ? 'block' : 'none';
+                                    var hist = document.getElementById('scViewHistory');
+                                    if (hist) hist.style.display = (v === 'history') ? 'block' : 'none';
                                     var cfg = document.getElementById('scViewConfigure');
                                     if (cfg) cfg.style.display = (v === 'configure') ? 'block' : 'none';
                                 });

@@ -228,13 +228,14 @@ function scraper_create_feed(array $d): int {
     $respect    = isset($d['respect_robots']) ? (int)!empty($d['respect_robots']) : 1;
     $override   = ($respect === 0 && !empty($d['robots_override_reason'])) ? (string)$d['robots_override_reason'] : null;
     $rate       = isset($d['rate_limit_seconds']) && $d['rate_limit_seconds'] !== '' ? (int)$d['rate_limit_seconds'] : null;
+    $maxItems   = isset($d['max_items']) && $d['max_items'] !== '' ? (int)$d['max_items'] : 20;
 
     $stmt = $conn->prepare(
         "INSERT INTO ten_scraper_feeds
-         (source_id, feed_url, feed_type, source_category_label, respect_robots, robots_override_reason, rate_limit_seconds)
-         VALUES (?,?,?,?,?,?,?)"
+         (source_id, feed_url, feed_type, source_category_label, respect_robots, robots_override_reason, rate_limit_seconds, max_items)
+         VALUES (?,?,?,?,?,?,?,?)"
     );
-    $stmt->bind_param('isssisi', $sourceId, $feedUrl, $feedType, $category, $respect, $override, $rate);
+    $stmt->bind_param('isssisii', $sourceId, $feedUrl, $feedType, $category, $respect, $override, $rate, $maxItems);
     $stmt->execute();
     $id = $stmt->insert_id;
     $stmt->close();
@@ -250,14 +251,15 @@ function scraper_update_feed(int $id, array $d): bool {
     $respect    = isset($d['respect_robots']) ? (int)!empty($d['respect_robots']) : 1;
     $override   = ($respect === 0 && !empty($d['robots_override_reason'])) ? (string)$d['robots_override_reason'] : null;
     $rate       = isset($d['rate_limit_seconds']) && $d['rate_limit_seconds'] !== '' ? (int)$d['rate_limit_seconds'] : null;
+    $maxItems   = isset($d['max_items']) && $d['max_items'] !== '' ? (int)$d['max_items'] : 20;
     $isActive   = isset($d['is_active']) ? (int)!empty($d['is_active']) : 1;
 
     $stmt = $conn->prepare(
         "UPDATE ten_scraper_feeds
-         SET feed_url=?, feed_type=?, source_category_label=?, respect_robots=?, robots_override_reason=?, rate_limit_seconds=?, is_active=?
+         SET feed_url=?, feed_type=?, source_category_label=?, respect_robots=?, robots_override_reason=?, rate_limit_seconds=?, max_items=?, is_active=?
          WHERE id=?"
     );
-    $stmt->bind_param('sssisiii', $feedUrl, $feedType, $category, $respect, $override, $rate, $isActive, $id);
+    $stmt->bind_param('sssisiiii', $feedUrl, $feedType, $category, $respect, $override, $rate, $maxItems, $isActive, $id);
     $ok = $stmt->execute();
     $stmt->close();
     $conn->close();
@@ -325,7 +327,7 @@ function scraper_delete_vpn_profile(int $id): bool {
 
 function scraper_get_project(int $id): ?array {
     $conn = getDBConnection();
-    $stmt = $conn->prepare("SELECT id, name, type, default_ai_provider, default_ai_model, default_prompt FROM ten_scraper_projects WHERE id = ?");
+    $stmt = $conn->prepare("SELECT id, name, type, default_ai_provider, default_ai_model, default_prompt, translation_provider, translation_model FROM ten_scraper_projects WHERE id = ?");
     $stmt->bind_param('i', $id);
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
@@ -334,13 +336,16 @@ function scraper_get_project(int $id): ?array {
     return $row ?: null;
 }
 
-function scraper_update_project_prompt(int $id, string $prompt, string $provider, string $model): bool {
+function scraper_update_project_settings(int $id, string $prompt, string $provider, string $model, string $translationProvider, string $translationModel): bool {
     $conn = getDBConnection();
     $provider = $provider === 'openai' ? 'openai' : 'anthropic';
+    $translationProvider = $translationProvider === 'openai' ? 'openai' : 'anthropic';
     $stmt = $conn->prepare(
-        "UPDATE ten_scraper_projects SET default_prompt=?, default_ai_provider=?, default_ai_model=? WHERE id=?"
+        "UPDATE ten_scraper_projects
+         SET default_prompt=?, default_ai_provider=?, default_ai_model=?, translation_provider=?, translation_model=?
+         WHERE id=?"
     );
-    $stmt->bind_param('sssi', $prompt, $provider, $model, $id);
+    $stmt->bind_param('sssssi', $prompt, $provider, $model, $translationProvider, $translationModel, $id);
     $ok = $stmt->execute();
     $stmt->close();
     $conn->close();

@@ -128,7 +128,7 @@ class PyMySQLRepo:
         with self._ten.cursor() as cur:
             cur.execute(
                 "SELECT f.id, f.feed_url, f.feed_type, f.source_category_label, "
-                "f.respect_robots, f.robots_override_reason, f.rate_limit_seconds "
+                "f.respect_robots, f.robots_override_reason, f.rate_limit_seconds, f.max_items "
                 "FROM ten_scraper_feeds f "
                 "JOIN ten_scraper_sources s ON s.id = f.source_id "
                 "WHERE s.pub_section_id=%s AND f.is_active=1 AND s.is_active=1",
@@ -145,6 +145,7 @@ class PyMySQLRepo:
                 respect_robots=bool(r[4]),
                 robots_override_reason=r[5],
                 rate_limit_seconds=r[6],
+                max_items=r[7],
             ))
         return feeds
 

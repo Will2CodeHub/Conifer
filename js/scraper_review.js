@@ -87,17 +87,17 @@
             state.dailyCount = j.daily_count || 0;
             state.autoPublish = j.auto_publish || 0;
             state.language = j.language || "English";
-            renderItems(j.items || [], j.translate_error || null);
+            renderItems(j.items || [], j.translate_error || null, j.cap_note || null);
         }).catch(function (e) {
             list.innerHTML = '<p class="scraper-placeholder">Error: ' + esc(e.message) + "</p>";
         });
     }
 
-    function renderItems(items, translateError) {
+    function renderItems(items, translateError, capNote) {
         var list = document.getElementById("scReviewList");
-        var banner = translateError
-            ? '<div class="rv-banner">⚠ Translation did not run — showing original text. Reason: ' + esc(translateError) + "</div>"
-            : "";
+        var banner = "";
+        if (translateError) banner += '<div class="rv-banner">⚠ Translation did not run — showing original text. Reason: ' + esc(translateError) + "</div>";
+        if (capNote) banner += '<div class="rv-banner" style="background:#dbeafe;border-color:#bfdbfe;color:#1e40af;">ℹ ' + esc(capNote) + "</div>";
         if (!items.length) {
             list.innerHTML = banner + '<p class="scraper-placeholder">No new collated articles for this section. The scraper adds more on its schedule.</p>';
             updateCounter();
@@ -221,6 +221,63 @@
         next();
     }
 
+    /* ---------------------------------------------------------------- history */
+
+    function loadHistorySections() {
+        var sel = document.getElementById("scHistorySection");
+        if (!sel) return;
+        api("sections", { project_id: PROJECT_ID }).then(function (j) {
+            var secs = j.sections || [];
+            if (!secs.length) { sel.innerHTML = '<option value="">No sections configured yet</option>'; return; }
+            sel.innerHTML = '<option value="">— choose a section —</option>' + secs.map(function (s) {
+                return '<option value="' + s.id + '">' + esc(s.publication_key) + " › " + esc(s.ten_section) + "</option>";
+            }).join("");
+            sel.addEventListener("change", function () {
+                var id = parseInt(sel.value, 10) || 0;
+                if (!id) { document.getElementById("scHistoryList").innerHTML = '<p class="scraper-placeholder">Choose a section to see its recent history.</p>'; return; }
+                loadHistory(id);
+            });
+        });
+    }
+
+    function loadHistory(sectionId) {
+        var box = document.getElementById("scHistoryList");
+        box.innerHTML = '<div class="sc-spinner-wrap"><span class="sc-spinner"></span> Loading history…</div>';
+        api("history", { pub_section_id: sectionId, days: 30 }).then(function (j) {
+            renderHistory(j.history || []);
+        }).catch(function (e) { box.innerHTML = '<p class="scraper-placeholder">Error: ' + esc(e.message) + "</p>"; });
+    }
+
+    function statusBadge(s) {
+        var map = { promoted: ["#dcfce7", "#166534"], discarded: ["#fee2e2", "#991b1b"], selected: ["#e0e7ff", "#3730a3"], new: ["#f1f5f9", "#475569"] };
+        var c = map[s] || map.new;
+        return '<span class="sc-badge" style="background:' + c[0] + ";color:" + c[1] + ';">' + esc(s) + "</span>";
+    }
+
+    function renderHistory(rows) {
+        var box = document.getElementById("scHistoryList");
+        if (!rows.length) {
+            box.innerHTML = '<p class="scraper-placeholder">Nothing collated for this section in the last 30 days.</p>';
+            return;
+        }
+        var body = rows.map(function (r) {
+            var when = String(r.fetched_at || "").replace("T", " ").slice(0, 16);
+            var art = r.article_id ? ' · <a href="module-articles.php" title="article #' + esc(r.article_id) + '">article #' + esc(r.article_id) + "</a>" : "";
+            return "<tr>" +
+                "<td style='white-space:nowrap;'>" + esc(when) + "</td>" +
+                "<td>" + esc(r.source_name || "") + "</td>" +
+                "<td>" + esc(r.title || "") +
+                    '<div class="scraper-placeholder"><a href="' + esc(r.source_url) + '" target="_blank" rel="noopener">source</a>' + art + "</div></td>" +
+                "<td>" + statusBadge(r.status) + "</td>" +
+                "</tr>";
+        }).join("");
+        box.innerHTML =
+            '<div style="overflow-x:auto;"><table class="sc-htable">' +
+            "<thead><tr><th>Collated</th><th>Source</th><th>Article</th><th>Status</th></tr></thead>" +
+            "<tbody>" + body + "</tbody></table></div>";
+    }
+
     document.getElementById("scPromote").addEventListener("click", promote);
     loadSections();
+    loadHistorySections();
 })();

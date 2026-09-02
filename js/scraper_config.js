@@ -304,7 +304,7 @@
             row.style.marginTop = "8px";
             row.innerHTML =
                 "<div><span class='sc-badge off'>" + esc(f.feed_type) + "</span> " + esc(f.feed_url) +
-                    ' <span class="scraper-placeholder">' + (f.source_category_label ? "· " + esc(f.source_category_label) + " " : "") + "· " + robots + "</span></div>" +
+                    ' <span class="scraper-placeholder">' + (f.source_category_label ? "· " + esc(f.source_category_label) + " " : "") + "· max " + esc(f.max_items || 20) + " · " + robots + "</span></div>" +
                 "<div>" +
                     '<button class="sc-btn small secondary" data-act="edit">Edit</button> ' +
                     '<button class="sc-btn small danger" data-act="del">Delete</button>' +
@@ -331,10 +331,11 @@
                 '<div class="sc-field"><label>Source category label</label><input type="text" id="fd_cat" value="' + esc(f.source_category_label || "") + '" placeholder="e.g. Politik"></div>' +
             "</div>" +
             '<div class="sc-inline">' +
+                '<div class="sc-field"><label>Max articles per fetch</label><input type="number" id="fd_max" min="1" value="' + esc(f.max_items || 20) + '"></div>' +
                 '<div class="sc-field"><label>Rate limit (seconds)</label><input type="number" id="fd_rate" min="0" value="' + esc(f.rate_limit_seconds || "") + '" placeholder="default"></div>' +
-                '<div class="sc-field"><label><input type="checkbox" id="fd_robots" ' + (respect === 1 ? "checked" : "") + '> Respect robots.txt</label>' +
-                    '<div id="fd_override_wrap" style="margin-top:6px;' + (respect === 1 ? "display:none;" : "") + '"><input type="text" id="fd_override" value="' + esc(f.robots_override_reason || "") + '" placeholder="Override reason (own/permitted site)"></div></div>' +
             "</div>" +
+            '<div class="sc-field"><label><input type="checkbox" id="fd_robots" ' + (respect === 1 ? "checked" : "") + '> Respect robots.txt</label>' +
+                '<div id="fd_override_wrap" style="margin-top:6px;' + (respect === 1 ? "display:none;" : "") + '"><input type="text" id="fd_override" value="' + esc(f.robots_override_reason || "") + '" placeholder="Override reason (own/permitted site)"></div></div>' +
             '<div class="sc-modal-actions"><button class="sc-btn secondary" id="fd_cancel">Cancel</button><button class="sc-btn" id="fd_save">Save</button></div>'
         );
         document.getElementById("fd_cancel").addEventListener("click", closeModal);
@@ -347,6 +348,7 @@
                 feed_url: document.getElementById("fd_url").value,
                 feed_type: document.getElementById("fd_type").value,
                 source_category_label: document.getElementById("fd_cat").value,
+                max_items: document.getElementById("fd_max").value,
                 rate_limit_seconds: document.getElementById("fd_rate").value,
                 respect_robots: robotsBox.checked ? 1 : 0,
                 robots_override_reason: document.getElementById("fd_override").value
@@ -360,27 +362,44 @@
 
     /* ---------------------------------------------------------------- prompt */
 
+    function providerOptions(sel) {
+        return '<option value="anthropic"' + (sel === "anthropic" ? " selected" : "") + ">Claude (Anthropic)</option>" +
+               '<option value="openai"' + (sel === "openai" ? " selected" : "") + ">ChatGPT (OpenAI)</option>";
+    }
+
     function openPromptModal() {
         api("prompt", "get", { project_id: PROJECT_ID }).then(function (json) {
             var p = json.project || {};
             var provider = p.default_ai_provider || DEFAULT_PROVIDER;
+            var tprovider = p.translation_provider || "anthropic";
+            var tmodel = p.translation_model || "claude-haiku-4-5";
             openModal(
-                "<h3>Edit project prompt</h3>" +
+                "<h3>Project settings</h3>" +
+                '<div style="font-weight:600;color:#111827;font-size:13px;margin-bottom:6px;">Article writing</div>' +
                 '<div class="sc-inline">' +
-                    '<div class="sc-field"><label>Default provider</label><select id="p_provider"><option value="anthropic"' + (provider === "anthropic" ? " selected" : "") + ">Claude (Anthropic)</option><option value=\"openai\"" + (provider === "openai" ? " selected" : "") + ">ChatGPT (OpenAI)</option></select></div>" +
-                    '<div class="sc-field"><label>Default model</label><select id="p_model">' + modelOptions(provider, p.default_ai_model || DEFAULT_MODEL) + "</select></div>" +
+                    '<div class="sc-field"><label>Writing provider</label><select id="p_provider">' + providerOptions(provider) + "</select></div>" +
+                    '<div class="sc-field"><label>Writing model</label><select id="p_model">' + modelOptions(provider, p.default_ai_model || DEFAULT_MODEL) + "</select></div>" +
                 "</div>" +
-                '<div class="sc-field"><label>Prompt template</label><textarea id="p_prompt">' + esc(p.default_prompt || "") + "</textarea></div>" +
+                '<div style="font-weight:600;color:#111827;font-size:13px;margin:10px 0 6px;">Translation <span style="font-weight:400;color:#6b7280;">— used for the review summaries; a cheap model is fine</span></div>' +
+                '<div class="sc-inline">' +
+                    '<div class="sc-field"><label>Translation provider</label><select id="p_tprovider">' + providerOptions(tprovider) + "</select></div>" +
+                    '<div class="sc-field"><label>Translation model</label><select id="p_tmodel">' + modelOptions(tprovider, tmodel) + "</select></div>" +
+                "</div>" +
+                '<div class="sc-field"><label>Article prompt template</label><textarea id="p_prompt">' + esc(p.default_prompt || "") + "</textarea></div>" +
                 '<div class="sc-modal-actions"><button class="sc-btn secondary" id="p_cancel">Cancel</button><button class="sc-btn" id="p_save">Save</button></div>'
             );
             document.getElementById("p_cancel").addEventListener("click", closeModal);
             var provSel = document.getElementById("p_provider");
             provSel.addEventListener("change", function () { document.getElementById("p_model").innerHTML = modelOptions(provSel.value, ""); });
+            var tprovSel = document.getElementById("p_tprovider");
+            tprovSel.addEventListener("change", function () { document.getElementById("p_tmodel").innerHTML = modelOptions(tprovSel.value, ""); });
             document.getElementById("p_save").addEventListener("click", function () {
                 api("prompt", "update", {
                     project_id: PROJECT_ID,
                     provider: provSel.value,
                     model: document.getElementById("p_model").value,
+                    translation_provider: tprovSel.value,
+                    translation_model: document.getElementById("p_tmodel").value,
                     prompt: document.getElementById("p_prompt").value
                 }).then(function () { closeModal(); }).catch(alertErr);
             });

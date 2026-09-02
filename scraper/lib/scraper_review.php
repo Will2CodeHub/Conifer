@@ -26,8 +26,11 @@ function scraper_review_items(int $pubSectionId, int $limit = 100): array {
     if (!$section) return ['items' => [], 'language' => 'English', 'translate_error' => null];
 
     $lang = ns_publication_language($section['publication_key']);
-    $ai = scraper_effective_ai($section);
+    $project = scraper_get_project((int)$section['project_id']) ?: [];
+    $tProvider = ($project['translation_provider'] ?? '') ?: 'anthropic';
+    $tModel = ($project['translation_model'] ?? '') ?: 'claude-haiku-4-5';
     $translateError = null;
+    $capNote = null;
 
     $conn = getDBConnection();
     $stmt = $conn->prepare(
@@ -43,29 +46,60 @@ function scraper_review_items(int $pubSectionId, int $limit = 100): array {
     $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
 
-    // Translate any item whose cached translation is missing or in a different language.
+    // Collapse duplicate stories (same cluster_id) before translating — keep the newest.
+    $seenClusters = [];
+    $deduped = [];
+    foreach ($rows as $r) {
+        $cid = (string)($r['cluster_id'] ?? '');
+        if ($cid !== '' && isset($seenClusters[$cid])) {
+            continue;
+        }
+        if ($cid !== '') {
+            $seenClusters[$cid] = true;
+        }
+        $deduped[] = $r;
+    }
+    $rows = $deduped;
+
+    // Items needing translation (missing/other language).
     $toTranslate = [];
     foreach ($rows as $r) {
         if (($r['translated_lang'] ?? '') !== $lang) {
             $toTranslate[] = ['id' => (int)$r['id'], 'title' => $r['title'], 'summary' => $r['summary']];
         }
     }
+
+    // Enforce per-publication daily translation cap (0 = unlimited).
+    if (!empty($toTranslate)) {
+        $cap = ns_publication_daily_cap($section['publication_key']);
+        if ($cap > 0) {
+            $usedToday = scraper_translations_today($conn, $section['publication_key']);
+            $remaining = $cap - $usedToday;
+            if ($remaining <= 0) {
+                $capNote = "Daily translation cap ({$cap}) reached for this publication — remaining items show original text; more can translate tomorrow.";
+                $toTranslate = [];
+            } elseif (count($toTranslate) > $remaining) {
+                $capNote = "Daily translation cap ({$cap}) — translated {$remaining} more today; the rest show original text.";
+                $toTranslate = array_slice($toTranslate, 0, $remaining);
+            }
+        }
+    }
+
     if (!empty($toTranslate)) {
         try {
-            $translations = scraper_ai_translate($ai['provider'], $ai['model'], $lang, $toTranslate);
+            $translations = scraper_ai_translate($tProvider, $tModel, $lang, $toTranslate);
         } catch (Throwable $e) {
             $translations = [];
             $translateError = $e->getMessage();
         }
         if (!empty($translations)) {
-            $up = $conn->prepare("UPDATE ten_scraper_items SET title_translated=?, summary_translated=?, translated_lang=? WHERE id=?");
+            $up = $conn->prepare("UPDATE ten_scraper_items SET title_translated=?, summary_translated=?, translated_lang=?, translated_at=NOW() WHERE id=?");
             foreach ($translations as $id => $t) {
                 $tt = $t['title']; $ts = $t['summary'];
                 $up->bind_param('sssi', $tt, $ts, $lang, $id);
                 $up->execute();
             }
             $up->close();
-            // merge into rows for this response
             foreach ($rows as &$r) {
                 $id = (int)$r['id'];
                 if (isset($translations[$id])) {
@@ -92,7 +126,45 @@ function scraper_review_items(int $pubSectionId, int $limit = 100): array {
         ];
     }, $rows);
 
-    return ['items' => $items, 'language' => $lang, 'translate_error' => $translateError];
+    return ['items' => $items, 'language' => $lang, 'translate_error' => $translateError, 'cap_note' => $capNote];
+}
+
+/** Count items translated today for a publication (across its sections). */
+function scraper_translations_today($conn, string $publicationKey): int {
+    $stmt = $conn->prepare(
+        "SELECT COUNT(*) AS c FROM ten_scraper_items i
+         JOIN ten_scraper_pub_sections ps ON ps.id = i.pub_section_id
+         WHERE ps.publication_key = ? AND i.translated_at >= CURDATE()"
+    );
+    $stmt->bind_param('s', $publicationKey);
+    $stmt->execute();
+    $c = (int)($stmt->get_result()->fetch_assoc()['c'] ?? 0);
+    $stmt->close();
+    return $c;
+}
+
+/** Last-N-days history for a section: what was collated, from where, and its status. */
+function scraper_history(int $pubSectionId, int $days = 30): array {
+    $conn = getDBConnection();
+    $stmt = $conn->prepare(
+        "SELECT i.id, i.status,
+                COALESCE(NULLIF(i.title_translated,''), i.title) AS title,
+                i.source_url, i.published_at, i.fetched_at,
+                src.name AS source_name, d.article_id
+         FROM ten_scraper_items i
+         LEFT JOIN ten_scraper_feeds f ON f.id = i.feed_id
+         LEFT JOIN ten_scraper_sources src ON src.id = f.source_id
+         LEFT JOIN ten_scraper_drafts d ON d.item_id = i.id
+         WHERE i.pub_section_id = ? AND i.fetched_at >= (NOW() - INTERVAL ? DAY)
+         ORDER BY i.fetched_at DESC
+         LIMIT 500"
+    );
+    $stmt->bind_param('ii', $pubSectionId, $days);
+    $stmt->execute();
+    $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+    $conn->close();
+    return $rows;
 }
 
 /**
