@@ -141,24 +141,27 @@ function scraper_ai_translate(string $provider, string $model, string $targetLan
         . "Preserve meaning and proper nouns; do not editorialise or add content. "
         . "Return ONLY a JSON object with key \"items\": an array in the SAME order, each element "
         . "{\"id\": <same id>, \"title\": \"...\", \"summary\": \"...\"}. No commentary.";
-    $input = [];
-    foreach ($items as $it) {
-        $input[] = ['id' => (int)$it['id'], 'title' => (string)$it['title'], 'summary' => (string)$it['summary']];
-    }
-    $user = json_encode(['items' => $input], JSON_UNESCAPED_UNICODE);
 
-    $text = scraper_ai_raw($provider, $model, $system, $user, 4096, true);
-    $decoded = scraper_ai_decode_json($text);
-    if (!$decoded || !isset($decoded['items']) || !is_array($decoded['items'])) {
-        throw new RuntimeException('Translator returned unexpected output: ' . substr($text, 0, 300));
-    }
     $out = [];
-    foreach ($decoded['items'] as $row) {
-        if (isset($row['id'])) {
-            $out[(int)$row['id']] = [
-                'title' => (string)($row['title'] ?? ''),
-                'summary' => (string)($row['summary'] ?? ''),
-            ];
+    // Translate in small batches so each response fits well within the token limit.
+    foreach (array_chunk($items, 20) as $chunk) {
+        $input = [];
+        foreach ($chunk as $it) {
+            $input[] = ['id' => (int)$it['id'], 'title' => (string)$it['title'], 'summary' => (string)$it['summary']];
+        }
+        $user = json_encode(['items' => $input], JSON_UNESCAPED_UNICODE);
+        $text = scraper_ai_raw($provider, $model, $system, $user, 8000, true);
+        $decoded = scraper_ai_decode_json($text);
+        if (!$decoded || !isset($decoded['items']) || !is_array($decoded['items'])) {
+            throw new RuntimeException('Translator returned unexpected output: ' . substr($text, 0, 200));
+        }
+        foreach ($decoded['items'] as $row) {
+            if (isset($row['id'])) {
+                $out[(int)$row['id']] = [
+                    'title' => (string)($row['title'] ?? ''),
+                    'summary' => (string)($row['summary'] ?? ''),
+                ];
+            }
         }
     }
     return $out;
