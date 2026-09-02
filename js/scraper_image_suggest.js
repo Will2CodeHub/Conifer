@@ -26,18 +26,26 @@
         return null;
     }
 
-    function ensureStrip() {
+    // The editor (#article_text) is position:absolute filling its .editor-container,
+    // so it paints over anything inside that container. Anchor the strip BEFORE the
+    // whole container instead, in normal flow.
+    function anchorEl() {
         var editor = document.getElementById("article_text");
-        if (!editor || !editor.parentNode) return null;
+        if (!editor) return null;
+        return editor.closest(".editor-container") || editor;
+    }
+
+    function ensureStrip() {
+        var anchor = anchorEl();
+        if (!anchor || !anchor.parentNode) return null;
         var strip = document.getElementById(STRIP_ID);
         if (!strip) {
             strip = document.createElement("div");
             strip.id = STRIP_ID;
             strip.style.cssText = "margin:0 0 10px;padding:10px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;";
         }
-        // The edit modal relocates the editor; keep the strip immediately before it.
-        if (strip.nextElementSibling !== editor) {
-            editor.parentNode.insertBefore(strip, editor);
+        if (strip.nextElementSibling !== anchor) {
+            anchor.parentNode.insertBefore(strip, anchor);
         }
         return strip;
     }
@@ -118,12 +126,12 @@
                 if (s) { s.style.display = "none"; s.innerHTML = ""; }
             }
         }
-        // Re-glue an existing populated strip to the editor wherever it now lives.
+        // Re-glue an existing populated strip above the editor container wherever it now lives.
         if (id && lastSuggestions.length) {
             var strip = document.getElementById(STRIP_ID);
-            var editor = document.getElementById("article_text");
-            if (strip && editor && editor.parentNode && strip.nextElementSibling !== editor) {
-                editor.parentNode.insertBefore(strip, editor);
+            var anchor = anchorEl();
+            if (strip && anchor && anchor.parentNode && strip.nextElementSibling !== anchor) {
+                anchor.parentNode.insertBefore(strip, anchor);
             }
         }
     }, 800);
