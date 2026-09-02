@@ -74,6 +74,10 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
         .rv-toggle { color:#2563eb; cursor:pointer; font-size:11px; }
         .rv-log-line { font-size:13px; padding:3px 0; }
         .rv-ok { color:#166534; } .rv-err { color:#b91c1c; }
+        .rv-banner { background:#fef3c7; border:1px solid #fde68a; color:#92400e; padding:8px 12px; border-radius:6px; font-size:13px; margin-bottom:10px; }
+        .sc-spinner-wrap { color:#6b7280; font-size:14px; padding:20px 0; }
+        .sc-spinner { display:inline-block; width:16px; height:16px; border:2px solid #cbd5e1; border-top-color:#2563eb; border-radius:50%; animation:sc-spin .8s linear infinite; vertical-align:middle; margin-right:6px; }
+        @keyframes sc-spin { to { transform:rotate(360deg); } }
     </style>
 </head>
 <body>

@@ -48,6 +48,7 @@ try {
                 'success' => true,
                 'items' => $r['items'],
                 'language' => $r['language'],
+                'translate_error' => $r['translate_error'] ?? null,
                 'daily_count' => $section ? (int)$section['daily_count'] : 0,
                 'auto_publish' => $section ? (int)$section['auto_publish'] : 0,
             ]);
