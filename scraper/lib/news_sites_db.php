@@ -15,12 +15,12 @@ if (!function_exists('getDBConnection_TENAdmin')) {
     error_reporting($__er);
 }
 
-/** All owned publications: id, publication (acronym), title, url, pub_live. */
+/** All owned publications: id, publication (acronym), title, url, pub_live, target_language. */
 function ns_list_publications(): array {
     $conn = getDBConnection_TENAdmin();
     if (!$conn) return [];
     $out = [];
-    $res = $conn->query("SELECT id, publication, title, url, pub_live FROM publications ORDER BY title ASC");
+    $res = $conn->query("SELECT id, publication, title, url, pub_live, target_language FROM publications ORDER BY title ASC");
     if ($res) {
         while ($row = $res->fetch_assoc()) { $out[] = $row; }
     }
@@ -31,13 +31,27 @@ function ns_list_publications(): array {
 function ns_get_publication(int $id): ?array {
     $conn = getDBConnection_TENAdmin();
     if (!$conn) return null;
-    $stmt = $conn->prepare("SELECT id, publication, title, url, pub_live FROM publications WHERE id = ?");
+    $stmt = $conn->prepare("SELECT id, publication, title, url, pub_live, target_language FROM publications WHERE id = ?");
     $stmt->bind_param('i', $id);
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
     $stmt->close();
     $conn->close();
     return $row ?: null;
+}
+
+/** Target language for a publication key (defaults to English). */
+function ns_publication_language(string $publicationKey): string {
+    $conn = getDBConnection_TENAdmin();
+    if (!$conn) return 'English';
+    $stmt = $conn->prepare("SELECT target_language FROM publications WHERE publication = ? LIMIT 1");
+    $stmt->bind_param('s', $publicationKey);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    $conn->close();
+    $lang = $row['target_language'] ?? '';
+    return ($lang !== null && $lang !== '') ? $lang : 'English';
 }
 
 /** Insert or update a publication (owned site). Returns the id. */
@@ -48,15 +62,16 @@ function ns_save_publication(array $d): int {
     $title    = trim((string)($d['title'] ?? ''));
     $url      = trim((string)($d['url'] ?? ''));
     $live     = !empty($d['pub_live']) ? 1 : 0;
+    $lang     = trim((string)($d['target_language'] ?? '')) ?: 'English';
 
     if ($id > 0) {
-        $stmt = $conn->prepare("UPDATE publications SET publication=?, title=?, url=?, pub_live=? WHERE id=?");
-        $stmt->bind_param('sssii', $acronym, $title, $url, $live, $id);
+        $stmt = $conn->prepare("UPDATE publications SET publication=?, title=?, url=?, pub_live=?, target_language=? WHERE id=?");
+        $stmt->bind_param('sssisi', $acronym, $title, $url, $live, $lang, $id);
         $stmt->execute();
         $stmt->close();
     } else {
-        $stmt = $conn->prepare("INSERT INTO publications (publication, title, url, pub_live) VALUES (?,?,?,?)");
-        $stmt->bind_param('sssi', $acronym, $title, $url, $live);
+        $stmt = $conn->prepare("INSERT INTO publications (publication, title, url, pub_live, target_language) VALUES (?,?,?,?,?)");
+        $stmt->bind_param('sssis', $acronym, $title, $url, $live, $lang);
         $stmt->execute();
         $id = $stmt->insert_id;
         $stmt->close();

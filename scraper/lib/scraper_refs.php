@@ -84,7 +84,7 @@ function scraper_get_ai_models(): array {
         'anthropic' => [
             'claude-opus-5',
             'claude-sonnet-5',
-            'claude-haiku-4-5-20251001',
+            'claude-haiku-4-5',
             'claude-fable-5-1',
         ],
         'openai' => [
