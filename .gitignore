@@ -5,6 +5,8 @@ login.txt
 
 # === Large database dumps (not source code) ===
 *.sql
+# ...but DO track the scraper's own SQL source files:
+!scraper/**/*.sql
 
 # === Runtime / generated data ===
 logs/
