@@ -5,6 +5,39 @@ requireLogin();
 
 header('Content-Type: application/json');
 
+/**
+ * Write a scaled WebP copy of a GD image into $destDir (created if needed),
+ * fitting within maxW x maxH, preserving aspect ratio, never upscaling.
+ * Mirrors the legacy resizeImage() placement folders/sizes.
+ */
+function scraper_make_image_size($srcImage, int $srcW, int $srcH, string $destDir, string $filename, int $maxW, int $maxH): void {
+    if (!is_dir($destDir)) {
+        @mkdir($destDir, 0755, true);
+        @chmod($destDir, 0755);
+    }
+    if (!is_dir($destDir) || !is_writable($destDir)) {
+        return; // non-fatal
+    }
+    $scale = min($maxW / $srcW, $maxH / $srcH, 1.0);
+    $nw = max(1, (int)round($srcW * $scale));
+    $nh = max(1, (int)round($srcH * $scale));
+    $canvas = imagecreatetruecolor($nw, $nh);
+    $white = imagecolorallocate($canvas, 255, 255, 255);
+    imagefill($canvas, 0, 0, $white);
+    imagecopyresampled($canvas, $srcImage, 0, 0, 0, 0, $nw, $nh, $srcW, $srcH);
+    imagewebp($canvas, rtrim($destDir, '/') . '/' . $filename, 85);
+    imagedestroy($canvas);
+}
+
+// Placement folders + sizes (match the legacy multi-size process).
+$SCRAPER_PLACEMENTS = [
+    'frontpage_headline' => [490, 310],
+    'section_headline'   => [790, 500],
+    'left_article'       => [381, 267],
+    'right_article'      => [191, 134],
+    'footer_images'      => [184, 129],
+];
+
 // Check if this is a POST request
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     echo json_encode([
@@ -94,6 +127,15 @@ $filepath = $base_path . $filename;
 
 // Convert to WebP format with good quality
 $success = imagewebp($image, $filepath, 90);
+
+if ($success) {
+    // Generate placement-size versions in subfolders (legacy folders/sizes).
+    $srcW = imagesx($image);
+    $srcH = imagesy($image);
+    foreach ($SCRAPER_PLACEMENTS as $folder => $dim) {
+        scraper_make_image_size($image, $srcW, $srcH, $base_path . $folder, $filename, $dim[0], $dim[1]);
+    }
+}
 imagedestroy($image);
 
 if (!$success) {
