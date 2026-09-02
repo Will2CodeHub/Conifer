@@ -181,8 +181,19 @@ try {
         
         if ($stmt->execute()) {
             $stmt->close();
+
+            // Auto-populate the featured image (filename only) from the first body
+            // image, but only if image_url is not already set.
+            if (preg_match('#<img[^>]+src=[\'"]([^\'"]+)[\'"]#i', $articleText, $mm)) {
+                $mainImage = basename($mm[1]);
+                $u2 = $conn->prepare("UPDATE articles SET image_url = ? WHERE id = ? AND (image_url IS NULL OR image_url = '')");
+                $u2->bind_param('si', $mainImage, $articleId);
+                $u2->execute();
+                $u2->close();
+            }
+
             $conn->close();
-            
+
             echo json_encode([
                 'status' => 'success',
                 'message' => 'Article saved successfully',

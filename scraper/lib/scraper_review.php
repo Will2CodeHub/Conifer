@@ -265,14 +265,12 @@ function scraper_insert_article(array $section, array $article, array $item, ?in
     $state = $autoPublish ? 'published' : 'draft';
     $pub = $section['publication_key'];
     $sectionName = substr($section['ten_section'], 0, 20);
-    $slug = scraper_slugify($article['title']);
-
     $stmt = $conn->prepare(
         "INSERT INTO articles
          (title, meta_title, meta_description, meta_keywords, article_text, state, section,
           submission_date, created_by, modified_date, publish_now, journalist_id,
-          publications, canonical, news_scrape_url, news_scrape_url_hash, url, alias)
-         VALUES (?,?,?,?,?,?,?, NOW(), 'scraper', NOW(), 1, ?, ?, ?, ?, ?, ?, ?)"
+          publications, canonical, news_scrape_url, news_scrape_url_hash)
+         VALUES (?,?,?,?,?,?,?, NOW(), 'scraper', NOW(), 1, ?, ?, ?, ?, ?)"
     );
     $title = $article['title'];
     $mt = substr($article['meta_title'], 0, 200);
@@ -283,18 +281,24 @@ function scraper_insert_article(array $section, array $article, array $item, ?in
     $srcHash = $item['source_url_hash'];
     $canonical = substr($pub, 0, 10);
     $jid = $journalistId;
-    $url = substr($slug, 0, 200);
-    $alias = substr($slug, 0, 255);
 
-    // 7 strings, journalist_id (i), then 6 strings = 14 params
+    // 7 strings, journalist_id (i), then 4 strings = 12 params
     $stmt->bind_param(
-        'sssssssissssss',
+        'sssssssissss',
         $title, $mt, $md, $mk, $body, $state, $sectionName,
-        $jid, $pub, $canonical, $srcUrl, $srcHash, $url, $alias
+        $jid, $pub, $canonical, $srcUrl, $srcHash
     );
     $stmt->execute();
     $id = $stmt->insert_id;
     $stmt->close();
+
+    // The site URL is <slug>-<id>, built from the title; set it now that we have the id.
+    $url = substr(scraper_slugify($article['title']) . '-' . $id, 0, 200);
+    $up = $conn->prepare("UPDATE articles SET url=? WHERE id=?");
+    $up->bind_param('si', $url, $id);
+    $up->execute();
+    $up->close();
+
     $conn->close();
     return $id;
 }
