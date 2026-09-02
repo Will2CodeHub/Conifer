@@ -190,17 +190,21 @@
     function runPromote(ids) {
         document.getElementById("scPromoteLog").innerHTML = "";
         var btn = document.getElementById("scPromote");
+        var origBtn = btn.innerHTML;
         btn.disabled = true;
+        btn.innerHTML = '<span class="sc-spinner" style="border-top-color:#fff;border-color:rgba(255,255,255,.5);border-top-color:#fff;"></span> Promoting…';
         var i = 0;
 
         function next() {
             if (i >= ids.length) {
                 btn.disabled = false;
-                addLog("Finished.", "");
+                btn.innerHTML = origBtn;
+                addLog("Finished.", "rv-ok");
                 return;
             }
             var id = ids[i++];
-            var line = addLog("Writing article " + i + " of " + ids.length + "…", "");
+            var line = addLog("", "");
+            line.innerHTML = '<span class="sc-spinner"></span> Writing article ' + i + " of " + ids.length + "…";
             api("promote", { pub_section_id: state.sectionId, ids: id }).then(function (j) {
                 var r = (j.results && j.results[0]) || {};
                 if (r.ok) {
