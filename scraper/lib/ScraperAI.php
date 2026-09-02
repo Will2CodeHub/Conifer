@@ -149,15 +149,16 @@ function scraper_ai_translate(string $provider, string $model, string $targetLan
 
     $text = scraper_ai_raw($provider, $model, $system, $user, 4096, true);
     $decoded = scraper_ai_decode_json($text);
+    if (!$decoded || !isset($decoded['items']) || !is_array($decoded['items'])) {
+        throw new RuntimeException('Translator returned unexpected output: ' . substr($text, 0, 300));
+    }
     $out = [];
-    if ($decoded && isset($decoded['items']) && is_array($decoded['items'])) {
-        foreach ($decoded['items'] as $row) {
-            if (isset($row['id'])) {
-                $out[(int)$row['id']] = [
-                    'title' => (string)($row['title'] ?? ''),
-                    'summary' => (string)($row['summary'] ?? ''),
-                ];
-            }
+    foreach ($decoded['items'] as $row) {
+        if (isset($row['id'])) {
+            $out[(int)$row['id']] = [
+                'title' => (string)($row['title'] ?? ''),
+                'summary' => (string)($row['summary'] ?? ''),
+            ];
         }
     }
     return $out;

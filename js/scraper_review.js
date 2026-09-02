@@ -59,25 +59,28 @@
 
     function loadItems() {
         var list = document.getElementById("scReviewList");
-        list.innerHTML = '<p class="scraper-placeholder">Loading &amp; translating… (first load of new items may take a few seconds)</p>';
+        list.innerHTML = '<div class="sc-spinner-wrap"><span class="sc-spinner"></span> Loading &amp; translating… (first load of new items may take a few seconds)</div>';
         api("list", { pub_section_id: state.sectionId }).then(function (j) {
             state.dailyCount = j.daily_count || 0;
             state.autoPublish = j.auto_publish || 0;
             state.language = j.language || "English";
-            renderItems(j.items || []);
+            renderItems(j.items || [], j.translate_error || null);
         }).catch(function (e) {
             list.innerHTML = '<p class="scraper-placeholder">Error: ' + esc(e.message) + "</p>";
         });
     }
 
-    function renderItems(items) {
+    function renderItems(items, translateError) {
         var list = document.getElementById("scReviewList");
+        var banner = translateError
+            ? '<div class="rv-banner">⚠ Translation did not run — showing original text. Reason: ' + esc(translateError) + "</div>"
+            : "";
         if (!items.length) {
-            list.innerHTML = '<p class="scraper-placeholder">No new collated articles for this section. The scraper adds more on its schedule.</p>';
+            list.innerHTML = banner + '<p class="scraper-placeholder">No new collated articles for this section. The scraper adds more on its schedule.</p>';
             updateCounter();
             return;
         }
-        list.innerHTML = '<p class="scraper-placeholder" style="margin-bottom:10px;">' + items.length +
+        list.innerHTML = banner + '<p class="scraper-placeholder" style="margin-bottom:10px;">' + items.length +
             " collated articles, translated to <strong>" + esc(state.language) + "</strong>. Select up to " + state.dailyCount +
             (state.autoPublish ? ' — <strong style="color:#b91c1c;">this section AUTO-PUBLISHES on promote</strong>.' : " (they land as drafts in the Article Tool).") + "</p>";
 

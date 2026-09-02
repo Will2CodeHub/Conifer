@@ -23,10 +23,11 @@ function scraper_effective_ai(array $section): array {
  */
 function scraper_review_items(int $pubSectionId, int $limit = 100): array {
     $section = scraper_get_section($pubSectionId);
-    if (!$section) return ['items' => [], 'language' => 'English'];
+    if (!$section) return ['items' => [], 'language' => 'English', 'translate_error' => null];
 
     $lang = ns_publication_language($section['publication_key']);
     $ai = scraper_effective_ai($section);
+    $translateError = null;
 
     $conn = getDBConnection();
     $stmt = $conn->prepare(
@@ -54,6 +55,7 @@ function scraper_review_items(int $pubSectionId, int $limit = 100): array {
             $translations = scraper_ai_translate($ai['provider'], $ai['model'], $lang, $toTranslate);
         } catch (Throwable $e) {
             $translations = [];
+            $translateError = $e->getMessage();
         }
         if (!empty($translations)) {
             $up = $conn->prepare("UPDATE ten_scraper_items SET title_translated=?, summary_translated=?, translated_lang=? WHERE id=?");
@@ -90,7 +92,7 @@ function scraper_review_items(int $pubSectionId, int $limit = 100): array {
         ];
     }, $rows);
 
-    return ['items' => $items, 'language' => $lang];
+    return ['items' => $items, 'language' => $lang, 'translate_error' => $translateError];
 }
 
 /**
