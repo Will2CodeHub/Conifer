@@ -27,14 +27,18 @@
     }
 
     function ensureStrip() {
-        var strip = document.getElementById(STRIP_ID);
-        if (strip) return strip;
         var editor = document.getElementById("article_text");
         if (!editor || !editor.parentNode) return null;
-        strip = document.createElement("div");
-        strip.id = STRIP_ID;
-        strip.style.cssText = "display:none;margin:0 0 10px;padding:10px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;";
-        editor.parentNode.insertBefore(strip, editor);
+        var strip = document.getElementById(STRIP_ID);
+        if (!strip) {
+            strip = document.createElement("div");
+            strip.id = STRIP_ID;
+            strip.style.cssText = "margin:0 0 10px;padding:10px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;";
+        }
+        // The edit modal relocates the editor; keep the strip immediately before it.
+        if (strip.nextElementSibling !== editor) {
+            editor.parentNode.insertBefore(strip, editor);
+        }
         return strip;
     }
 
@@ -91,23 +95,36 @@
         });
     }
 
+    var lastSuggestions = [];
+
     function fetchFor(id) {
         fetch(EP + "?article_id=" + encodeURIComponent(id), { credentials: "same-origin" })
             .then(function (r) { return r.json(); })
-            .then(function (j) { render(j.suggestions || []); })
+            .then(function (j) { lastSuggestions = j.suggestions || []; render(lastSuggestions); })
             .catch(function () {});
     }
 
-    // Poll for the currently-open article and refresh the strip when it changes.
+    // Poll: refresh on article change, and keep the strip glued to the editor's
+    // current location (the edit modal relocates the editor after it opens).
     setInterval(function () {
         var id = currentArticleId();
-        if (id === lastId) return;
-        lastId = id;
-        if (id) {
-            fetchFor(id);
-        } else {
-            var s = document.getElementById(STRIP_ID);
-            if (s) { s.style.display = "none"; s.innerHTML = ""; }
+        if (id !== lastId) {
+            lastId = id;
+            if (id) {
+                fetchFor(id);
+            } else {
+                lastSuggestions = [];
+                var s = document.getElementById(STRIP_ID);
+                if (s) { s.style.display = "none"; s.innerHTML = ""; }
+            }
+        }
+        // Re-glue an existing populated strip to the editor wherever it now lives.
+        if (id && lastSuggestions.length) {
+            var strip = document.getElementById(STRIP_ID);
+            var editor = document.getElementById("article_text");
+            if (strip && editor && editor.parentNode && strip.nextElementSibling !== editor) {
+                editor.parentNode.insertBefore(strip, editor);
+            }
         }
     }, 800);
 })();
