@@ -62,6 +62,21 @@ def subprocess_runner(command: List[str]) -> int:
 # Database (PyMySQL)
 # ---------------------------------------------------------------------------
 
+def mysql_connect_from_env(prefix: str):
+    """Open a PyMySQL connection from <PREFIX>_HOST/USER/PASS/NAME env vars."""
+    import os
+    import pymysql
+
+    return pymysql.connect(
+        host=os.environ[f"{prefix}_HOST"],
+        user=os.environ[f"{prefix}_USER"],
+        password=os.environ[f"{prefix}_PASS"],
+        database=os.environ[f"{prefix}_NAME"],
+        charset="utf8mb4",
+        autocommit=False,
+    )
+
+
 class PyMySQLRepo:
     """ScraperRepo + config loader backed by MySQL (server-side).
 
@@ -72,6 +87,25 @@ class PyMySQLRepo:
     def __init__(self, ten_conn, admin_conn):
         self._ten = ten_conn
         self._admin = admin_conn
+
+    # --- scheduler support ------------------------------------------------
+
+    def list_active_sections(self) -> List[dict]:
+        with self._ten.cursor() as cur:
+            cur.execute(
+                "SELECT id, cron_schedule FROM ten_scraper_pub_sections WHERE is_active = 1"
+            )
+            return [{"id": r[0], "cron_schedule": r[1]} for r in cur.fetchall()]
+
+    def last_run_time(self, pub_section_id: int):
+        with self._ten.cursor() as cur:
+            cur.execute(
+                "SELECT MAX(started) FROM ten_scraper_runs "
+                "WHERE pub_section_id = %s AND status = 'ok'",
+                (pub_section_id,),
+            )
+            row = cur.fetchone()
+        return row[0] if row else None
 
     # --- config loading ---------------------------------------------------
 

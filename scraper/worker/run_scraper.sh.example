@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Cron wrapper for the TEN Scraper scheduler.
+# Copy to run_scraper.sh (chmod 700), fill in the DB passwords, keep OUT of public_html.
+# Crontab (every 10 min):
+#   */10 * * * * /home/tenuser/scraper_worker/run_scraper.sh >> /home/tenuser/scraper_worker/scheduler.log 2>&1
+set -euo pipefail
+cd "$(dirname "$0")"
+
+# TEN_Management (scraper tables)
+export SCRAPER_DB_HOST=localhost
+export SCRAPER_DB_USER=ten_man_user_2353
+export SCRAPER_DB_PASS='CHANGE_ME'
+export SCRAPER_DB_NAME=TEN_Management
+
+# admin_ten (published articles, for dedup)
+export SCRAPER_ADMIN_DB_HOST=localhost
+export SCRAPER_ADMIN_DB_USER=admin_smyth1w
+export SCRAPER_ADMIN_DB_PASS='CHANGE_ME'
+export SCRAPER_ADMIN_DB_NAME=admin_ten
+
+exec ./venv/bin/python run_scheduler.py
