@@ -178,9 +178,12 @@ function scraper_ai_write_article(string $provider, string $model, string $promp
     foreach ($vars as $k => $v) {
         $prompt = str_replace('{' . $k . '}', (string)$v, $prompt);
     }
+    $lang = (string)($vars['target_language'] ?? 'English');
     // The template both instructs the task and asks for JSON output.
-    $system = "You are an experienced staff journalist. Follow the instructions exactly and return only the requested JSON.";
-    $text = scraper_ai_raw($provider, $model, $system, $prompt, 4096, $provider === 'openai');
+    $system = "You are an experienced staff journalist. Write the ENTIRE article (title, body_html and all meta fields) "
+        . "in {$lang}, regardless of the source language. Follow the instructions exactly and return ONLY the requested "
+        . "JSON object — no markdown fences, no commentary.";
+    $text = scraper_ai_raw($provider, $model, $system, $prompt, 8000, $provider === 'openai');
     $decoded = scraper_ai_decode_json($text);
     if (!$decoded) {
         throw new RuntimeException('AI did not return valid JSON article. Raw start: ' . substr($text, 0, 200));
