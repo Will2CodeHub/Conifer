@@ -1838,7 +1838,9 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                 const editor = $('.editor');
                 var image_link = $(this).prev().attr('href');
                 var image_attribution = $(this).prev().attr('title') || '';
-                var image_str_prepped = '<img src="' + image_link + '" alt="' + image_attribution + '" style="float:left;margin:0 15px 10px 0;max-width:50%;height:auto;cursor:pointer;" class="editor-image editor-img-wrapped" />';
+                // Clean image markup — the site's per-placement CSS handles sizing;
+                // an inline max-width:50% would shrink the front-page headline.
+                var image_str_prepped = '<img src="' + image_link + '" alt="" />';
 
                 insertHTMLAtCursor(image_str_prepped, editor);
                 $('.overlay, #modal_image_insert').fadeOut();
