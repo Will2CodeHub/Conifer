@@ -230,29 +230,39 @@
         }
         body.innerHTML = html;
         sources.forEach(function (src) {
-            var wrap = document.createElement("div");
-            wrap.style.marginTop = "8px";
-            wrap.innerHTML =
-                '<div class="sc-row">' +
-                    "<div><strong>" + esc(src.name) + '</strong> <span class="scraper-placeholder">' + esc(src.homepage_url) + " · feeds: " + esc(src.feed_count) + "</span></div>" +
+            // Each source is a collapsed card; its feeds stay hidden until expanded.
+            var card = document.createElement("div");
+            card.className = "sc-card";
+            card.style.marginTop = "8px";
+            card.innerHTML =
+                '<div class="sc-card-head">' +
+                    '<div><div class="sc-card-title">' + esc(src.name) + "</div>" +
+                        '<div class="sc-card-meta">' + esc(src.homepage_url) + " · feeds: " + esc(src.feed_count) + "</div></div>" +
                     "<div>" +
-                        '<button class="sc-btn small" data-act="feeds">Feeds</button> ' +
+                        '<button class="sc-btn small" data-act="expand"><i class="fas fa-chevron-down"></i> Feeds</button> ' +
                         '<button class="sc-btn small secondary" data-act="edit">Edit</button> ' +
                         '<button class="sc-btn small danger" data-act="del">Delete</button>' +
                     "</div>" +
                 "</div>" +
-                '<div class="sc-card-body" style="border:none;padding:6px 0 0;"></div>';
-            var fbody = wrap.querySelector(".sc-card-body");
-            wrap.querySelector('[data-act="feeds"]').addEventListener("click", function () {
-                if (fbody.classList.contains("open")) { fbody.classList.remove("open"); return; }
-                fbody.classList.add("open"); loadFeeds(src.id, fbody);
+                '<div class="sc-card-body"></div>';
+            var fbody = card.querySelector(".sc-card-body");
+            var expandBtn = card.querySelector('[data-act="expand"]');
+            expandBtn.addEventListener("click", function () {
+                if (fbody.classList.contains("open")) {
+                    fbody.classList.remove("open");
+                    expandBtn.innerHTML = '<i class="fas fa-chevron-down"></i> Feeds';
+                    return;
+                }
+                fbody.classList.add("open");
+                expandBtn.innerHTML = '<i class="fas fa-chevron-up"></i> Feeds';
+                loadFeeds(src.id, fbody);
             });
-            wrap.querySelector('[data-act="edit"]').addEventListener("click", function () { openSourceModal(sectionId, body, src); });
-            wrap.querySelector('[data-act="del"]').addEventListener("click", function () {
+            card.querySelector('[data-act="edit"]').addEventListener("click", function () { openSourceModal(sectionId, body, src); });
+            card.querySelector('[data-act="del"]').addEventListener("click", function () {
                 if (!confirm("Delete this source and its feeds?")) return;
                 api("source", "delete", { id: src.id }).then(function () { loadSources(sectionId, body); }).catch(alertErr);
             });
-            body.appendChild(wrap);
+            body.appendChild(card);
         });
         body.querySelector('[data-add="src"]').addEventListener("click", function () { openSourceModal(sectionId, body, null); });
     }
