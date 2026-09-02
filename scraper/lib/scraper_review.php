@@ -179,7 +179,9 @@ function scraper_promote_items(int $pubSectionId, array $itemIds): array {
 
     $ai = scraper_effective_ai($section);
     $lang = ns_publication_language($section['publication_key']);
-    $journalistId = $section['journalist_id'] !== null ? (int)$section['journalist_id'] : null;
+    $journalistId = ($section['journalist_id'] !== null && $section['journalist_id'] !== '')
+        ? (int)$section['journalist_id']
+        : scraper_default_journalist_id();
     $autoPublish = (int)($section['auto_publish'] ?? 0) === 1;
 
     $conn = getDBConnection();
@@ -235,6 +237,15 @@ function scraper_promote_items(int $pubSectionId, array $itemIds): array {
     }
     $conn->close();
     return $results;
+}
+
+/** Default byline journalist for scraped articles (the generic "TEN News" account). */
+function scraper_default_journalist_id(): ?int {
+    $conn = getDBConnection();
+    $res = $conn->query("SELECT id FROM ten_users WHERE username='ten_news' AND status='active' LIMIT 1");
+    $row = $res ? $res->fetch_assoc() : null;
+    $conn->close();
+    return $row ? (int)$row['id'] : null;
 }
 
 /** URL slug from a title: lowercase, non-alphanumerics to hyphens. */
