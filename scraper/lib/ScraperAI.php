@@ -1,0 +1,191 @@
+<?php
+/**
+ * ScraperAI — provider abstraction for Claude (Anthropic) + ChatGPT (OpenAI),
+ * via raw HTTPS (cURL). Two operations:
+ *   - scraper_ai_translate(): translate item titles/summaries into a target language
+ *   - scraper_ai_write_article(): write an original article from facts (JSON out)
+ *
+ * Keys come from config.php: ANTHROPIC_API_KEY, OPENAI_API_KEY.
+ */
+
+if (!defined('ANTHROPIC_API_KEY')) {
+    require_once __DIR__ . '/../../config.php';
+}
+
+/**
+ * Low-level call. Returns the model's text output (string).
+ * Throws RuntimeException on transport/API errors.
+ */
+function scraper_ai_raw(string $provider, string $model, string $systemPrompt, string $userContent, int $maxTokens = 4096, bool $jsonMode = false): string {
+    if ($provider === 'openai') {
+        return scraper_ai_openai($model, $systemPrompt, $userContent, $maxTokens, $jsonMode);
+    }
+    return scraper_ai_anthropic($model, $systemPrompt, $userContent, $maxTokens);
+}
+
+function scraper_ai_anthropic(string $model, string $systemPrompt, string $userContent, int $maxTokens): string {
+    $key = defined('ANTHROPIC_API_KEY') ? ANTHROPIC_API_KEY : '';
+    if ($key === '') {
+        throw new RuntimeException('Anthropic API key not configured');
+    }
+    $payload = [
+        'model' => $model,
+        'max_tokens' => $maxTokens,
+        'system' => $systemPrompt,
+        'messages' => [
+            ['role' => 'user', 'content' => $userContent],
+        ],
+    ];
+    $resp = scraper_ai_http(
+        'https://api.anthropic.com/v1/messages',
+        [
+            'x-api-key: ' . $key,
+            'anthropic-version: 2023-06-01',
+            'content-type: application/json',
+        ],
+        $payload
+    );
+    $data = json_decode($resp, true);
+    if (!is_array($data) || !isset($data['content'])) {
+        $err = $data['error']['message'] ?? substr($resp, 0, 500);
+        throw new RuntimeException('Anthropic API error: ' . $err);
+    }
+    $text = '';
+    foreach ($data['content'] as $block) {
+        if (($block['type'] ?? '') === 'text') {
+            $text .= $block['text'];
+        }
+    }
+    return $text;
+}
+
+function scraper_ai_openai(string $model, string $systemPrompt, string $userContent, int $maxTokens, bool $jsonMode): string {
+    $key = defined('OPENAI_API_KEY') ? OPENAI_API_KEY : '';
+    if ($key === '') {
+        throw new RuntimeException('OpenAI API key not configured');
+    }
+    $payload = [
+        'model' => $model,
+        'max_tokens' => $maxTokens,
+        'messages' => [
+            ['role' => 'system', 'content' => $systemPrompt],
+            ['role' => 'user', 'content' => $userContent],
+        ],
+    ];
+    if ($jsonMode) {
+        $payload['response_format'] = ['type' => 'json_object'];
+    }
+    $resp = scraper_ai_http(
+        'https://api.openai.com/v1/chat/completions',
+        [
+            'Authorization: Bearer ' . $key,
+            'Content-Type: application/json',
+        ],
+        $payload
+    );
+    $data = json_decode($resp, true);
+    if (!is_array($data) || !isset($data['choices'][0]['message']['content'])) {
+        $err = $data['error']['message'] ?? substr($resp, 0, 500);
+        throw new RuntimeException('OpenAI API error: ' . $err);
+    }
+    return $data['choices'][0]['message']['content'];
+}
+
+function scraper_ai_http(string $url, array $headers, array $payload): string {
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_HTTPHEADER => $headers,
+        CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        CURLOPT_TIMEOUT => 120,
+    ]);
+    $resp = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $cerr = curl_error($ch);
+    curl_close($ch);
+    if ($resp === false) {
+        throw new RuntimeException('HTTP transport error: ' . $cerr);
+    }
+    if ($code < 200 || $code >= 300) {
+        $data = json_decode($resp, true);
+        $msg = $data['error']['message'] ?? ('HTTP ' . $code . ': ' . substr($resp, 0, 400));
+        throw new RuntimeException($msg);
+    }
+    return $resp;
+}
+
+/** Strip ```json ... ``` fences and decode. Returns array or null. */
+function scraper_ai_decode_json(string $text) {
+    $t = trim($text);
+    if (strpos($t, '```') !== false) {
+        $t = preg_replace('/^```[a-zA-Z]*\s*/', '', $t);
+        $t = preg_replace('/\s*```$/', '', $t);
+        $t = trim($t);
+    }
+    $decoded = json_decode($t, true);
+    return is_array($decoded) ? $decoded : null;
+}
+
+/**
+ * Translate a list of items into $targetLanguage.
+ * @param array $items list of ['id'=>int,'title'=>string,'summary'=>string]
+ * @return array map of id => ['title'=>..., 'summary'=>...]
+ */
+function scraper_ai_translate(string $provider, string $model, string $targetLanguage, array $items): array {
+    if (empty($items)) {
+        return [];
+    }
+    $lang = $targetLanguage !== '' ? $targetLanguage : 'English';
+    $system = "You are a professional news translator. Translate each item's title and summary into {$lang}. "
+        . "Preserve meaning and proper nouns; do not editorialise or add content. "
+        . "Return ONLY a JSON object with key \"items\": an array in the SAME order, each element "
+        . "{\"id\": <same id>, \"title\": \"...\", \"summary\": \"...\"}. No commentary.";
+    $input = [];
+    foreach ($items as $it) {
+        $input[] = ['id' => (int)$it['id'], 'title' => (string)$it['title'], 'summary' => (string)$it['summary']];
+    }
+    $user = json_encode(['items' => $input], JSON_UNESCAPED_UNICODE);
+
+    $text = scraper_ai_raw($provider, $model, $system, $user, 4096, true);
+    $decoded = scraper_ai_decode_json($text);
+    $out = [];
+    if ($decoded && isset($decoded['items']) && is_array($decoded['items'])) {
+        foreach ($decoded['items'] as $row) {
+            if (isset($row['id'])) {
+                $out[(int)$row['id']] = [
+                    'title' => (string)($row['title'] ?? ''),
+                    'summary' => (string)($row['summary'] ?? ''),
+                ];
+            }
+        }
+    }
+    return $out;
+}
+
+/**
+ * Write an original article from facts using the section prompt template.
+ * @param array $vars placeholders: source_title, source_summary, source_facts,
+ *                    source_url, section, publication, target_language
+ * @return array ['title','body_html','meta_title','meta_description','meta_keywords']
+ */
+function scraper_ai_write_article(string $provider, string $model, string $promptTemplate, array $vars): array {
+    $prompt = $promptTemplate;
+    foreach ($vars as $k => $v) {
+        $prompt = str_replace('{' . $k . '}', (string)$v, $prompt);
+    }
+    // The template both instructs the task and asks for JSON output.
+    $system = "You are an experienced staff journalist. Follow the instructions exactly and return only the requested JSON.";
+    $text = scraper_ai_raw($provider, $model, $system, $prompt, 4096, $provider === 'openai');
+    $decoded = scraper_ai_decode_json($text);
+    if (!$decoded) {
+        throw new RuntimeException('AI did not return valid JSON article. Raw start: ' . substr($text, 0, 200));
+    }
+    return [
+        'title' => (string)($decoded['title'] ?? ''),
+        'body_html' => (string)($decoded['body_html'] ?? $decoded['body'] ?? ''),
+        'meta_title' => (string)($decoded['meta_title'] ?? ''),
+        'meta_description' => (string)($decoded['meta_description'] ?? ''),
+        'meta_keywords' => (string)($decoded['meta_keywords'] ?? ''),
+    ];
+}

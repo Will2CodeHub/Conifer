@@ -60,6 +60,20 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
         .sc-modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
         .sc-inline { display:flex; gap:12px; }
         .sc-inline > * { flex:1; }
+        .sc-subtabs { display:flex; gap:6px; margin-bottom:16px; }
+        .sc-subtab { padding:8px 14px; border:1px solid #e5e7eb; background:#f9fafb; border-radius:8px; cursor:pointer; font-weight:600; font-size:13px; color:#374151; }
+        .sc-subtab.active { background:#2563eb; color:#fff; border-color:#2563eb; }
+        .rv-item { display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border:1px solid #eef2f7; border-radius:8px; margin-bottom:8px; }
+        .rv-item.sel { border-color:#2563eb; background:#eff6ff; }
+        .rv-item input[type=checkbox] { margin-top:3px; width:16px; height:16px; }
+        .rv-title { font-weight:600; color:#111827; font-size:14px; }
+        .rv-summary { color:#374151; font-size:13px; margin-top:3px; }
+        .rv-orig { color:#6b7280; font-size:12px; margin-top:5px; padding-top:5px; border-top:1px dashed #e5e7eb; display:none; }
+        .rv-meta { color:#94a3b8; font-size:11px; margin-top:5px; }
+        .rv-meta a { color:#2563eb; }
+        .rv-toggle { color:#2563eb; cursor:pointer; font-size:11px; }
+        .rv-log-line { font-size:13px; padding:3px 0; }
+        .rv-ok { color:#166534; } .rv-err { color:#b91c1c; }
     </style>
 </head>
 <body>
@@ -89,7 +103,25 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
                     <h2 style="font-size:17px;margin-bottom:14px;"><?php echo htmlspecialchars($active['name']); ?></h2>
 
                     <?php if ($active['type'] === 'news_collation'): ?>
+                        <div class="sc-subtabs">
+                            <button class="sc-subtab active" data-view="review"><i class="fas fa-list-check"></i> Review &amp; Promote</button>
+                            <?php if ($canManage): ?><button class="sc-subtab" data-view="configure"><i class="fas fa-sliders"></i> Configure</button><?php endif; ?>
+                        </div>
+
+                        <div id="scViewReview" data-project-id="<?php echo (int)$active['id']; ?>">
+                            <div class="sc-toolbar" style="align-items:center;">
+                                <label style="font-size:13px;font-weight:600;color:#374151;">Section:
+                                    <select id="scReviewSection" style="margin-left:6px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;"><option value="">Loading…</option></select>
+                                </label>
+                                <span id="scReviewCounter" class="scraper-placeholder"></span>
+                                <button class="sc-btn" id="scPromote" disabled><i class="fas fa-wand-magic-sparkles"></i> Promote selected</button>
+                            </div>
+                            <div id="scPromoteLog"></div>
+                            <div id="scReviewList"><p class="scraper-placeholder">Choose a section to review its collated articles.</p></div>
+                        </div>
+
                         <?php if ($canManage): ?>
+                        <div id="scViewConfigure" style="display:none;">
                             <div id="scraperManage" data-project-id="<?php echo (int)$active['id']; ?>"
                                  data-provider="<?php echo htmlspecialchars($active['default_ai_provider']); ?>"
                                  data-model="<?php echo htmlspecialchars($active['default_ai_model']); ?>">
@@ -100,12 +132,29 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
                                 </div>
                                 <div id="scSections"><p class="scraper-placeholder">Loading…</p></div>
                             </div>
-                            <div id="scOverlay" class="sc-overlay" style="display:none;"></div>
-                            <div id="scModal" class="sc-modal" style="display:none;"><div id="scModalBody"></div></div>
-                            <script src="js/scraper_config.js"></script>
-                        <?php else: ?>
-                            <p class="scraper-placeholder">You can review and promote collated articles here (coming in Phase 5). Configuration requires the <code>scraper.manage</code> permission.</p>
+                        </div>
                         <?php endif; ?>
+
+                        <div id="scOverlay" class="sc-overlay" style="display:none;"></div>
+                        <div id="scModal" class="sc-modal" style="display:none;"><div id="scModalBody"></div></div>
+
+                        <script src="js/scraper_review.js"></script>
+                        <?php if ($canManage): ?><script src="js/scraper_config.js"></script><?php endif; ?>
+                        <script>
+                        (function () {
+                            var tabs = document.querySelectorAll('.sc-subtab');
+                            tabs.forEach(function (t) {
+                                t.addEventListener('click', function () {
+                                    tabs.forEach(function (x) { x.classList.remove('active'); });
+                                    t.classList.add('active');
+                                    var v = t.getAttribute('data-view');
+                                    document.getElementById('scViewReview').style.display = (v === 'review') ? 'block' : 'none';
+                                    var cfg = document.getElementById('scViewConfigure');
+                                    if (cfg) cfg.style.display = (v === 'configure') ? 'block' : 'none';
+                                });
+                            });
+                        })();
+                        </script>
                     <?php else: ?>
                         <p class="scraper-placeholder">Cafe/Restaurant email collection — configuration coming soon.</p>
                     <?php endif; ?>

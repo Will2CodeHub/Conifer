@@ -59,7 +59,7 @@
                 '<div class="ns-head">' +
                     "<div>" +
                         '<div class="ns-title">' + esc(p.title) + ' <span class="ns-badge ' + (live ? "on" : "off") + '">' + (live ? "live" : "offline") + "</span></div>" +
-                        '<div class="ns-meta">' + esc(p.publication) + " · " + esc(p.url) + "</div>" +
+                        '<div class="ns-meta">' + esc(p.publication) + " · " + esc(p.url) + " · lang: " + esc(p.target_language || "English") + "</div>" +
                     "</div>" +
                     "<div>" +
                         '<button class="ns-btn small" data-act="feeds">Feeds</button> ' +
@@ -109,6 +109,7 @@
             '<div class="ns-field"><label>Acronym / key</label><input type="text" id="ns_acr" value="' + esc(p.publication || "") + '" placeholder="e.g. tme"></div>' +
             '<div class="ns-field"><label>Site name</label><input type="text" id="ns_title" value="' + esc(p.title || "") + '" placeholder="The Munich Eye"></div>' +
             '<div class="ns-field"><label>URL</label><input type="text" id="ns_url" value="' + esc(p.url || "") + '" placeholder="themunicheye.com"></div>' +
+            '<div class="ns-field"><label>Target language (for scraper translation + articles)</label><input type="text" id="ns_lang" value="' + esc(p.target_language || "English") + '" placeholder="English"></div>' +
             '<div class="ns-field"><label><input type="checkbox" id="ns_live" ' + (live ? "checked" : "") + '> Live</label></div>' +
             '<div class="ns-actions"><button class="ns-btn secondary" id="ns_cancel">Cancel</button><button class="ns-btn" id="ns_save">Save</button></div>'
         );
@@ -118,6 +119,7 @@
                 publication: document.getElementById("ns_acr").value,
                 title: document.getElementById("ns_title").value,
                 url: document.getElementById("ns_url").value,
+                target_language: document.getElementById("ns_lang").value,
                 pub_live: document.getElementById("ns_live").checked ? 1 : 0
             };
             if (pub) data.id = p.id;
