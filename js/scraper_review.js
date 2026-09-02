@@ -258,27 +258,54 @@
         return '<span class="sc-badge" style="background:' + c[0] + ";color:" + c[1] + ';">' + esc(s) + "</span>";
     }
 
+    var historyRows = [];
+    var historyPage = 0;
+    var HISTORY_PER = 25;
+
+    function historyRowHtml(r) {
+        var when = String(r.fetched_at || "").replace("T", " ").slice(0, 16);
+        var art = r.article_id ? ' · <a href="module-articles.php" title="article #' + esc(r.article_id) + '">article #' + esc(r.article_id) + "</a>" : "";
+        return "<tr>" +
+            "<td style='white-space:nowrap;'>" + esc(when) + "</td>" +
+            "<td>" + esc(r.source_name || "") + "</td>" +
+            "<td>" + esc(r.title || "") +
+                '<div class="scraper-placeholder"><a href="' + esc(r.source_url) + '" target="_blank" rel="noopener">source</a>' + art + "</div></td>" +
+            "<td>" + statusBadge(r.status) + "</td>" +
+            "</tr>";
+    }
+
     function renderHistory(rows) {
+        historyRows = rows || [];
+        historyPage = 0;
+        renderHistoryPage();
+    }
+
+    function renderHistoryPage() {
         var box = document.getElementById("scHistoryList");
-        if (!rows.length) {
+        if (!historyRows.length) {
             box.innerHTML = '<p class="scraper-placeholder">Nothing collated for this section in the last 30 days.</p>';
             return;
         }
-        var body = rows.map(function (r) {
-            var when = String(r.fetched_at || "").replace("T", " ").slice(0, 16);
-            var art = r.article_id ? ' · <a href="module-articles.php" title="article #' + esc(r.article_id) + '">article #' + esc(r.article_id) + "</a>" : "";
-            return "<tr>" +
-                "<td style='white-space:nowrap;'>" + esc(when) + "</td>" +
-                "<td>" + esc(r.source_name || "") + "</td>" +
-                "<td>" + esc(r.title || "") +
-                    '<div class="scraper-placeholder"><a href="' + esc(r.source_url) + '" target="_blank" rel="noopener">source</a>' + art + "</div></td>" +
-                "<td>" + statusBadge(r.status) + "</td>" +
-                "</tr>";
-        }).join("");
+        var total = historyRows.length;
+        var pages = Math.ceil(total / HISTORY_PER);
+        if (historyPage >= pages) historyPage = pages - 1;
+        if (historyPage < 0) historyPage = 0;
+        var start = historyPage * HISTORY_PER;
+        var body = historyRows.slice(start, start + HISTORY_PER).map(historyRowHtml).join("");
+        var nav =
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;">' +
+                '<button class="sc-btn small secondary" id="scHistPrev"' + (historyPage === 0 ? " disabled" : "") + ">Prev</button>" +
+                '<span class="scraper-placeholder">Page ' + (historyPage + 1) + " of " + pages + " · " + total + " items</span>" +
+                '<button class="sc-btn small secondary" id="scHistNext"' + (historyPage >= pages - 1 ? " disabled" : "") + ">Next</button>" +
+            "</div>";
         box.innerHTML =
             '<div style="overflow-x:auto;"><table class="sc-htable">' +
             "<thead><tr><th>Collated</th><th>Source</th><th>Article</th><th>Status</th></tr></thead>" +
-            "<tbody>" + body + "</tbody></table></div>";
+            "<tbody>" + body + "</tbody></table></div>" + nav;
+        var prev = document.getElementById("scHistPrev");
+        var next = document.getElementById("scHistNext");
+        if (prev) prev.addEventListener("click", function () { if (historyPage > 0) { historyPage--; renderHistoryPage(); } });
+        if (next) next.addEventListener("click", function () { if (historyPage < pages - 1) { historyPage++; renderHistoryPage(); } });
     }
 
     document.getElementById("scPromote").addEventListener("click", promote);
