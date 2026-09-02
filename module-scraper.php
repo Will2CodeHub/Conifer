@@ -25,6 +25,7 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
     <title>Data Scraper — <?php echo SITE_NAME; ?></title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/backend-style.css">
+    <script src="js/vendor/sweetalert2.all.min.js"></script>
     <style>
         .scraper-tabs { display:flex; gap:8px; border-bottom:1px solid #e5e7eb; margin-bottom:20px; }
         .scraper-tab { padding:10px 18px; cursor:pointer; border:1px solid transparent; border-bottom:none;
