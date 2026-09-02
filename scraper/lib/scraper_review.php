@@ -237,19 +237,31 @@ function scraper_promote_items(int $pubSectionId, array $itemIds): array {
     return $results;
 }
 
+/** URL slug from a title: lowercase, non-alphanumerics to hyphens. */
+function scraper_slugify(string $text): string {
+    $text = preg_replace('/[^\p{L}\p{N}]+/u', '-', trim($text));
+    $text = trim(preg_replace('/-+/', '-', $text), '-');
+    $text = function_exists('mb_strtolower') ? mb_strtolower($text) : strtolower($text);
+    if ($text === '') {
+        return 'article-' . time();
+    }
+    return function_exists('mb_substr') ? mb_substr($text, 0, 190) : substr($text, 0, 190);
+}
+
 /** Insert the generated article into admin_ten.articles. Returns new article id. */
 function scraper_insert_article(array $section, array $article, array $item, ?int $journalistId, bool $autoPublish): int {
     $conn = getDBConnection_TENAdmin();
     $state = $autoPublish ? 'published' : 'draft';
     $pub = $section['publication_key'];
     $sectionName = substr($section['ten_section'], 0, 20);
+    $slug = scraper_slugify($article['title']);
 
     $stmt = $conn->prepare(
         "INSERT INTO articles
          (title, meta_title, meta_description, meta_keywords, article_text, state, section,
           submission_date, created_by, modified_date, publish_now, journalist_id,
-          publications, canonical, news_scrape_url, news_scrape_url_hash)
-         VALUES (?,?,?,?,?,?,?, NOW(), 'scraper', NOW(), 1, ?, ?, ?, ?, ?)"
+          publications, canonical, news_scrape_url, news_scrape_url_hash, url, alias)
+         VALUES (?,?,?,?,?,?,?, NOW(), 'scraper', NOW(), 1, ?, ?, ?, ?, ?, ?, ?)"
     );
     $title = $article['title'];
     $mt = substr($article['meta_title'], 0, 200);
@@ -260,12 +272,14 @@ function scraper_insert_article(array $section, array $article, array $item, ?in
     $srcHash = $item['source_url_hash'];
     $canonical = substr($pub, 0, 10);
     $jid = $journalistId;
+    $url = substr($slug, 0, 200);
+    $alias = substr($slug, 0, 255);
 
-    // 7 strings, journalist_id (i), then 4 strings = 12 params
+    // 7 strings, journalist_id (i), then 6 strings = 14 params
     $stmt->bind_param(
-        'sssssssissss',
+        'sssssssissssss',
         $title, $mt, $md, $mk, $body, $state, $sectionName,
-        $jid, $pub, $canonical, $srcUrl, $srcHash
+        $jid, $pub, $canonical, $srcUrl, $srcHash, $url, $alias
     );
     $stmt->execute();
     $id = $stmt->insert_id;
