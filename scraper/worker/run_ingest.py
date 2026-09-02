@@ -26,6 +26,7 @@ from tenscraper.adapters import (
     country_ip_checker,
     subprocess_runner,
 )
+from tenscraper.html_listing import extract_article_links
 from tenscraper.ingest import run_ingest
 from tenscraper.politeness import build_user_agent
 from tenscraper.vpn import VpnController, VpnError
@@ -83,6 +84,7 @@ def main() -> int:
             fetcher=fetcher.fetch,
             user_agent=user_agent,
             robots_fetcher=fetcher.fetch_robots,
+            html_lister=extract_article_links,
         )
         log = (
             f"found={result.items_found} new={result.items_new} "
