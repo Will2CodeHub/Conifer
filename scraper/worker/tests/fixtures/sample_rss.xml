@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+  <title>Sample News</title>
+  <link>https://news.example.com</link>
+  <description>Sample channel</description>
+  <item>
+    <title>Munich transit fares to rise in 2026</title>
+    <link>https://news.example.com/munich-fares?utm_source=rss</link>
+    <description>&lt;p&gt;The city &lt;b&gt;announced&lt;/b&gt; higher fares.&lt;/p&gt;</description>
+    <pubDate>Mon, 01 Sep 2025 08:00:00 GMT</pubDate>
+  </item>
+  <item>
+    <title>New museum opens downtown</title>
+    <link>https://news.example.com/museum</link>
+    <description>A new museum opened.</description>
+    <pubDate>Tue, 02 Sep 2025 09:30:00 GMT</pubDate>
+  </item>
+</channel>
+</rss>

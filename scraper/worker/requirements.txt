@@ -1,0 +1,10 @@
+# TEN Scraper worker dependencies
+feedparser>=6.0
+requests>=2.31
+PyMySQL>=1.1
+pytest>=7.4
+
+# Optional: high-quality HTML article extraction (server-side).
+# html_fallback.py falls back to a stdlib extractor if trafilatura is absent,
+# so tests do NOT require it. Install on the server where wheels are available.
+# trafilatura>=1.6
