@@ -11,7 +11,12 @@ if (!function_exists('getDBConnection')) {
 // which is defined in config_ten_admin.php (not config.php). Same pattern as
 // ajax/get_article_data.php.
 if (!function_exists('getDBConnection_TENAdmin')) {
+    // config_ten_admin.php re-defines constants config.php already set (and calls
+    // session_start again), which emits warnings. Load it quietly so nothing
+    // leaks into JSON responses; the identical re-defines are harmless.
+    $__er = error_reporting(0);
     require_once __DIR__ . '/../../config_ten_admin.php';
+    error_reporting($__er);
 }
 
 /**
