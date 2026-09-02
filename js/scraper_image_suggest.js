@@ -74,7 +74,12 @@
                 showCancelButton: true,
                 confirmButtonText: "Insert at top of article",
                 cancelButtonText: "Close",
-                confirmButtonColor: "#2563eb"
+                confirmButtonColor: "#2563eb",
+                // The edit modal stacks above SweetAlert's default layer — lift it.
+                didOpen: function () {
+                    var c = document.querySelector(".swal2-container");
+                    if (c) c.style.zIndex = "2147483000";
+                }
             }).then(function (r) { if (r.isConfirmed) insertImage(s.url, s.attribution); });
         } else if (confirm("Insert this image at the top of the article?")) {
             insertImage(s.url, s.attribution);
