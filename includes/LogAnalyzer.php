@@ -1,0 +1,448 @@
+<?php
+/**
+ * LogAnalyzer Class
+ * Enhanced traffic log analysis with bot filtering and accurate visitor tracking
+ * Uses dynamically downloaded bot lists with graceful fallback
+ */
+class LogAnalyzer {
+    
+    private $logPath;
+    private $siteKey;
+    private $botDataDir;
+    
+    // Cached bot patterns
+    private $botPatterns = null;
+    private $spamReferrers = null;
+    
+    // Fallback bot patterns if files don't exist
+    private $fallbackBotPatterns = [
+        'googlebot', 'bingbot', 'slurp', 'duckduckbot', 'baiduspider',
+        'yandexbot', 'facebookexternalhit', 'twitterbot', 'linkedinbot',
+        'whatsapp', 'telegrambot', 'slackbot', 'applebot', 'amazonbot',
+        'semrushbot', 'ahrefsbot', 'mj12bot', 'dotbot', 'rogerbot',
+        'screaming frog', 'uptimerobot', 'pingdom', 'lighthouse',
+        'headless', 'phantom', 'selenium',
+        'gptbot', 'chatgpt-user', 'claude-web', 'company.info',
+        'bytespider', 'petalbot', 'moreover', 'googleother',
+        'spider', 'crawler', 'scraper', 'fetch',
+        ' bot', 'bot/', 'bot-', '_bot', 'bot.',
+    ];
+    
+    // Fallback spam referrers
+    private $fallbackSpamReferrers = [
+        'semalt.com', 'buttons-for-website.com', 'free-share-buttons.com',
+        'pornhub-forum.ga', 'buy-cheap-online.info', 'social-buttons.com',
+        'event-tracking.com', 'best-seo-offer.com', 'floating-share-buttons.com'
+    ];
+    
+    public function __construct($logPath, $siteKey = 'default', $botDataDir = '/home/tenuser/private/bot_data/') {
+        $this->logPath = $logPath;
+        $this->siteKey = $siteKey;
+        $this->botDataDir = rtrim($botDataDir, '/') . '/';
+        
+        // Load bot patterns and spam referrers on initialization
+        $this->loadBotPatterns();
+        $this->loadSpamReferrers();
+    }
+    
+    /**
+     * Load bot patterns from compiled file or fallback to defaults
+     */
+    private function loadBotPatterns() {
+        $compiledFile = $this->botDataDir . 'compiled_bot_patterns.json';
+        
+        try {
+            if (file_exists($compiledFile) && is_readable($compiledFile)) {
+                $content = @file_get_contents($compiledFile);
+                if ($content !== false) {
+                    $patterns = json_decode($content, true);
+                    if (json_last_error() === JSON_ERROR_NONE && is_array($patterns) && count($patterns) > 0) {
+                        $this->botPatterns = $patterns;
+                        error_log("LogAnalyzer: Loaded " . count($patterns) . " bot patterns from compiled file");
+                        return;
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            error_log("LogAnalyzer: Error loading bot patterns: " . $e->getMessage());
+        }
+        
+        // Fallback to default patterns
+        $this->botPatterns = $this->fallbackBotPatterns;
+        error_log("LogAnalyzer: Using " . count($this->botPatterns) . " fallback bot patterns");
+    }
+    
+    /**
+     * Load spam referrers from downloaded list or fallback to defaults
+     */
+    private function loadSpamReferrers() {
+        $spamFile = $this->botDataDir . 'referrer-spam.json';
+        
+        try {
+            if (file_exists($spamFile) && is_readable($spamFile)) {
+                $content = @file_get_contents($spamFile);
+                if ($content !== false) {
+                    $referrers = json_decode($content, true);
+                    if (json_last_error() === JSON_ERROR_NONE && is_array($referrers) && count($referrers) > 0) {
+                        $this->spamReferrers = $referrers;
+                        error_log("LogAnalyzer: Loaded " . count($referrers) . " spam referrers from file");
+                        return;
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            error_log("LogAnalyzer: Error loading spam referrers: " . $e->getMessage());
+        }
+        
+        // Fallback to default referrers
+        $this->spamReferrers = $this->fallbackSpamReferrers;
+        error_log("LogAnalyzer: Using " . count($this->spamReferrers) . " fallback spam referrers");
+    }
+    
+    /**
+     * Parse log file for a specific time period
+     * @param int $startTime Unix timestamp
+     * @param int $endTime Unix timestamp
+     * @return array Statistics array
+     */
+    public function analyzeTimePeriod($startTime, $endTime) {
+        if (!file_exists($this->logPath) || !is_readable($this->logPath)) {
+            error_log("LogAnalyzer: Log file not accessible at {$this->logPath}");
+            return $this->getEmptyStats();
+        }
+        
+        $content = @file_get_contents($this->logPath);
+        if ($content === false) {
+            error_log("LogAnalyzer: Failed to read log file at {$this->logPath}");
+            return $this->getEmptyStats();
+        }
+        
+        $lines = array_filter(explode("\n", $content), function($line) {
+            return trim($line) !== '';
+        });
+        
+        error_log("LogAnalyzer: Processing " . count($lines) . " log lines for period " . 
+                  date('Y-m-d H:i:s', $startTime) . " to " . date('Y-m-d H:i:s', $endTime));
+        
+        $stats = [
+            'total_visits' => 0,
+            'unique_visitors' => [],
+            'human_visits' => 0,
+            'human_unique' => [],
+            'bot_visits' => 0,
+            'spam_visits' => 0,
+            'hourly_distribution' => array_fill(0, 24, 0),
+            'page_views' => [],
+            'referrers' => [],
+            'user_agents' => [],
+        ];
+        
+        $processedLines = 0;
+        $skippedLines = 0;
+        
+        foreach ($lines as $line) {
+            $parsed = $this->parseLogLine($line);
+            if (!$parsed) {
+                $skippedLines++;
+                continue;
+            }
+            
+            // Check if within time range
+            if ($parsed['timestamp'] < $startTime || $parsed['timestamp'] > $endTime) {
+                continue;
+            }
+            
+            $processedLines++;
+            $stats['total_visits']++;
+            $stats['unique_visitors'][$parsed['visitor_id']] = true;
+            
+            // Hourly distribution
+            $hour = (int)date('G', $parsed['timestamp']);
+            $stats['hourly_distribution'][$hour]++;
+            
+            // Categorize traffic
+            if ($this->isBot($parsed)) {
+                $stats['bot_visits']++;
+            } elseif ($this->isSpam($parsed)) {
+                $stats['spam_visits']++;
+            } else {
+                $stats['human_visits']++;
+                $stats['human_unique'][$parsed['visitor_id']] = true;
+                
+                // Track page views
+                if (isset($parsed['url'])) {
+                    if (!isset($stats['page_views'][$parsed['url']])) {
+                        $stats['page_views'][$parsed['url']] = 0;
+                    }
+                    $stats['page_views'][$parsed['url']]++;
+                }
+                
+                // Track referrers
+                if (isset($parsed['referrer']) && $parsed['referrer'] !== '-') {
+                    if (!isset($stats['referrers'][$parsed['referrer']])) {
+                        $stats['referrers'][$parsed['referrer']] = 0;
+                    }
+                    $stats['referrers'][$parsed['referrer']]++;
+                }
+            }
+            
+            // Track user agents
+            if (isset($parsed['user_agent'])) {
+                $browser = $this->detectBrowser($parsed['user_agent']);
+                if (!isset($stats['user_agents'][$browser])) {
+                    $stats['user_agents'][$browser] = 0;
+                }
+                $stats['user_agents'][$browser]++;
+            }
+        }
+        
+        error_log("LogAnalyzer: Processed $processedLines lines, skipped $skippedLines invalid lines");
+        error_log("LogAnalyzer: Found {$stats['total_visits']} visits, {$stats['human_visits']} human, " . 
+                  "{$stats['bot_visits']} bots, {$stats['spam_visits']} spam");
+        
+        // Convert unique arrays to counts
+        $stats['unique_visitors'] = count($stats['unique_visitors']);
+        $stats['human_unique'] = count($stats['human_unique']);
+        
+        // Sort page views and referrers
+        arsort($stats['page_views']);
+        arsort($stats['referrers']);
+        
+        return $stats;
+    }
+    
+    /**
+     * Parse a single log line
+     * Format: [30/Oct/2025:13:38:41 +0100] visitor_id ip user_agent referrer url
+     * Note: user_agent can contain spaces, referrer can be URL or "-", url is path
+     */
+    private function parseLogLine($line) {
+        $line = trim($line);
+        
+        if (empty($line)) {
+            return false;
+        }
+        
+        // Match the timestamp in brackets
+        if (!preg_match('/^\[(.*?)\]\s+(.*)/', $line, $matches)) {
+            return false;
+        }
+        
+        $timestampRaw = $matches[1];
+        $rest = $matches[2];
+        
+        // Parse timestamp
+        $timestamp = $this->parseTimestamp($timestampRaw);
+        if (!$timestamp) return false;
+        
+        // Split into tokens
+        $parts = preg_split('/\s+/', $rest);
+        
+        if (count($parts) < 4) {
+            return false; // At minimum need visitor_id, ip, user_agent, referrer
+        }
+        
+        $visitorId = $parts[0];
+        $ip = $parts[1];
+        
+        $parsed = [
+            'timestamp' => $timestamp,
+            'visitor_id' => $visitorId,
+            'ip' => $ip,
+        ];
+        
+        // Strategy: Find the referrer (starts with http or is "-") and URL (starts with "/")
+        // Everything between IP and referrer is user_agent
+        
+        $referrerIndex = -1;
+        $urlIndex = -1;
+        
+        // Find referrer - look for token that is "-" or starts with "http"
+        for ($i = 2; $i < count($parts); $i++) {
+            if ($parts[$i] === '-' || strpos($parts[$i], 'http://') === 0 || strpos($parts[$i], 'https://') === 0) {
+                $referrerIndex = $i;
+                break;
+            }
+        }
+        
+        // Find URL - look for token that starts with "/"
+        if ($referrerIndex !== -1) {
+            for ($i = $referrerIndex + 1; $i < count($parts); $i++) {
+                if (strpos($parts[$i], '/') === 0) {
+                    $urlIndex = $i;
+                    break;
+                }
+            }
+        }
+        
+        // Extract user agent (from index 2 to referrerIndex)
+        if ($referrerIndex > 2) {
+            $userAgentParts = array_slice($parts, 2, $referrerIndex - 2);
+            $parsed['user_agent'] = implode(' ', $userAgentParts);
+        } elseif ($referrerIndex === 2) {
+            $parsed['user_agent'] = 'Unknown';
+        } else {
+            // No referrer found, everything after IP is user agent
+            $userAgentParts = array_slice($parts, 2);
+            $parsed['user_agent'] = implode(' ', $userAgentParts);
+        }
+        
+        // Extract referrer
+        if ($referrerIndex !== -1) {
+            $parsed['referrer'] = $parts[$referrerIndex];
+        } else {
+            $parsed['referrer'] = '-';
+        }
+        
+        // Extract URL (may have spaces if encoded)
+        if ($urlIndex !== -1) {
+            $urlParts = array_slice($parts, $urlIndex);
+            $parsed['url'] = implode(' ', $urlParts);
+        } else {
+            $parsed['url'] = '/';
+        }
+        
+        return $parsed;
+    }
+    
+    /**
+     * Parse Apache/Varnish timestamp format
+     */
+    private function parseTimestamp($timestamp) {
+        // Format: 30/Oct/2025:13:38:41 +0100
+        // Convert to: 30-Oct-2025 13:38:41 +0100
+        try {
+            $cleaned = str_replace('/', '-', $timestamp);
+            $cleaned = preg_replace('/:/', ' ', $cleaned, 1);
+            $time = strtotime($cleaned);
+            return $time !== false ? $time : null;
+        } catch (Exception $e) {
+            error_log("LogAnalyzer: Error parsing timestamp '$timestamp': " . $e->getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Check if request is from a bot using downloaded patterns
+     */
+    private function isBot($parsed) {
+        if (!isset($parsed['user_agent'])) {
+            return false;
+        }
+        
+        $userAgent = strtolower($parsed['user_agent']);
+        
+        // Empty or very short user agents are suspicious
+        if (strlen(trim($userAgent)) < 3) {
+            return true;
+        }
+        
+        // Use loaded patterns (either from file or fallback)
+        if (is_array($this->botPatterns)) {
+            foreach ($this->botPatterns as $pattern) {
+                if (strpos($userAgent, strtolower($pattern)) !== false) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Check if request is spam using downloaded referrer list
+     */
+    private function isSpam($parsed) {
+        if (!isset($parsed['referrer']) || $parsed['referrer'] === '-') {
+            return false;
+        }
+        
+        $referrer = strtolower($parsed['referrer']);
+        
+        // Use loaded spam referrers (either from file or fallback)
+        if (is_array($this->spamReferrers)) {
+            foreach ($this->spamReferrers as $spamDomain) {
+                if (strpos($referrer, strtolower($spamDomain)) !== false) {
+                    return true;
+                }
+            }
+        }
+        
+        // Check for suspicious patterns
+        if (preg_match('/(pills|viagra|casino|poker|xxx|porn|sex|nude|adult)/i', $referrer)) {
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Detect browser from user agent
+     */
+    private function detectBrowser($userAgent) {
+        $userAgent = strtolower($userAgent);
+        
+        if (strpos($userAgent, 'edg') !== false) return 'Edge';
+        if (strpos($userAgent, 'chrome') !== false && strpos($userAgent, 'edg') === false) return 'Chrome';
+        if (strpos($userAgent, 'safari') !== false && strpos($userAgent, 'chrome') === false) return 'Safari';
+        if (strpos($userAgent, 'firefox') !== false) return 'Firefox';
+        if (strpos($userAgent, 'opera') !== false || strpos($userAgent, 'opr') !== false) return 'Opera';
+        if (strpos($userAgent, 'msie') !== false || strpos($userAgent, 'trident') !== false) return 'IE';
+        
+        return 'Other';
+    }
+    
+    /**
+     * Get empty stats structure
+     */
+    private function getEmptyStats() {
+        return [
+            'total_visits' => 0,
+            'unique_visitors' => 0,
+            'human_visits' => 0,
+            'human_unique' => 0,
+            'bot_visits' => 0,
+            'spam_visits' => 0,
+            'hourly_distribution' => array_fill(0, 24, 0),
+            'page_views' => [],
+            'referrers' => [],
+            'user_agents' => [],
+        ];
+    }
+    
+    /**
+     * Get quick stats for dashboard (last N hours from live log)
+     */
+    public function getQuickStats($hours = 24) {
+        $endTime = time();
+        $startTime = $endTime - ($hours * 3600);
+        return $this->analyzeTimePeriod($startTime, $endTime);
+    }
+    
+    /**
+     * Get information about loaded bot detection data
+     */
+    public function getBotDetectionInfo() {
+        $compiledFile = $this->botDataDir . 'compiled_bot_patterns.json';
+        $spamFile = $this->botDataDir . 'referrer-spam.json';
+        $summaryFile = $this->botDataDir . 'update_summary.json';
+        
+        $info = [
+            'bot_patterns_count' => is_array($this->botPatterns) ? count($this->botPatterns) : 0,
+            'spam_referrers_count' => is_array($this->spamReferrers) ? count($this->spamReferrers) : 0,
+            'using_fallback_bots' => !file_exists($compiledFile),
+            'using_fallback_spam' => !file_exists($spamFile),
+            'last_update' => null,
+        ];
+        
+        // Get last update time from summary
+        if (file_exists($summaryFile)) {
+            $summary = json_decode(file_get_contents($summaryFile), true);
+            if (isset($summary['last_updated'])) {
+                $info['last_update'] = $summary['last_updated'];
+            }
+        }
+        
+        return $info;
+    }
+}

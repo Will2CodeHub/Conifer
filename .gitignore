@@ -1,0 +1,32 @@
+# === Secrets (contain live DB passwords / API keys) ===
+config.php
+config_ten_admin.php
+login.txt
+
+# === Large database dumps (not source code) ===
+*.sql
+
+# === Runtime / generated data ===
+logs/
+uploads/
+cvs/
+data/
+article_images/
+*.log
+
+# === Python worker environment (scraper) ===
+scraper/worker/venv/
+scraper/worker/__pycache__/
+**/__pycache__/
+*.pyc
+
+# === VPN credentials / configs (scraper) ===
+scraper/worker/vpn_configs/
+*.ovpn
+*.conf.secret
+
+# === OS / editor noise ===
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

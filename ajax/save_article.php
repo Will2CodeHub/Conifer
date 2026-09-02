@@ -1,0 +1,205 @@
+<?php
+session_start();
+require_once '../config.php';
+require_once '../config_ten_admin.php';
+
+header('Content-Type: application/json');
+
+// Check login
+if (!isLoggedIn()) {
+    echo json_encode(['status' => 'error', 'message' => 'Not authenticated']);
+    exit;
+}
+
+// Get POST data
+$articleId = isset($_POST['id']) ? intval($_POST['id']) : 0;
+$title = isset($_POST['title']) ? trim($_POST['title']) : '';
+$articleText = isset($_POST['article_text']) ? $_POST['article_text'] : '';
+$alias = isset($_POST['alias']) ? trim($_POST['alias']) : '';
+$tags = isset($_POST['tags']) ? trim($_POST['tags']) : '';
+$section = isset($_POST['section']) ? trim($_POST['section']) : '';
+$sectionSubcat = isset($_POST['section_subcat']) ? trim($_POST['section_subcat']) : '';
+$author = isset($_POST['author']) ? intval($_POST['author']) : 0;
+$publications = isset($_POST['publications']) ? trim($_POST['publications']) : '';
+$canonical = isset($_POST['canonical']) ? trim($_POST['canonical']) : '';
+$evergreen = isset($_POST['evergreen']) ? intval($_POST['evergreen']) : 0;
+$featured = isset($_POST['featured']) ? intval($_POST['featured']) : 0;
+$sponsored = isset($_POST['sponsored']) ? intval($_POST['sponsored']) : 0;
+$headline = isset($_POST['frontpage_temp']) ? intval($_POST['frontpage_temp']) : 0;
+$note = isset($_POST['note']) ? trim($_POST['note']) : '';
+$publishNow = isset($_POST['publish_now']) ? intval($_POST['publish_now']) : 0;
+$publishFrom = isset($_POST['publish_from']) ? trim($_POST['publish_from']) : null;
+$publishTo = isset($_POST['publish_to']) ? trim($_POST['publish_to']) : null;
+$action = isset($_POST['action']) ? $_POST['action'] : 'save'; // 'save', 'submit', 'publish'
+
+// Validation
+if (empty($title)) {
+    echo json_encode(['status' => 'error', 'message' => 'Title is required']);
+    exit;
+}
+
+if (empty($articleText)) {
+    echo json_encode(['status' => 'error', 'message' => 'Article content is required']);
+    exit;
+}
+
+if (empty($publications)) {
+    echo json_encode(['status' => 'error', 'message' => 'At least one publication must be selected']);
+    exit;
+}
+
+try {
+    // Get user info
+    $userId = $_SESSION['ten_user_id'] ?? 0;
+    $position = $_SESSION['ten_position'] ?? '';
+    $isUserAdmin = isAdmin();
+    
+    // Check publish permission — keep role list in sync with get_article_data.php
+    $canPublish = $isUserAdmin || in_array($position, ['Admin', 'Super Admin', 'Editor-in-Chief', 'Managing Editor', 'General Editor', 'Edition Editor-in-Chief', 'Section Editor', 'Administrator', 'Manager', 'Editor', 'Super User']);
+    
+    // Determine state based on action
+    $state = 'draft';
+    switch ($action) {
+        case 'submit':
+            $state = 'under review';
+            break;
+        case 'publish':
+            if (!$canPublish) {
+                echo json_encode(['status' => 'error', 'message' => 'You do not have permission to publish articles']);
+                exit;
+            }
+            $state = 'published';
+            break;
+        case 'save':
+        default:
+            $state = 'draft';
+            break;
+    }
+    
+    // Connect to admin_ten database
+    $conn = getDBConnection_TENAdmin();
+    
+    // Check if article exists and user has permission
+    if ($articleId > 0) {
+        $checkStmt = $conn->prepare("SELECT journalist_id, state, section FROM articles WHERE id = ?");
+        $checkStmt->bind_param('i', $articleId);
+        $checkStmt->execute();
+        $result = $checkStmt->get_result();
+        $existingArticle = $result->fetch_assoc();
+        $checkStmt->close();
+        
+        if (!$existingArticle) {
+            echo json_encode(['status' => 'error', 'message' => 'Article not found']);
+            $conn->close();
+            exit;
+        }
+        
+        // Permission check — keep role list in sync with get_article_data.php.
+        // journalist_id in articles references TEN_Management.ten_users.id, same as $userId.
+        $canEdit = $isUserAdmin ||
+                   in_array($position, ['Admin', 'Super Admin', 'Editor-in-Chief', 'Managing Editor', 'General Editor', 'Edition Editor-in-Chief', 'Administrator', 'Manager', 'Editor', 'Super User']) ||
+                   ($position === 'Section Editor' && $existingArticle['section'] === $_SESSION['ten_section']) ||
+                   ($existingArticle['journalist_id'] == $userId);
+        
+        if (!$canEdit) {
+            echo json_encode(['status' => 'error', 'message' => 'You do not have permission to edit this article']);
+            $conn->close();
+            exit;
+        }
+    }
+    
+    // Convert date formats if needed (dd-mm-yyyy to yyyy-mm-dd)
+    if ($publishFrom && !empty($publishFrom)) {
+        $parts = explode('-', $publishFrom);
+        if (count($parts) == 3 && strlen($parts[0]) <= 2) {
+            $publishFrom = $parts[2] . '-' . $parts[1] . '-' . $parts[0];
+        }
+    } else {
+        $publishFrom = null;
+    }
+    
+    if ($publishTo && !empty($publishTo)) {
+        $parts = explode('-', $publishTo);
+        if (count($parts) == 3 && strlen($parts[0]) <= 2) {
+            $publishTo = $parts[2] . '-' . $parts[1] . '-' . $parts[0];
+        }
+    } else {
+        $publishTo = null;
+    }
+    
+    // Set default author if not provided
+    if ($author == 0) {
+        $author = $userId;
+    }
+    
+    // Update or insert
+    if ($articleId > 0) {
+        // UPDATE
+        $query = "UPDATE articles SET
+            title = ?,
+            article_text = ?,
+            alias = ?,
+            tags = ?,
+            section = ?,
+            section_subcat = ?,
+            journalist_id = ?,
+            publications = ?,
+            canonical = ?,
+            evergreen = ?,
+            featured = ?,
+            sponsored = ?,
+            frontpage_temp = ?,
+            note = ?,
+            publish_now = ?,
+            publish_from = ?,
+            publish_to = ?,
+            state = ?
+            WHERE id = ?";
+        
+        $stmt = $conn->prepare($query);
+        $stmt->bind_param('ssssssissiiiisssssi',
+            $title,
+            $articleText,
+            $alias,
+            $tags,
+            $section,
+            $sectionSubcat,
+            $author,
+            $publications,
+            $canonical,
+            $evergreen,
+            $featured,
+            $sponsored,
+            $headline,
+            $note,
+            $publishNow,
+            $publishFrom,
+            $publishTo,
+            $state,
+            $articleId
+        );
+        
+        if ($stmt->execute()) {
+            $stmt->close();
+            $conn->close();
+            
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Article saved successfully',
+                'article_id' => $articleId,
+                'state' => $state
+            ]);
+        } else {
+            throw new Exception('Failed to update article: ' . $stmt->error);
+        }
+    } else {
+        // INSERT NEW (if needed in future)
+        echo json_encode(['status' => 'error', 'message' => 'Article ID required for updates']);
+        $conn->close();
+        exit;
+    }
+    
+} catch (Exception $e) {
+    error_log("Error saving article: " . $e->getMessage());
+    echo json_encode(['status' => 'error', 'message' => 'Error: ' . $e->getMessage()]);
+}
