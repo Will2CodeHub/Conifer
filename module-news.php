@@ -62,6 +62,6 @@ $canEdit = isAdmin();
             <div id="nsModal" class="ns-modal" style="display:none;"><div id="nsModalBody"></div></div>
         </div>
     </div>
-    <script src="js/news_sites.js"></script>
+    <script src="js/news_sites.js?v=<?php echo @filemtime(__DIR__ . '/js/news_sites.js'); ?>"></script>
 </body>
 </html>
