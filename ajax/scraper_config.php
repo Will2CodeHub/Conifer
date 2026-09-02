@@ -4,6 +4,11 @@
  * POST params: entity (section|source|feed|vpn|prompt|refs), action (list|get|create|update|delete|save).
  * Reads allowed for scraper.use; writes require scraper.manage. Mirrors ajax/roles.php conventions.
  */
+// JSON endpoint: never let PHP warnings/notices leak into the response body
+// (the server has display_errors on, and config_ten_admin.php re-defines
+// constants config.php already set). Errors are still written to the log.
+ini_set('display_errors', '0');
+
 require_once '../config.php';
 require_once __DIR__ . '/../scraper/lib/scraper_crud.php';
 require_once __DIR__ . '/../scraper/lib/scraper_refs.php';
