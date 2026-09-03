@@ -299,39 +299,55 @@ $pageTitle = 'Article Management';
             display: none !important;
         }
         
-        /* Editor container should only show one child at a time */
+        /* Editor flows naturally (was position:absolute with a fixed height,
+           which clipped tall content — e.g. after inserting an image — so the
+           bottom of the article could not be reached). The modal body's scroll
+           area now grows with the content instead. */
+        #modal_editor_slot { overflow: visible; }
         #modal_editor_slot .editor-container {
-            position: relative;
-            height: 100%;
-            min-height: 500px;
+            position: static;
+            height: auto;
+            min-height: 0;
         }
-        
         #modal_editor_slot .editor-container > .editor,
         #modal_editor_slot .editor-container > .source-view {
-            position: absolute;
-            top: 50px; /* Below toolbar */
-            left: 0;
-            right: 0;
-            bottom: 0;
+            position: static;
             width: 100%;
-            height: calc(100% - 50px);
+            height: auto;
         }
-        
+        #modal_editor_slot .editor { min-height: 340px; height: auto; overflow: visible; }
+        #modal_editor_slot .source-view { min-height: 340px; }
         @media (min-width: 768px) {
             #modal_editor_slot .editor-container,
             #modal_editor_slot .editor,
             #modal_editor_slot .source-view {
-                min-height: 600px !important;
+                min-height: 340px !important;
             }
         }
-        
         @media (min-width: 1024px) {
             #modal_editor_slot .editor-container,
             #modal_editor_slot .editor,
             #modal_editor_slot .source-view {
-                min-height: 700px !important;
+                min-height: 340px !important;
             }
         }
+
+        /* ── Collapsible settings panels (top of the edit modal) ── */
+        .ed-panels { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+        .ed-panel { flex:0 1 auto; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; overflow:hidden; }
+        .ed-panel[open] { flex-basis:100%; background:#fff; }
+        .ed-panel > summary { list-style:none; cursor:pointer; padding:9px 14px; font-size:12px; font-weight:700; color:#475569; text-transform:uppercase; letter-spacing:0.4px; user-select:none; white-space:nowrap; }
+        .ed-panel > summary::-webkit-details-marker { display:none; }
+        .ed-panel > summary i { color:#3b82f6; margin-right:6px; }
+        .ed-panel > summary::after { content:'\25be'; float:right; margin-left:14px; color:#94a3b8; }
+        .ed-panel[open] > summary { border-bottom:1px solid #e2e8f0; background:#f1f5f9; }
+        .ed-panel[open] > summary::after { content:'\25b4'; }
+        .ed-panel-body { padding:14px; }
+        .ed-lbl { display:block; font-size:11px; font-weight:700; color:#64748b; margin-bottom:5px; text-transform:uppercase; letter-spacing:0.4px; }
+        .ed-input { width:100%; padding:9px 10px; border:1px solid #e2e8f0; border-radius:6px; background:#fff; font-size:13px; color:#1e293b; box-sizing:border-box; outline:none; font-family:inherit; }
+        .ed-input:focus { border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,0.1); }
+        .ed-flag { display:inline-flex; align-items:center; gap:6px; padding:7px 11px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; font-size:13px; font-weight:600; color:#1e293b; cursor:pointer; }
+        .ed-flag input { width:16px; height:16px; cursor:pointer; }
         
         /* Fullscreen styles */
         .fullscreen {
@@ -1090,135 +1106,96 @@ $pageTitle = 'Article Management';
             </div>
         </div>
 
-        <!-- ── Modal Body: 2-column layout ── -->
-        <div style="flex:1;overflow:hidden;display:flex;flex-direction:row;">
-            <form id="ten_edit_article" method="post" onsubmit="return false;" novalidate="novalidate" style="display:contents;">
+        <!-- ── Modal Body: single column; collapsible settings on top ── -->
+        <div style="flex:1;overflow:hidden;display:flex;flex-direction:column;">
+            <form id="ten_edit_article" method="post" onsubmit="return false;" novalidate="novalidate" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
                 <input type="hidden" id="article_id_field" name="article_id_field" value="">
 
-                <!-- LEFT COLUMN: Title + Editor (65%) -->
-                <div style="flex:1;overflow-y:auto;padding:24px;border-right:1px solid #e2e8f0;background:#fff;">
+                <!-- One scroll area so tall content (with images) is fully reachable -->
+                <div style="flex:1;overflow-y:auto;padding:18px 24px;background:#fff;">
 
                     <!-- Title -->
-                    <div style="margin-bottom:18px;">
+                    <div style="margin-bottom:12px;">
                         <label style="display:block;font-size:11px;font-weight:700;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.8px;">Article Title <span style="color:#dc2626;">*</span></label>
                         <input type="text" id="modal_title" name="modal_title" placeholder="Enter article title..."
-                               style="width:100%;padding:12px 14px;border:1px solid #e2e8f0;border-radius:8px;font-size:16px;font-weight:600;box-sizing:border-box;color:#0f172a;background:#fff;transition:border-color 0.2s;outline:none;"
-                               onfocus="this.style.borderColor='#3b82f6';this.style.boxShadow='0 0 0 3px rgba(59,130,246,0.1)'"
-                               onblur="this.style.borderColor='#e2e8f0';this.style.boxShadow='none'">
+                               style="width:100%;padding:12px 14px;border:1px solid #e2e8f0;border-radius:8px;font-size:16px;font-weight:600;box-sizing:border-box;color:#0f172a;background:#fff;outline:none;">
                     </div>
 
-                    <!-- Content Editor -->
+                    <!-- Collapsible settings (collapsed by default so the photo strip + article stay in view) -->
+                    <div class="ed-panels">
+                        <details class="ed-panel">
+                            <summary><i class="fas fa-newspaper"></i> Publications</summary>
+                            <div class="ed-panel-body"><div id="modal_publications_container"></div></div>
+                        </details>
+
+                        <details class="ed-panel">
+                            <summary><i class="fas fa-user"></i> Author &amp; Section</summary>
+                            <div class="ed-panel-body">
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                                    <div>
+                                        <label class="ed-lbl">Author</label>
+                                        <select id="modal_author" name="modal_author" size="1" class="ed-input"><option value="">Select author...</option></select>
+                                    </div>
+                                    <div>
+                                        <label class="ed-lbl">Section</label>
+                                        <select id="modal_section" name="modal_section" size="1" class="ed-input"><option value="">Choose section...</option></select>
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+
+                        <details class="ed-panel">
+                            <summary><i class="fas fa-sliders-h"></i> Flags &amp; Scheduling</summary>
+                            <div class="ed-panel-body">
+                                <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                                    <label class="ed-flag" title="Highlight in featured sections."><input type="checkbox" id="modal_featured" name="modal_featured" value="1"><i class="fas fa-star" style="color:#f59e0b;"></i> Featured</label>
+                                    <label class="ed-flag" title="Never expires."><input type="checkbox" id="modal_evergreen"><i class="fas fa-leaf" style="color:#10b981;"></i> Evergreen</label>
+                                    <label class="ed-flag" title="Paid/partner content."><input type="checkbox" id="modal_sponsored"><i class="fas fa-ad" style="color:#8b5cf6;"></i> Sponsored</label>
+                                    <label class="ed-flag" title="Frontpage headline story."><input type="checkbox" id="modal_headline_checkbox"><i class="fas fa-fire" style="color:#ef4444;"></i> Headline</label>
+                                    <label class="ed-flag" title="Publish immediately; uncheck to schedule."><input type="checkbox" id="modal_publish_now" checked><i class="fas fa-bolt" style="color:#3b82f6;"></i> Publish now</label>
+                                </div>
+                                <div id="publish_date_fields" style="display:none;margin-top:10px;padding:10px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;">
+                                    <div style="font-size:11px;font-weight:700;color:#1d4ed8;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;"><i class="fas fa-calendar-alt" style="margin-right:4px;"></i>Publishing Schedule</div>
+                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                                        <div><label class="ed-lbl">From</label><input id="modal_publish_from" type="text" placeholder="dd-mm-yyyy" class="ed-input"></div>
+                                        <div><label class="ed-lbl">To</label><input id="modal_publish_to" type="text" placeholder="dd-mm-yyyy" class="ed-input"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+
+                        <details class="ed-panel">
+                            <summary><i class="fas fa-hashtag"></i> SEO &amp; Metadata</summary>
+                            <div class="ed-panel-body">
+                                <label class="ed-lbl">Meta title <span style="font-weight:400;text-transform:none;color:#94a3b8;">(≤60 chars)</span></label>
+                                <input type="text" id="modal_meta_title" class="ed-input" maxlength="70">
+                                <label class="ed-lbl" style="margin-top:10px;">Meta description <span style="font-weight:400;text-transform:none;color:#94a3b8;">(≤155 chars)</span></label>
+                                <textarea id="modal_meta_description" class="ed-input" rows="2" maxlength="180" style="resize:vertical;"></textarea>
+                                <label class="ed-lbl" style="margin-top:10px;">Meta keywords <span style="font-weight:400;text-transform:none;color:#94a3b8;">(comma separated)</span></label>
+                                <input type="text" id="modal_meta_keywords" class="ed-input">
+                                <label class="ed-lbl" style="margin-top:10px;">Tags <span style="font-weight:400;text-transform:none;color:#94a3b8;">(comma separated)</span></label>
+                                <input type="text" id="modal_tags" class="ed-input">
+                            </div>
+                        </details>
+                    </div>
+
+                    <!-- Content Editor (the scraper photo-suggestion strip auto-inserts just above this) -->
                     <div style="margin-bottom:8px;">
                         <label style="display:block;font-size:11px;font-weight:700;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.8px;">Article Content <span style="color:#dc2626;">*</span></label>
-                        <div id="modal_editor_slot" style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;min-height:520px;background:#fff;">
+                        <div id="modal_editor_slot" style="border:1px solid #e2e8f0;border-radius:8px;overflow:visible;background:#fff;">
                             <!-- Editor container moved here dynamically -->
                         </div>
                     </div>
-                </div>
 
-                <!-- RIGHT SIDEBAR: All metadata (35%) -->
-                <div id="modal_sidebar" style="width:340px;flex-shrink:0;overflow-y:auto;background:#f8fafc;padding:20px;">
-
-                    <!-- Publications -->
-                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:16px;">
-                        <div style="padding:12px 14px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;">
-                            <span style="font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:0.8px;"><i class="fas fa-newspaper" style="margin-right:6px;color:#3b82f6;"></i>Publications & Canonical</span>
-                        </div>
-                        <div style="padding:12px 14px;">
-                            <div id="modal_publications_container"></div>
-                        </div>
-                    </div>
-
-                    <!-- Options / Flags -->
-                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:16px;">
-                        <div style="padding:12px 14px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;">
-                            <span style="font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:0.8px;"><i class="fas fa-sliders-h" style="margin-right:6px;color:#3b82f6;"></i>Article Flags</span>
-                        </div>
-                        <div style="padding:12px 14px;display:flex;flex-direction:column;gap:8px;">
-                            <label title="Featured: Highlight this article in featured sections and carousels." style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;transition:background 0.15s;">
-                                <div style="display:flex;align-items:center;gap:8px;">
-                                    <i class="fas fa-star" style="color:#f59e0b;font-size:13px;width:16px;text-align:center;"></i>
-                                    <div><span style="font-size:13px;font-weight:600;color:#1e293b;">Featured</span><div style="font-size:11px;color:#94a3b8;margin-top:1px;">Homepage highlight</div></div>
-                                </div>
-                                <input type="checkbox" id="modal_featured" name="modal_featured" value="1" style="width:18px;height:18px;accent-color:#f59e0b;cursor:pointer;flex-shrink:0;">
-                            </label>
-                            <label title="Evergreen: Remains relevant long-term, does not expire." style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;transition:background 0.15s;">
-                                <div style="display:flex;align-items:center;gap:8px;">
-                                    <i class="fas fa-leaf" style="color:#10b981;font-size:13px;width:16px;text-align:center;"></i>
-                                    <div><span style="font-size:13px;font-weight:600;color:#1e293b;">Evergreen</span><div style="font-size:11px;color:#94a3b8;margin-top:1px;">Never expires</div></div>
-                                </div>
-                                <input id="modal_evergreen" type="checkbox" style="width:18px;height:18px;accent-color:#10b981;cursor:pointer;flex-shrink:0;">
-                            </label>
-                            <label title="Sponsored: Mark as paid/sponsored content." style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;transition:background 0.15s;">
-                                <div style="display:flex;align-items:center;gap:8px;">
-                                    <i class="fas fa-ad" style="color:#8b5cf6;font-size:13px;width:16px;text-align:center;"></i>
-                                    <div><span style="font-size:13px;font-weight:600;color:#1e293b;">Sponsored</span><div style="font-size:11px;color:#94a3b8;margin-top:1px;">Paid/partner content</div></div>
-                                </div>
-                                <input id="modal_sponsored" type="checkbox" style="width:18px;height:18px;accent-color:#8b5cf6;cursor:pointer;flex-shrink:0;">
-                            </label>
-                            <label title="Headline: Display as a frontpage headline story." style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;transition:background 0.15s;">
-                                <div style="display:flex;align-items:center;gap:8px;">
-                                    <i class="fas fa-fire" style="color:#ef4444;font-size:13px;width:16px;text-align:center;"></i>
-                                    <div><span style="font-size:13px;font-weight:600;color:#1e293b;">Headline</span><div style="font-size:11px;color:#94a3b8;margin-top:1px;">Frontpage story</div></div>
-                                </div>
-                                <input id="modal_headline_checkbox" type="checkbox" style="width:18px;height:18px;accent-color:#ef4444;cursor:pointer;flex-shrink:0;">
-                            </label>
-                            <label title="Publish Now: Publish immediately. Uncheck to set date range." style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;transition:background 0.15s;">
-                                <div style="display:flex;align-items:center;gap:8px;">
-                                    <i class="fas fa-bolt" style="color:#3b82f6;font-size:13px;width:16px;text-align:center;"></i>
-                                    <div><span style="font-size:13px;font-weight:600;color:#1e293b;">Publish Now</span><div style="font-size:11px;color:#94a3b8;margin-top:1px;">Immediate publication</div></div>
-                                </div>
-                                <input id="modal_publish_now" type="checkbox" checked style="width:18px;height:18px;accent-color:#3b82f6;cursor:pointer;flex-shrink:0;">
-                            </label>
-
-                            <!-- Publishing dates (shown when Publish Now is unchecked) -->
-                            <div id="publish_date_fields" style="display:none;padding:10px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;margin-top:4px;">
-                                <div style="font-size:11px;font-weight:700;color:#1d4ed8;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;"><i class="fas fa-calendar-alt" style="margin-right:4px;"></i>Publishing Schedule</div>
-                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-                                    <div>
-                                        <label style="display:block;font-size:11px;font-weight:600;color:#64748b;margin-bottom:4px;">From</label>
-                                        <input id="modal_publish_from" type="text" placeholder="dd-mm-yyyy" style="width:100%;padding:7px 10px;border:1px solid #bfdbfe;border-radius:6px;font-size:12px;box-sizing:border-box;background:#fff;">
-                                    </div>
-                                    <div>
-                                        <label style="display:block;font-size:11px;font-weight:600;color:#64748b;margin-bottom:4px;">To</label>
-                                        <input id="modal_publish_to" type="text" placeholder="dd-mm-yyyy" style="width:100%;padding:7px 10px;border:1px solid #bfdbfe;border-radius:6px;font-size:12px;box-sizing:border-box;background:#fff;">
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Author & Section -->
-                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:16px;">
-                        <div style="padding:12px 14px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;">
-                            <span style="font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:0.8px;"><i class="fas fa-user" style="margin-right:6px;color:#3b82f6;"></i>Assignment</span>
-                        </div>
-                        <div style="padding:12px 14px;display:flex;flex-direction:column;gap:10px;">
-                            <div>
-                                <label style="display:block;font-size:11px;font-weight:700;color:#64748b;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px;">Author</label>
-                                <select id="modal_author" name="modal_author" size="1" style="width:100%;padding:9px 10px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;font-size:13px;color:#1e293b;">
-                                    <option value="">Select author...</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label style="display:block;font-size:11px;font-weight:700;color:#64748b;margin-bottom:5px;text-transform:uppercase;letter-spacing:0.5px;">Section</label>
-                                <select id="modal_section" name="modal_section" size="1" style="width:100%;padding:9px 10px;border:1px solid #e2e8f0;border-radius:6px;background:#fff;font-size:13px;color:#1e293b;">
-                                    <option value="">Choose section...</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Hidden Fields -->
+                    <!-- Hidden legacy fields -->
                     <div style="display:none;">
                         <input type="text" id="modal_alias" name="modal_alias">
-                        <input id="modal_tags" type="text">
                         <select id="modal_section_subcat" name="modal_section_subcat" size="1">
                             <option value="">Is it a sub-category?</option>
                         </select>
                     </div>
 
-                </div><!-- end right sidebar -->
+                </div>
 
             </form>
         </div><!-- end body -->
@@ -2872,6 +2849,9 @@ document.getElementById('modal_publish_now').addEventListener('change', function
     const fld_publish_from = document.getElementById('modal_publish_from');
     const fld_publish_to = document.getElementById('modal_publish_to');
     const fld_publish_now = document.getElementById('modal_publish_now');
+    const fld_meta_title = document.getElementById('modal_meta_title');
+    const fld_meta_description = document.getElementById('modal_meta_description');
+    const fld_meta_keywords = document.getElementById('modal_meta_keywords');
     const save_status = document.getElementById('modal_save_status');
 
     const editorSlot = document.getElementById('modal_editor_slot');
@@ -3199,6 +3179,9 @@ document.getElementById('modal_publish_now').addEventListener('change', function
             fld_title.value = json.title || '';
             fld_alias.value = json.article_alias || '';
             fld_tags.value = json.article_tags || '';
+            if (fld_meta_title) fld_meta_title.value = json.meta_title || '';
+            if (fld_meta_description) fld_meta_description.value = json.meta_description || '';
+            if (fld_meta_keywords) fld_meta_keywords.value = json.meta_keywords || '';
             
             // Set checkboxes with detailed logging
             const evergreenValue = (json.evergreen == 1 || json.evergreen == '1' || json.evergreen === true);
@@ -3585,6 +3568,9 @@ document.getElementById('modal_publish_now').addEventListener('change', function
         fd.append('article_text', articleHtml || '');
         fd.append('alias', fld_alias.value || '');
         fd.append('tags', fld_tags.value || '');
+        fd.append('meta_title', fld_meta_title ? (fld_meta_title.value || '') : '');
+        fd.append('meta_description', fld_meta_description ? (fld_meta_description.value || '') : '');
+        fd.append('meta_keywords', fld_meta_keywords ? (fld_meta_keywords.value || '') : '');
         fd.append('section', fld_section.value || '');
         fd.append('section_subcat', fld_section_subcat.value || '');
         fd.append('author', fld_author.value || '');

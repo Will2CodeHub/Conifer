@@ -154,6 +154,9 @@ try {
         $article_alias = '';
         $canonical_pub = '';
         $state = 'draft';
+        $meta_title = '';
+        $meta_description = '';
+        $meta_keywords = '';
         $publish_from = '';
         $publish_to = '';
         $time_from = '';
@@ -177,6 +180,9 @@ try {
         $article_alias = $row['article_alias'] ?? $row['alias'] ?? '';
         $canonical_pub = $row['canonical'];
         $state = $row['state'] ?? 'draft';
+        $meta_title = $row['meta_title'] ?? '';
+        $meta_description = $row['meta_description'] ?? '';
+        $meta_keywords = $row['meta_keywords'] ?? '';
         
         // Handle dates
         $publish_from = $row['publish_from'];
@@ -359,6 +365,9 @@ try {
         'author_id' => $author,
         'publications' => $article_publications,
         'canonical' => $canonical_pub,
+        'meta_title' => $meta_title,
+        'meta_description' => $meta_description,
+        'meta_keywords' => $meta_keywords,
         'evergreen' => $evergreen,
         'featured' => $featured,
         'sponsored' => $sponsored,
