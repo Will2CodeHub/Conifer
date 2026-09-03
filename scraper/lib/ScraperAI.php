@@ -200,6 +200,9 @@ function scraper_ai_write_article(string $provider, string $model, string $promp
     // Any remaining (sparse) <h2> subheadings: the site styles h2 near h1 size,
     // so give them an explicit smaller size inline (scoped to scraped articles).
     $body = preg_replace('/<h2(\s[^>]*)?>/i', '<h2 style="font-size:1.4rem;line-height:1.3;margin:1.1em 0 .45em;font-weight:700;">', $body);
+    // Space paragraphs (a blank line between them) wherever the article renders —
+    // the editor and each publication's article page. Only add to bare <p>.
+    $body = preg_replace('/<p(?![^>]*style=)(\s[^>]*)?>/i', '<p style="margin:0 0 1em;"$1>', $body);
     return [
         'title' => (string)($decoded['title'] ?? ''),
         'body_html' => $body,

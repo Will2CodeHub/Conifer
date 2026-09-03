@@ -244,6 +244,11 @@ $pageTitle = 'Article Management';
         .editor[contenteditable="true"]:focus {
             background-color: #fefefe;
         }
+
+        /* Paragraph spacing in the editor (a blank line between paragraphs) —
+           a global reset elsewhere can otherwise collapse <p> margins. */
+        .editor p { margin: 0 0 1em; }
+        .editor h2, .editor h3 { margin: 1.3em 0 0.5em; }
         
         .editor mark {
             background-color: #fef3c7;

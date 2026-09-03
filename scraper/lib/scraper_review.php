@@ -252,11 +252,17 @@ function scraper_promote_items(int $pubSectionId, array $itemIds): array {
  * the editor's author dropdown show/select the house account too.
  */
 function scraper_inhouse_author(string $publicationKey): array {
-    $key = strtolower(trim($publicationKey));
-    $map = [
-        'tme' => [112, 'TME News'],
-    ];
-    return $map[$key] ?? [112, 'TME News'];
+    // The generic house account for scraped articles is ten_users 'ten_news'
+    // (full name "TEN News"). Look it up dynamically so an id change — the users
+    // migration moved it to 9001 — never breaks author selection or the byline.
+    $conn = getDBConnection();
+    $res = $conn->query("SELECT id, full_name FROM ten_users WHERE username='ten_news' AND status='active' LIMIT 1");
+    $row = $res ? $res->fetch_assoc() : null;
+    $conn->close();
+    if ($row && (int)$row['id'] > 0) {
+        return [(int)$row['id'], (string)($row['full_name'] ?: 'TEN News')];
+    }
+    return [9001, 'TEN News'];
 }
 
 /** Default byline journalist for scraped articles (kept for back-compat). */
