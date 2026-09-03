@@ -353,6 +353,18 @@ $pageTitle = 'Article Management';
         .ed-input:focus { border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,0.1); }
         .ed-flag { display:inline-flex; align-items:center; gap:6px; padding:7px 11px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; font-size:13px; font-weight:600; color:#1e293b; cursor:pointer; }
         .ed-flag input { width:16px; height:16px; cursor:pointer; }
+
+        /* ── Settings tabs (row stays fixed; active panel opens below it) ── */
+        .ed-tabs { display:flex; flex-wrap:wrap; gap:6px; }
+        .ed-tab { border:1px solid #e2e8f0; background:#f8fafc; color:#475569; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:8px 13px; border-radius:8px; cursor:pointer; white-space:nowrap; transition:background .12s,color .12s; }
+        .ed-tab:hover { background:#eef2f7; }
+        .ed-tab i { color:#3b82f6; margin-right:6px; }
+        .ed-tab.active { background:#3b82f6; color:#fff; border-color:#3b82f6; }
+        .ed-tab.active i { color:#fff; }
+        .ed-tabwrap { display:none; border:1px solid #e2e8f0; border-radius:8px; background:#fff; margin:8px 0 14px; }
+        .ed-tabwrap.open { display:block; }
+        .ed-tabpanel { display:none; padding:14px; }
+        .ed-tabpanel.active { display:block; }
         
         /* Fullscreen styles */
         .fullscreen {
@@ -1126,62 +1138,59 @@ $pageTitle = 'Article Management';
                                style="width:100%;padding:12px 14px;border:1px solid #e2e8f0;border-radius:8px;font-size:16px;font-weight:600;box-sizing:border-box;color:#0f172a;background:#fff;outline:none;">
                     </div>
 
-                    <!-- Collapsible settings (collapsed by default so the photo strip + article stay in view) -->
-                    <div class="ed-panels">
-                        <details class="ed-panel">
-                            <summary><i class="fas fa-newspaper"></i> Publications</summary>
-                            <div class="ed-panel-body"><div id="modal_publications_container"></div></div>
-                        </details>
+                    <!-- Publish-now row (outside the tabs). From/To appear to the right only when unchecked. -->
+                    <div style="display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-bottom:12px;">
+                        <label class="ed-flag" title="Publish immediately. Uncheck to schedule a publish window." style="background:#eff6ff;border-color:#bfdbfe;align-self:center;">
+                            <input type="checkbox" id="modal_publish_now" checked><i class="fas fa-bolt" style="color:#3b82f6;"></i> Publish now
+                        </label>
+                        <div id="publish_date_fields" style="display:none;align-items:flex-end;gap:10px;">
+                            <div><label class="ed-lbl">Publish from</label><input id="modal_publish_from" type="text" placeholder="dd-mm-yyyy HH:MM" class="ed-input" style="width:160px;"></div>
+                            <div><label class="ed-lbl">Publish to</label><input id="modal_publish_to" type="text" placeholder="dd-mm-yyyy HH:MM" class="ed-input" style="width:160px;"></div>
+                        </div>
+                    </div>
 
-                        <details class="ed-panel">
-                            <summary><i class="fas fa-user"></i> Author &amp; Section</summary>
-                            <div class="ed-panel-body">
-                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-                                    <div>
-                                        <label class="ed-lbl">Author</label>
-                                        <select id="modal_author" name="modal_author" size="1" class="ed-input"><option value="">Select author...</option></select>
-                                    </div>
-                                    <div>
-                                        <label class="ed-lbl">Section</label>
-                                        <select id="modal_section" name="modal_section" size="1" class="ed-input"><option value="">Choose section...</option></select>
-                                    </div>
+                    <!-- Settings tabs: the tab row stays put; the chosen panel opens BELOW it. -->
+                    <div class="ed-tabs">
+                        <button type="button" class="ed-tab" data-edtab="pub"><i class="fas fa-newspaper"></i> Publications</button>
+                        <button type="button" class="ed-tab" data-edtab="author"><i class="fas fa-user"></i> Author &amp; Section</button>
+                        <button type="button" class="ed-tab" data-edtab="flags"><i class="fas fa-sliders-h"></i> Flags &amp; Scheduling</button>
+                        <button type="button" class="ed-tab" data-edtab="seo"><i class="fas fa-hashtag"></i> SEO &amp; Metadata</button>
+                    </div>
+                    <div class="ed-tabwrap">
+                        <div class="ed-tabpanel" data-edpanel="pub"><div id="modal_publications_container"></div></div>
+
+                        <div class="ed-tabpanel" data-edpanel="author">
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                                <div>
+                                    <label class="ed-lbl">Author</label>
+                                    <select id="modal_author" name="modal_author" size="1" class="ed-input"><option value="">Select author...</option></select>
+                                </div>
+                                <div>
+                                    <label class="ed-lbl">Section</label>
+                                    <select id="modal_section" name="modal_section" size="1" class="ed-input"><option value="">Choose section...</option></select>
                                 </div>
                             </div>
-                        </details>
+                        </div>
 
-                        <details class="ed-panel">
-                            <summary><i class="fas fa-sliders-h"></i> Flags &amp; Scheduling</summary>
-                            <div class="ed-panel-body">
-                                <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                                    <label class="ed-flag" title="Highlight in featured sections."><input type="checkbox" id="modal_featured" name="modal_featured" value="1"><i class="fas fa-star" style="color:#f59e0b;"></i> Featured</label>
-                                    <label class="ed-flag" title="Never expires."><input type="checkbox" id="modal_evergreen"><i class="fas fa-leaf" style="color:#10b981;"></i> Evergreen</label>
-                                    <label class="ed-flag" title="Paid/partner content."><input type="checkbox" id="modal_sponsored"><i class="fas fa-ad" style="color:#8b5cf6;"></i> Sponsored</label>
-                                    <label class="ed-flag" title="Frontpage headline story."><input type="checkbox" id="modal_headline_checkbox"><i class="fas fa-fire" style="color:#ef4444;"></i> Headline</label>
-                                    <label class="ed-flag" title="Publish immediately; uncheck to schedule."><input type="checkbox" id="modal_publish_now" checked><i class="fas fa-bolt" style="color:#3b82f6;"></i> Publish now</label>
-                                </div>
-                                <div id="publish_date_fields" style="display:none;margin-top:10px;padding:10px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;">
-                                    <div style="font-size:11px;font-weight:700;color:#1d4ed8;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;"><i class="fas fa-calendar-alt" style="margin-right:4px;"></i>Publishing Schedule</div>
-                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-                                        <div><label class="ed-lbl">From</label><input id="modal_publish_from" type="text" placeholder="dd-mm-yyyy" class="ed-input"></div>
-                                        <div><label class="ed-lbl">To</label><input id="modal_publish_to" type="text" placeholder="dd-mm-yyyy" class="ed-input"></div>
-                                    </div>
-                                </div>
+                        <div class="ed-tabpanel" data-edpanel="flags">
+                            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                                <label class="ed-flag" title="Show this article as the main front-page headline story."><input type="checkbox" id="modal_headline_checkbox"><i class="fas fa-fire" style="color:#ef4444;"></i> Frontpage Headline</label>
+                                <label class="ed-flag" title="Show this article as the section headline."><input type="checkbox" id="modal_featured" name="modal_featured" value="1"><i class="fas fa-star" style="color:#f59e0b;"></i> Section Headline</label>
+                                <label class="ed-flag" title="Never expires."><input type="checkbox" id="modal_evergreen"><i class="fas fa-leaf" style="color:#10b981;"></i> Evergreen</label>
+                                <label class="ed-flag" title="Paid/partner content."><input type="checkbox" id="modal_sponsored"><i class="fas fa-ad" style="color:#8b5cf6;"></i> Sponsored</label>
                             </div>
-                        </details>
+                        </div>
 
-                        <details class="ed-panel">
-                            <summary><i class="fas fa-hashtag"></i> SEO &amp; Metadata</summary>
-                            <div class="ed-panel-body">
-                                <label class="ed-lbl">Meta title <span style="font-weight:400;text-transform:none;color:#94a3b8;">(≤60 chars)</span></label>
-                                <input type="text" id="modal_meta_title" class="ed-input" maxlength="70">
-                                <label class="ed-lbl" style="margin-top:10px;">Meta description <span style="font-weight:400;text-transform:none;color:#94a3b8;">(≤155 chars)</span></label>
-                                <textarea id="modal_meta_description" class="ed-input" rows="2" maxlength="180" style="resize:vertical;"></textarea>
-                                <label class="ed-lbl" style="margin-top:10px;">Meta keywords <span style="font-weight:400;text-transform:none;color:#94a3b8;">(comma separated)</span></label>
-                                <input type="text" id="modal_meta_keywords" class="ed-input">
-                                <label class="ed-lbl" style="margin-top:10px;">Tags <span style="font-weight:400;text-transform:none;color:#94a3b8;">(comma separated)</span></label>
-                                <input type="text" id="modal_tags" class="ed-input">
-                            </div>
-                        </details>
+                        <div class="ed-tabpanel" data-edpanel="seo">
+                            <label class="ed-lbl">Meta title <span style="font-weight:400;text-transform:none;color:#94a3b8;">(≤60 chars)</span></label>
+                            <input type="text" id="modal_meta_title" class="ed-input" maxlength="70">
+                            <label class="ed-lbl" style="margin-top:10px;">Meta description <span style="font-weight:400;text-transform:none;color:#94a3b8;">(≤155 chars)</span></label>
+                            <textarea id="modal_meta_description" class="ed-input" rows="2" maxlength="180" style="resize:vertical;"></textarea>
+                            <label class="ed-lbl" style="margin-top:10px;">Meta keywords <span style="font-weight:400;text-transform:none;color:#94a3b8;">(comma separated)</span></label>
+                            <input type="text" id="modal_meta_keywords" class="ed-input">
+                            <label class="ed-lbl" style="margin-top:10px;">Tags <span style="font-weight:400;text-transform:none;color:#94a3b8;">(comma separated)</span></label>
+                            <input type="text" id="modal_tags" class="ed-input">
+                        </div>
                     </div>
 
                     <!-- Content Editor (the scraper photo-suggestion strip auto-inserts just above this) -->
@@ -1283,12 +1292,28 @@ $pageTitle = 'Article Management';
 // Toggle publish date fields when Publish Now checkbox changes
 document.getElementById('modal_publish_now').addEventListener('change', function() {
     const dateFields = document.getElementById('publish_date_fields');
-    if (this.checked) {
-        dateFields.style.display = 'none';
-    } else {
-        dateFields.style.display = 'block';
-    }
+    dateFields.style.display = this.checked ? 'none' : 'flex';
 });
+
+/* Settings tabs: keep the tab row fixed; open the chosen panel below it. */
+(function () {
+    var tabs = document.querySelectorAll('.ed-tab');
+    var wrap = document.querySelector('.ed-tabwrap');
+    if (!tabs.length || !wrap) return;
+    tabs.forEach(function (t) {
+        t.addEventListener('click', function () {
+            var key = t.getAttribute('data-edtab');
+            var wasActive = t.classList.contains('active');
+            tabs.forEach(function (x) { x.classList.remove('active'); });
+            document.querySelectorAll('.ed-tabpanel').forEach(function (p) { p.classList.remove('active'); });
+            if (wasActive) { wrap.classList.remove('open'); return; }
+            t.classList.add('active');
+            var panel = document.querySelector('.ed-tabpanel[data-edpanel="' + key + '"]');
+            if (panel) panel.classList.add('active');
+            wrap.classList.add('open');
+        });
+    });
+})();
 </script>
 
 <style>

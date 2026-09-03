@@ -172,9 +172,11 @@
             strip.innerHTML = "";
             return;
         }
-        var thumbs = suggestions.map(function (s, i) {
-            return '<img data-i="' + i + '" src="' + esc(s.thumb) + '" title="' + esc((s.attribution || "") + " · " + (s.license || "")) +
-                '" style="height:64px;width:auto;border-radius:4px;cursor:pointer;border:1px solid #e5e7eb;">';
+        // Cap the strip and lazy/async-load the external thumbnails so a slow
+        // third-party image CDN can't stall the editor while it renders.
+        var thumbs = suggestions.slice(0, 8).map(function (s, i) {
+            return '<img data-i="' + i + '" loading="lazy" decoding="async" src="' + esc(s.thumb) + '" title="' + esc((s.attribution || "") + " · " + (s.license || "")) +
+                '" style="height:64px;width:auto;border-radius:4px;cursor:pointer;border:1px solid #e5e7eb;background:#f1f5f9;">';
         }).join(" ");
         strip.innerHTML =
             '<div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:6px;">' +
@@ -212,5 +214,5 @@
                 anchor.parentNode.insertBefore(strip, anchor);
             }
         }
-    }, 800);
+    }, 1500);
 })();
