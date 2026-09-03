@@ -180,17 +180,25 @@ function scraper_ai_write_article(string $provider, string $model, string $promp
     }
     $lang = (string)($vars['target_language'] ?? 'English');
     // The template both instructs the task and asks for JSON output.
-    $system = "You are an experienced staff journalist. Write the ENTIRE article (title, body_html and all meta fields) "
-        . "in {$lang}, regardless of the source language. Follow the instructions exactly and return ONLY the requested "
-        . "JSON object — no markdown fences, no commentary.";
+    $system = "You are an experienced staff news journalist. Write the ENTIRE article (title, body_html and all meta "
+        . "fields) in {$lang}, regardless of the source language. Write a factual news report of AT LEAST 700 words in "
+        . "flowing paragraphs — no opinion, analysis or editorialising, and avoid libel (report any allegation only as "
+        . "an attributed claim, never as established fact). Do NOT litter the piece with subheadings; over-use of "
+        . "headings reads as machine-generated. Use a subheading only if genuinely warranted, and even then rarely — "
+        . "most articles need none. NEVER begin the article with a heading: it MUST open with a body paragraph. Follow "
+        . "the instructions exactly and return ONLY the requested JSON object — no markdown fences, no commentary.";
     $text = scraper_ai_raw($provider, $model, $system, $prompt, 8000, $provider === 'openai');
     $decoded = scraper_ai_decode_json($text);
     if (!$decoded) {
         throw new RuntimeException('AI did not return valid JSON article. Raw start: ' . substr($text, 0, 200));
     }
     $body = (string)($decoded['body_html'] ?? $decoded['body'] ?? '');
-    // The AI uses <h2> subheadings a lot; the site styles h2 near h1 size, so
-    // give them an explicit smaller size inline (scoped to scraped articles).
+    // Enforce "never start with a heading": the featured image is inserted above
+    // the body, so the first block must be real text. Demote a leading h1/h2/h3
+    // to a paragraph if the model slipped.
+    $body = preg_replace('/^\s*<h[1-3][^>]*>(.*?)<\/h[1-3]>/is', '<p>$1</p>', $body, 1);
+    // Any remaining (sparse) <h2> subheadings: the site styles h2 near h1 size,
+    // so give them an explicit smaller size inline (scoped to scraped articles).
     $body = preg_replace('/<h2(\s[^>]*)?>/i', '<h2 style="font-size:1.4rem;line-height:1.3;margin:1.1em 0 .45em;font-weight:700;">', $body);
     return [
         'title' => (string)($decoded['title'] ?? ''),

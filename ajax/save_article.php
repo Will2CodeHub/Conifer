@@ -5,6 +5,46 @@ require_once '../config_ten_admin.php';
 
 header('Content-Type: application/json');
 
+/**
+ * After an article is published, rebuild the cached front page (index.php) of
+ * each publication it appears on by calling that site's cache_index.php.
+ * Best-effort: a cache failure must never affect the save.
+ */
+function ten_regenerate_publication_caches($publicationsCsv) {
+    try {
+        $acr = array_values(array_unique(array_filter(array_map('trim', explode(',', (string)$publicationsCsv)))));
+        if (!$acr) return [];
+        $conn = getDBConnection_TENAdmin();
+        $in = implode(',', array_fill(0, count($acr), '?'));
+        $stmt = $conn->prepare("SELECT url FROM publications WHERE pub_live = 1 AND publication IN ($in)");
+        $stmt->bind_param(str_repeat('s', count($acr)), ...$acr);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        $urls = [];
+        while ($row = $res->fetch_assoc()) {
+            $u = rtrim((string)$row['url'], '/');
+            if ($u !== '') $urls[] = $u . '/cache_index.php';
+        }
+        $stmt->close();
+        $conn->close();
+        foreach ($urls as $u) {
+            $ch = curl_init($u);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 30,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_SSL_VERIFYPEER => false,
+            ]);
+            curl_exec($ch);
+            curl_close($ch);
+        }
+        return $urls;
+    } catch (Throwable $e) {
+        error_log('cache regen failed: ' . $e->getMessage());
+        return [];
+    }
+}
+
 // Check login
 if (!isLoggedIn()) {
     echo json_encode(['status' => 'error', 'message' => 'Not authenticated']);
@@ -200,6 +240,13 @@ try {
                 'article_id' => $articleId,
                 'state' => $state
             ]);
+
+            // On publish, rebuild each publication's cached front page. Do it
+            // AFTER sending the response so the editor isn't kept waiting.
+            if ($state === 'published') {
+                if (function_exists('fastcgi_finish_request')) { @fastcgi_finish_request(); }
+                ten_regenerate_publication_caches($publications);
+            }
         } else {
             throw new Exception('Failed to update article: ' . $stmt->error);
         }
