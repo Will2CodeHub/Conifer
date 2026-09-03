@@ -54,6 +54,91 @@ function scraper_fetch_facts(string $url, int $maxChars = 5000): string {
     return mb_substr($facts, 0, $maxChars);
 }
 
+/* ============================ Curate tab ============================ */
+
+/** Publications with an active section, one primary section each (News preferred). */
+function scraper_curate_publications(): array {
+    $conn = getDBConnection();
+    $res = $conn->query("SELECT id, publication_key, ten_section, daily_count FROM ten_scraper_pub_sections WHERE is_active=1 ORDER BY publication_key ASC");
+    $pick = [];
+    while ($r = $res->fetch_assoc()) {
+        $k = $r['publication_key'];
+        if (!isset($pick[$k]) || strcasecmp($r['ten_section'], 'News') === 0) $pick[$k] = $r; // prefer News
+    }
+    $out = [];
+    foreach ($pick as $k => $r) {
+        $sid = (int)$r['id'];
+        $c = $conn->query("SELECT COUNT(*) c FROM ten_scraper_items WHERE pub_section_id=$sid AND status='new'")->fetch_assoc()['c'];
+        $out[] = ['publication_key' => $k, 'section_id' => $sid, 'ten_section' => $r['ten_section'], 'top_n' => (int)$r['daily_count'], 'new_count' => (int)$c];
+    }
+    $conn->close();
+    return $out;
+}
+
+/** AI-rank a section's 'new' items and return the top N (N from daily_count). */
+function scraper_curate_rank(int $pubSectionId, int $topN): array {
+    $section = scraper_get_section($pubSectionId);
+    if (!$section || $topN < 1) return ['items' => []];
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("SELECT id, COALESCE(NULLIF(title_translated,''),title) AS t, COALESCE(NULLIF(summary_translated,''),summary) AS s
+                            FROM ten_scraper_items WHERE pub_section_id=? AND status='new'
+                            ORDER BY published_at DESC, id DESC LIMIT 80");
+    $stmt->bind_param('i', $pubSectionId); $stmt->execute();
+    $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC); $stmt->close(); $conn->close();
+    if (!$rows) return ['items' => []];
+
+    $byId = []; $lines = '';
+    foreach ($rows as $r) { $byId[(int)$r['id']] = $r; $lines .= (int)$r['id'] . ': ' . preg_replace('/\s+/', ' ', $r['t']) . "\n"; }
+
+    // Few enough that ranking adds nothing — just return by recency.
+    if (count($rows) <= $topN) {
+        $items = [];
+        foreach ($rows as $r) $items[] = ['id' => (int)$r['id'], 'title' => $r['t'], 'summary' => $r['s'], 'reason' => ''];
+        return ['items' => $items];
+    }
+
+    $ai = scraper_effective_ai($section);
+    $pub = $section['publication_key'];
+    $system = "You are the regional news editor for the publication '{$pub}'. Choose the most newsworthy, high-interest stories for readers in that region: significant, timely, locally relevant news. Drop trivia, near-duplicates and clickbait. Return ONLY JSON.";
+    $user = "From these " . count($rows) . " collated headlines (id: headline), choose the TOP {$topN} for this publication's readers. "
+          . "Return JSON {\"top\":[{\"id\":<id>,\"reason\":\"<max 12 words why>\"}]}, best first, exactly {$topN} items.\n\n" . $lines;
+    $decoded = null;
+    try {
+        $text = scraper_ai_raw($ai['provider'], $ai['model'], $system, $user, 1500, $ai['provider'] === 'openai');
+        $decoded = scraper_ai_decode_json($text);
+    } catch (Throwable $e) { $decoded = null; }
+
+    $items = [];
+    if ($decoded && !empty($decoded['top']) && is_array($decoded['top'])) {
+        foreach ($decoded['top'] as $t) {
+            $id = (int)($t['id'] ?? 0);
+            if (isset($byId[$id])) {
+                $items[] = ['id' => $id, 'title' => $byId[$id]['t'], 'summary' => $byId[$id]['s'], 'reason' => mb_substr((string)($t['reason'] ?? ''), 0, 120)];
+                unset($byId[$id]);
+            }
+        }
+    }
+    if (!$items) { // fallback to recency if the model failed
+        foreach (array_slice($rows, 0, $topN) as $r) $items[] = ['id' => (int)$r['id'], 'title' => $r['t'], 'summary' => $r['s'], 'reason' => ''];
+    }
+    return ['items' => array_slice($items, 0, $topN)];
+}
+
+/** Rebuild a publication's cached front page by calling its cache_index.php. */
+function scraper_trigger_publication_cache(string $pubKey): void {
+    try {
+        $a = getDBConnection_TENAdmin();
+        $st = $a->prepare("SELECT url FROM publications WHERE publication=? AND pub_live=1 LIMIT 1");
+        $st->bind_param('s', $pubKey); $st->execute();
+        $row = $st->get_result()->fetch_assoc(); $st->close(); $a->close();
+        if ($row && !empty($row['url'])) {
+            $ch = curl_init(rtrim($row['url'], '/') . '/cache_index.php');
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30, CURLOPT_SSL_VERIFYPEER => false]);
+            curl_exec($ch); curl_close($ch);
+        }
+    } catch (Throwable $e) { /* best effort */ }
+}
+
 /**
  * Return up to $limit new items for a section, each with translated title/summary
  * (translated once into the publication's language and cached on the row).
@@ -209,7 +294,7 @@ function scraper_history(int $pubSectionId, int $days = 30): array {
  * admin_ten.articles (draft, or published if the section auto-publishes).
  * @return array list of per-item results
  */
-function scraper_promote_items(int $pubSectionId, array $itemIds): array {
+function scraper_promote_items(int $pubSectionId, array $itemIds, ?bool $forcePublish = null): array {
     $section = scraper_get_section($pubSectionId);
     if (!$section) return [['ok' => false, 'error' => 'Section not found']];
 
@@ -219,7 +304,9 @@ function scraper_promote_items(int $pubSectionId, array $itemIds): array {
     $journalistId = ($section['journalist_id'] !== null && $section['journalist_id'] !== '')
         ? (int)$section['journalist_id']
         : $inhouseId;
-    $autoPublish = (int)($section['auto_publish'] ?? 0) === 1;
+    // $forcePublish overrides the section's auto_publish (used by Curate's
+    // "publish direct" bulk action, which publishes straight away).
+    $autoPublish = $forcePublish !== null ? $forcePublish : ((int)($section['auto_publish'] ?? 0) === 1);
 
     $conn = getDBConnection();
     $results = [];
@@ -334,8 +421,8 @@ function scraper_insert_article(array $section, array $article, array $item, ?in
         "INSERT INTO articles
          (title, meta_title, meta_description, meta_keywords, article_text, state, section,
           submission_date, created_by, modified_date, publish_now, journalist_id,
-          publications, canonical, news_scrape_url, news_scrape_url_hash)
-         VALUES (?,?,?,?,?,?,?, NOW(), ?, NOW(), 1, ?, ?, ?, ?, ?)"
+          publications, canonical, news_scrape_url, news_scrape_url_hash, imageless)
+         VALUES (?,?,?,?,?,?,?, NOW(), ?, NOW(), 1, ?, ?, ?, ?, ?, 1)"
     );
     $title = $article['title'];
     $mt = substr($article['meta_title'], 0, 200);

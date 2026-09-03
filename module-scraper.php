@@ -114,6 +114,7 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
                     <?php if ($active['type'] === 'news_collation'): ?>
                         <div class="sc-subtabs">
                             <button class="sc-subtab active" data-view="review"><i class="fas fa-list-check"></i> Review &amp; Promote</button>
+                            <button class="sc-subtab" data-view="curate"><i class="fas fa-star"></i> Curate</button>
                             <button class="sc-subtab" data-view="history"><i class="fas fa-clock-rotate-left"></i> History</button>
                             <?php if ($canManage): ?><button class="sc-subtab" data-view="configure"><i class="fas fa-sliders"></i> Configure</button><?php endif; ?>
                         </div>
@@ -128,6 +129,14 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
                             </div>
                             <div id="scPromoteLog"></div>
                             <div id="scReviewList"><p class="scraper-placeholder">Choose a section to review its collated articles.</p></div>
+                        </div>
+
+                        <div id="scViewCurate" style="display:none;">
+                            <div class="sc-toolbar" style="align-items:center;">
+                                <span class="scraper-placeholder">Top AI-ranked, region-relevant stories per publication (count set by each section's daily limit in Configure). Select and publish straight to the live front page.</span>
+                            </div>
+                            <div id="scCuratePubTabs" class="sc-subtabs" style="margin:6px 0 12px;flex-wrap:wrap;"></div>
+                            <div id="scCurateBody"><p class="scraper-placeholder">Loading publications…</p></div>
                         </div>
 
                         <div id="scViewHistory" data-project-id="<?php echo (int)$active['id']; ?>" style="display:none;">
@@ -159,6 +168,7 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
                         <div id="scModal" class="sc-modal" style="display:none;"><div id="scModalBody"></div></div>
 
                         <script src="js/scraper_review.js?v=<?php echo @filemtime(__DIR__ . '/js/scraper_review.js'); ?>"></script>
+                        <script src="js/scraper_curate.js?v=<?php echo @filemtime(__DIR__ . '/js/scraper_curate.js'); ?>"></script>
                         <?php if ($canManage): ?><script src="js/scraper_config.js?v=<?php echo @filemtime(__DIR__ . '/js/scraper_config.js'); ?>"></script><?php endif; ?>
                         <script>
                         (function () {
@@ -173,6 +183,9 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
                                     if (hist) hist.style.display = (v === 'history') ? 'block' : 'none';
                                     var cfg = document.getElementById('scViewConfigure');
                                     if (cfg) cfg.style.display = (v === 'configure') ? 'block' : 'none';
+                                    var cur = document.getElementById('scViewCurate');
+                                    if (cur) cur.style.display = (v === 'curate') ? 'block' : 'none';
+                                    if (v === 'curate' && typeof window.scCurateInit === 'function') window.scCurateInit();
                                 });
                             });
                         })();

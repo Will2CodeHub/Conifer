@@ -71,6 +71,27 @@ try {
             echo json_encode(['success' => true, 'results' => $results]);
             break;
 
+        case 'curate_pubs':
+            echo json_encode(['success' => true, 'publications' => scraper_curate_publications()]);
+            break;
+
+        case 'curate_suggest':
+            $pubSectionId = (int)($_POST['pub_section_id'] ?? $_GET['pub_section_id'] ?? 0);
+            $topN = (int)($_POST['top_n'] ?? $_GET['top_n'] ?? 10);
+            $res = scraper_curate_rank($pubSectionId, $topN);
+            echo json_encode(['success' => true, 'items' => $res['items']]);
+            break;
+
+        case 'curate_publish':
+            $pubSectionId = (int)($_POST['pub_section_id'] ?? 0);
+            $ids = $_POST['ids'] ?? [];
+            if (is_string($ids)) $ids = array_filter(array_map('trim', explode(',', $ids)), 'strlen');
+            $results = scraper_promote_items($pubSectionId, $ids, true); // force -> published
+            $section = scraper_get_section($pubSectionId);
+            if ($section) scraper_trigger_publication_cache($section['publication_key']);
+            echo json_encode(['success' => true, 'results' => $results]);
+            break;
+
         default:
             echo json_encode(['success' => false, 'message' => "Unknown action: $action"]);
     }
