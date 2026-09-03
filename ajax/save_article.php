@@ -62,6 +62,9 @@ $sectionSubcat = isset($_POST['section_subcat']) ? trim($_POST['section_subcat']
 $author = isset($_POST['author']) ? intval($_POST['author']) : 0;
 $publications = isset($_POST['publications']) ? trim($_POST['publications']) : '';
 $canonical = isset($_POST['canonical']) ? trim($_POST['canonical']) : '';
+$metaTitle = isset($_POST['meta_title']) ? trim($_POST['meta_title']) : '';
+$metaDescription = isset($_POST['meta_description']) ? trim($_POST['meta_description']) : '';
+$metaKeywords = isset($_POST['meta_keywords']) ? trim($_POST['meta_keywords']) : '';
 $evergreen = isset($_POST['evergreen']) ? intval($_POST['evergreen']) : 0;
 $featured = isset($_POST['featured']) ? intval($_POST['featured']) : 0;
 $sponsored = isset($_POST['sponsored']) ? intval($_POST['sponsored']) : 0;
@@ -185,6 +188,9 @@ try {
             journalist_id = ?,
             publications = ?,
             canonical = ?,
+            meta_title = ?,
+            meta_description = ?,
+            meta_keywords = ?,
             evergreen = ?,
             featured = ?,
             sponsored = ?,
@@ -195,9 +201,9 @@ try {
             publish_to = ?,
             state = ?
             WHERE id = ?";
-        
+
         $stmt = $conn->prepare($query);
-        $stmt->bind_param('ssssssissiiiisssssi',
+        $stmt->bind_param('ssssssisssssiiiisssssi',
             $title,
             $articleText,
             $alias,
@@ -207,6 +213,9 @@ try {
             $author,
             $publications,
             $canonical,
+            $metaTitle,
+            $metaDescription,
+            $metaKeywords,
             $evergreen,
             $featured,
             $sponsored,
