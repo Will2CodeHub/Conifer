@@ -203,6 +203,19 @@ function scraper_ai_write_article(string $provider, string $model, string $promp
     // Space paragraphs (a blank line between them) wherever the article renders —
     // the editor and each publication's article page. Only add to bare <p>.
     $body = preg_replace('/<p(?![^>]*style=)(\s[^>]*)?>/i', '<p style="margin:0 0 1em;"$1>', $body);
+    // News articles from facts carry NO inline hyperlinks; the source is credited
+    // on its own line at the foot of the article, not woven into the prose. Unwrap
+    // any links the model added (keep the visible text).
+    $body = preg_replace('#<a\b[^>]*>(.*?)</a>#is', '$1', $body);
+    // Append the source reference as its own line at the very bottom.
+    $srcUrl = trim((string)($vars['source_url'] ?? ''));
+    if ($srcUrl !== '') {
+        $host = parse_url($srcUrl, PHP_URL_HOST);
+        $host = $host ? preg_replace('#^www\.#i', '', $host) : 'original report';
+        $body .= '<p class="article-source" style="margin:1.6em 0 0;font-size:0.9em;color:#555;">Source: <a href="'
+            . htmlspecialchars($srcUrl, ENT_QUOTES) . '" target="_blank" rel="nofollow noopener">'
+            . htmlspecialchars($host, ENT_QUOTES) . '</a></p>';
+    }
     return [
         'title' => (string)($decoded['title'] ?? ''),
         'body_html' => $body,

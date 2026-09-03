@@ -241,6 +241,14 @@ try {
                 $u2->close();
             }
 
+            // Flag the article imageless (1) when its body has no <img>, else 0 —
+            // this drives the site's imageless article sections.
+            $imageless = preg_match('#<img[^>]+src=#i', $articleText) ? 0 : 1;
+            $iu = $conn->prepare("UPDATE articles SET imageless = ? WHERE id = ?");
+            $iu->bind_param('ii', $imageless, $articleId);
+            $iu->execute();
+            $iu->close();
+
             $conn->close();
 
             echo json_encode([
