@@ -58,6 +58,9 @@ def ingest_section(repo, pub_section_id: int):
                     )
 
         fetcher = RequestsFetcher()
+        # NOTE: facts are NOT extracted here — fetching every article page at
+        # ingest is far too slow across many sections/feeds. Facts are pulled at
+        # PROMOTE time instead, only for the items actually being published.
         result = run_ingest(
             pub_section_id=pub_section_id,
             feeds=feeds,
@@ -66,7 +69,6 @@ def ingest_section(repo, pub_section_id: int):
             user_agent=user_agent,
             robots_fetcher=fetcher.fetch_robots,
             html_lister=extract_article_links,
-            facts_builder=_make_facts_builder(fetcher, user_agent),
         )
         log = (
             f"found={result.items_found} new={result.items_new} "

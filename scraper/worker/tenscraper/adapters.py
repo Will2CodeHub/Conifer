@@ -203,8 +203,11 @@ class PyMySQLRepo:
     def insert_item(self, pub_section_id, feed_id, item: RawItem, source_url_hash, cluster_id, facts: str = "") -> int:
         published = item.published_at.strftime("%Y-%m-%d %H:%M:%S") if item.published_at else None
         with self._ten.cursor() as cur:
+            # INSERT IGNORE: a duplicate (pub_section_id, source_url_hash) — the
+            # same story arriving via two feeds in one section — is skipped rather
+            # than raising and aborting the whole section's ingest.
             cur.execute(
-                "INSERT INTO ten_scraper_items "
+                "INSERT IGNORE INTO ten_scraper_items "
                 "(feed_id, pub_section_id, source_url, source_url_hash, title, summary, facts, "
                 " published_at, cluster_id, status) "
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'new')",
