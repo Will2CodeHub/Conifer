@@ -7,10 +7,31 @@ Depends on adapter I/O, so it is exercised server-side, not in unit tests.
 from __future__ import annotations
 
 from .adapters import RequestsFetcher, country_ip_checker, subprocess_runner
+from .html_fallback import extract_facts
 from .html_listing import extract_article_links
 from .ingest import run_ingest
-from .politeness import build_user_agent
+from .politeness import RateLimiter, build_user_agent
 from .vpn import VpnController, VpnError
+
+
+def _make_facts_builder(fetcher, user_agent, rate_seconds: float = 1.5, max_chars: int = 5000):
+    """Return a facts_builder(item) that fetches the article page and returns a
+    condensed facts blob (summary + key paragraphs) for the AI writer. Politeness:
+    a small per-domain delay between article-page fetches."""
+    limiter = RateLimiter(rate_seconds)
+
+    def _build(item) -> str:
+        limiter.wait(item.source_url)
+        html = fetcher.fetch(item.source_url, user_agent)
+        facts = extract_facts(html, item.source_url)
+        parts = []
+        if facts.summary:
+            parts.append(facts.summary)
+        parts.extend(facts.key_points)
+        blob = "\n\n".join(p for p in parts if p).strip()
+        return blob[:max_chars]
+
+    return _build
 
 
 def ingest_section(repo, pub_section_id: int):
@@ -45,6 +66,7 @@ def ingest_section(repo, pub_section_id: int):
             user_agent=user_agent,
             robots_fetcher=fetcher.fetch_robots,
             html_lister=extract_article_links,
+            facts_builder=_make_facts_builder(fetcher, user_agent),
         )
         log = (
             f"found={result.items_found} new={result.items_new} "
