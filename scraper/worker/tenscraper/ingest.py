@@ -21,6 +21,8 @@ Fetcher = Callable[[str, str], str]
 RobotsFetcher = Callable[[str, str], str]
 # html_lister(content, base_url, category) -> list[RawItem]   (Phase 3b; optional)
 HtmlLister = Callable[[str, str, Optional[str]], List[RawItem]]
+# facts_builder(item) -> condensed facts text for the AI writer (optional)
+FactsBuilder = Callable[["RawItem"], str]
 
 
 @dataclass
@@ -53,6 +55,7 @@ def run_ingest(
     robots_fetcher: Optional[RobotsFetcher] = None,
     rate_limiter: Optional[RateLimiter] = None,
     html_lister: Optional[HtmlLister] = None,
+    facts_builder: Optional[FactsBuilder] = None,
     default_rate_seconds: float = 2.0,
 ) -> IngestResult:
     """Fetch each feed, parse, dedup, and insert new items. Returns a summary."""
@@ -109,7 +112,16 @@ def run_ingest(
             if h in seen:
                 result.skipped_dupe += 1
                 continue
-            repo.insert_item(pub_section_id, feed.feed_id, item, h, cluster_key(item.title))
+            # Fetch the article page and extract condensed facts so the AI writer
+            # has real material (not just the short feed summary). Best-effort:
+            # a failure here must not lose the item — it is stored with empty facts.
+            facts = ""
+            if facts_builder is not None:
+                try:
+                    facts = facts_builder(item)
+                except Exception as exc:  # noqa: BLE001 - keep ingesting
+                    result.errors.append(f"facts extract failed for {item.source_url}: {exc}")
+            repo.insert_item(pub_section_id, feed.feed_id, item, h, cluster_key(item.title), facts)
             seen.add(h)
             result.items_new += 1
 

@@ -28,6 +28,7 @@ class ScraperRepo(Protocol):
         item: RawItem,
         source_url_hash: str,
         cluster_id: str,
+        facts: str = "",
     ) -> int:
         """Persist a new item; return its id."""
         ...
@@ -59,6 +60,7 @@ class InMemoryRepo:
         item: RawItem,
         source_url_hash: str,
         cluster_id: str,
+        facts: str = "",
     ) -> int:
         row = {
             "id": self._next_id,
@@ -68,6 +70,7 @@ class InMemoryRepo:
             "source_url_hash": source_url_hash,
             "title": item.title,
             "summary": item.summary,
+            "facts": facts,
             "cluster_id": cluster_id,
             "source_category_label": item.source_category_label,
         }

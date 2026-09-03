@@ -200,16 +200,16 @@ class PyMySQLRepo:
             )
             return {r[0] for r in cur.fetchall()}
 
-    def insert_item(self, pub_section_id, feed_id, item: RawItem, source_url_hash, cluster_id) -> int:
+    def insert_item(self, pub_section_id, feed_id, item: RawItem, source_url_hash, cluster_id, facts: str = "") -> int:
         published = item.published_at.strftime("%Y-%m-%d %H:%M:%S") if item.published_at else None
         with self._ten.cursor() as cur:
             cur.execute(
                 "INSERT INTO ten_scraper_items "
-                "(feed_id, pub_section_id, source_url, source_url_hash, title, summary, "
+                "(feed_id, pub_section_id, source_url, source_url_hash, title, summary, facts, "
                 " published_at, cluster_id, status) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'new')",
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'new')",
                 (feed_id, pub_section_id, item.source_url, source_url_hash,
-                 item.title, item.summary, published, cluster_id),
+                 item.title, item.summary, facts, published, cluster_id),
             )
             item_id = cur.lastrowid
         self._ten.commit()
