@@ -1227,6 +1227,9 @@ $pageTitle = 'Article Management';
         <div style="padding:14px 24px;border-top:1px solid #e2e8f0;background:#f8fafc;flex-shrink:0;display:flex;justify-content:space-between;align-items:center;">
             <div style="font-size:12px;color:#94a3b8;">Changes are saved to the database immediately when you click Save.</div>
             <div style="display:flex;gap:8px;">
+                <button id="deleteArticleBtn" title="Move this article to the Deleted state (kept in the database)" style="background:#fff;border:1px solid #fecaca;color:#dc2626;padding:9px 18px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;">
+                    <i class="fas fa-trash"></i> Delete
+                </button>
                 <button id="cancelBtn" style="background:#fff;border:1px solid #e2e8f0;color:#64748b;padding:9px 18px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;transition:all 0.15s;">
                     <i class="fas fa-times"></i> Cancel
                 </button>
@@ -1982,7 +1985,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                                 
                                 imgElement.addEventListener("click", () => {
                                     const editor = $('.editor');
-                                    const imgHtml = `<img src="${image.largeImageURL}" alt="${image.tags}" style="float:left;margin:0 15px 10px 0;max-width:50%;height:auto;" class="editor-image editor-img-wrapped">`;
+                                    const imgHtml = `<img src="${image.largeImageURL}" alt="">`;
                                     insertHTMLAtCursor(imgHtml, editor);
                                     $('.overlay, #modal_pixabay').fadeOut();
                                 });
@@ -2851,6 +2854,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
     const saveDraftBtn = document.getElementById('saveDraftBtn');
     const submitReviewBtn = document.getElementById('submitReviewBtn');
     const publishBtn = document.getElementById('publishBtn');
+    const deleteArticleBtn = document.getElementById('deleteArticleBtn');
     const fullscreenBtn = document.getElementById('modal_fullscreen_toggle');
 
     // Inputs & containers
@@ -3371,20 +3375,9 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                 originalArticleText.innerHTML = articleContent;
             }
 
-            // Re-apply float wrap styles to all images in editor (for display only, not saved)
-            const editorForWrap = originalEditor
-                ? (originalEditor.querySelector('.editor[contenteditable="true"]') || originalEditor.querySelector('#article_text'))
-                : document.querySelector('#article_text');
-            if (editorForWrap) {
-                editorForWrap.querySelectorAll('img').forEach(function(img) {
-                    if (!img.classList.contains('editor-img-wrapped')) {
-                        img.classList.add('editor-img-wrapped');
-                        img.style.float = 'left';
-                        img.style.margin = '0 15px 10px 0';
-                        img.style.maxWidth = '50%';
-                    }
-                });
-            }
+            // NOTE: previously this re-applied float + max-width:50% inline to every
+            // image on load, which was then saved and shrank the front-page headline.
+            // Images are now kept clean; the site's per-placement CSS sizes them.
 
             save_status.style.color = '#666';
             save_status.textContent = 'Ready to edit';
@@ -3453,6 +3446,50 @@ document.getElementById('modal_publish_now').addEventListener('change', function
         }
 
         return true;
+    }
+
+    // Soft-delete: set the article's state to 'deleted' (row is kept in the DB).
+    function deleteArticle() {
+        if (!activeArticleId) return;
+        const doDelete = function () {
+            if (deleteArticleBtn) { deleteArticleBtn.disabled = true; deleteArticleBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...'; }
+            save_status.style.color = '#666';
+            save_status.textContent = 'Deleting article...';
+            const fd = new FormData();
+            fd.append('id', activeArticleId);
+            fetch('/management/ajax/delete_article.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+                .then(r => r.json())
+                .then(resp => {
+                    if (deleteArticleBtn) { deleteArticleBtn.disabled = false; deleteArticleBtn.innerHTML = '<i class="fas fa-trash"></i> Delete'; }
+                    if (resp && resp.status === 'success') {
+                        save_status.style.color = '#28a745';
+                        save_status.textContent = 'Article deleted.';
+                        Swal.fire({ icon: 'success', title: 'Deleted', text: resp.message || 'Article moved to Deleted.', showConfirmButton: false, timer: 1500, customClass: { container: 'swal-high-z' } });
+                        if (typeof loadArticles === 'function') loadArticles();
+                        setTimeout(function () { hideModal(); }, 1600);
+                    } else {
+                        save_status.style.color = '#dc3545';
+                        save_status.textContent = (resp && resp.message) ? resp.message : 'Failed to delete.';
+                        Swal.fire({ icon: 'error', title: 'Error', text: (resp && resp.message) ? resp.message : 'Failed to delete article', customClass: { container: 'swal-high-z' } });
+                    }
+                })
+                .catch(err => {
+                    if (deleteArticleBtn) { deleteArticleBtn.disabled = false; deleteArticleBtn.innerHTML = '<i class="fas fa-trash"></i> Delete'; }
+                    save_status.style.color = '#dc3545';
+                    save_status.textContent = 'Failed to delete.';
+                    Swal.fire({ icon: 'error', title: 'Error', text: err.message, customClass: { container: 'swal-high-z' } });
+                });
+        };
+        Swal.fire({
+            icon: 'warning',
+            title: 'Delete this article?',
+            text: 'It will be moved to the Deleted state and hidden from the site, but kept in the database.',
+            showCancelButton: true,
+            confirmButtonText: 'Yes, delete',
+            confirmButtonColor: '#dc2626',
+            cancelButtonText: 'Cancel',
+            customClass: { container: 'swal-high-z' }
+        }).then(function (res) { if (res.isConfirmed) doDelete(); });
     }
 
     // Generic save handler
@@ -3645,6 +3682,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
     saveDraftBtn.addEventListener('click', function () { saveArticle('save'); });
     submitReviewBtn.addEventListener('click', function () { saveArticle('submit'); });
     publishBtn.addEventListener('click', function () { saveArticle('publish'); });
+    if (deleteArticleBtn) deleteArticleBtn.addEventListener('click', deleteArticle);
 
     // Close handlers
     closeBtn.addEventListener('click', hideModal);

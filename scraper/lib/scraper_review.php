@@ -179,9 +179,10 @@ function scraper_promote_items(int $pubSectionId, array $itemIds): array {
 
     $ai = scraper_effective_ai($section);
     $lang = ns_publication_language($section['publication_key']);
+    list($inhouseId, $inhouseName) = scraper_inhouse_author($section['publication_key']);
     $journalistId = ($section['journalist_id'] !== null && $section['journalist_id'] !== '')
         ? (int)$section['journalist_id']
-        : scraper_default_journalist_id();
+        : $inhouseId;
     $autoPublish = (int)($section['auto_publish'] ?? 0) === 1;
 
     $conn = getDBConnection();
@@ -210,7 +211,7 @@ function scraper_promote_items(int $pubSectionId, array $itemIds): array {
                 'target_language' => $lang,
             ]);
 
-            $articleId = scraper_insert_article($section, $article, $item, $journalistId, $autoPublish);
+            $articleId = scraper_insert_article($section, $article, $item, $journalistId, $autoPublish, $inhouseName);
             scraper_record_draft($conn, $itemId, $article, $ai, $journalistId, $articleId);
 
             // Best-effort royalty-free image suggestions for the editor sidebar.
@@ -239,13 +240,29 @@ function scraper_promote_items(int $pubSectionId, array $itemIds): array {
     return $results;
 }
 
-/** Default byline journalist for scraped articles (the generic "TEN News" account). */
+/**
+ * The in-house "house" author for scraped articles, per publication, as
+ * [journalist_id, display_name]. These ids are OLD admin_ten.users ids that the
+ * public site's get_author_byline() already renders as the in-house line
+ * ("Article collated/edited/curated, or written in-house, by The Munich Eye")
+ * — currently 112 and 186 for TME. journalist_id on articles resolves against
+ * that table on the site, so the default byline must use one of those ids (NOT
+ * a low ten_users id like ten_news=9, which the site reads as a real person's
+ * row — e.g. id 9 = Karl Gruber). A mirror ten_users row with the SAME id lets
+ * the editor's author dropdown show/select the house account too.
+ */
+function scraper_inhouse_author(string $publicationKey): array {
+    $key = strtolower(trim($publicationKey));
+    $map = [
+        'tme' => [112, 'TME News'],
+    ];
+    return $map[$key] ?? [112, 'TME News'];
+}
+
+/** Default byline journalist for scraped articles (kept for back-compat). */
 function scraper_default_journalist_id(): ?int {
-    $conn = getDBConnection();
-    $res = $conn->query("SELECT id FROM ten_users WHERE username='ten_news' AND status='active' LIMIT 1");
-    $row = $res ? $res->fetch_assoc() : null;
-    $conn->close();
-    return $row ? (int)$row['id'] : null;
+    list($id, ) = scraper_inhouse_author('');
+    return $id;
 }
 
 /** URL slug from a title: lowercase, non-alphanumerics to hyphens. */
@@ -260,7 +277,7 @@ function scraper_slugify(string $text): string {
 }
 
 /** Insert the generated article into admin_ten.articles. Returns new article id. */
-function scraper_insert_article(array $section, array $article, array $item, ?int $journalistId, bool $autoPublish): int {
+function scraper_insert_article(array $section, array $article, array $item, ?int $journalistId, bool $autoPublish, string $createdBy = 'TME News'): int {
     $conn = getDBConnection_TENAdmin();
     $state = $autoPublish ? 'published' : 'draft';
     $pub = $section['publication_key'];
@@ -270,7 +287,7 @@ function scraper_insert_article(array $section, array $article, array $item, ?in
          (title, meta_title, meta_description, meta_keywords, article_text, state, section,
           submission_date, created_by, modified_date, publish_now, journalist_id,
           publications, canonical, news_scrape_url, news_scrape_url_hash)
-         VALUES (?,?,?,?,?,?,?, NOW(), 'scraper', NOW(), 1, ?, ?, ?, ?, ?)"
+         VALUES (?,?,?,?,?,?,?, NOW(), ?, NOW(), 1, ?, ?, ?, ?, ?)"
     );
     $title = $article['title'];
     $mt = substr($article['meta_title'], 0, 200);
@@ -281,12 +298,13 @@ function scraper_insert_article(array $section, array $article, array $item, ?in
     $srcHash = $item['source_url_hash'];
     $canonical = substr($pub, 0, 10);
     $jid = $journalistId;
+    $cb = substr($createdBy, 0, 100);
 
-    // 7 strings, journalist_id (i), then 4 strings = 12 params
+    // 8 strings, journalist_id (i), then 4 strings = 13 params
     $stmt->bind_param(
-        'sssssssissss',
+        'ssssssssissss',
         $title, $mt, $md, $mk, $body, $state, $sectionName,
-        $jid, $pub, $canonical, $srcUrl, $srcHash
+        $cb, $jid, $pub, $canonical, $srcUrl, $srcHash
     );
     $stmt->execute();
     $id = $stmt->insert_id;
