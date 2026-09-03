@@ -207,6 +207,14 @@ function scraper_ai_write_article(string $provider, string $model, string $promp
     // on its own line at the foot of the article, not woven into the prose. Unwrap
     // any links the model added (keep the visible text).
     $body = preg_replace('#<a\b[^>]*>(.*?)</a>#is', '$1', $body);
+    // Em/en dashes are a strong AI tell — remove them everywhere. Between digits
+    // they become a hyphen (ranges); in prose a comma.
+    $dedash = function ($s) {
+        $s = preg_replace('/(\d)\s*[\x{2014}\x{2013}]\s*(\d)/u', '$1-$2', (string)$s);
+        $s = preg_replace('/\s*[\x{2014}\x{2013}]\s*/u', ', ', $s);
+        return preg_replace('/,\s*,/', ',', $s);
+    };
+    $body = $dedash($body);
     // Append the source reference as its own line at the very bottom.
     $srcUrl = trim((string)($vars['source_url'] ?? ''));
     if ($srcUrl !== '') {
@@ -217,10 +225,10 @@ function scraper_ai_write_article(string $provider, string $model, string $promp
             . htmlspecialchars($host, ENT_QUOTES) . '</a></p>';
     }
     return [
-        'title' => (string)($decoded['title'] ?? ''),
+        'title' => $dedash((string)($decoded['title'] ?? '')),
         'body_html' => $body,
-        'meta_title' => (string)($decoded['meta_title'] ?? ''),
-        'meta_description' => (string)($decoded['meta_description'] ?? ''),
+        'meta_title' => $dedash((string)($decoded['meta_title'] ?? '')),
+        'meta_description' => $dedash((string)($decoded['meta_description'] ?? '')),
         'meta_keywords' => (string)($decoded['meta_keywords'] ?? ''),
     ];
 }
