@@ -19,6 +19,42 @@ function scraper_effective_ai(array $section): array {
 }
 
 /**
+ * Fetch an article page at promote time and extract condensed facts (the main
+ * paragraphs) for the AI writer. Best-effort: returns '' on any failure. Done
+ * here (not at ingest) so only the items actually being published are fetched.
+ */
+function scraper_fetch_facts(string $url, int $maxChars = 5000): string {
+    $url = trim($url);
+    if ($url === '') return '';
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 15,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_USERAGENT => 'Mozilla/5.0 (compatible; TENScraper/1.0; +https://theeyenewspapers.com)',
+    ]);
+    $html = curl_exec($ch);
+    curl_close($ch);
+    if (!is_string($html) || $html === '') return '';
+    // Drop non-content blocks, then pull the substantive paragraphs.
+    $html = preg_replace('#<(script|style|noscript|nav|header|footer|aside|form)\b[^>]*>.*?</\1>#is', ' ', $html);
+    $facts = '';
+    if (preg_match_all('#<p\b[^>]*>(.*?)</p>#is', $html, $mm)) {
+        $paras = [];
+        foreach ($mm[1] as $p) {
+            $t = trim(preg_replace('/\s+/', ' ', strip_tags($p)));
+            if (mb_strlen($t) > 40) $paras[] = $t;   // real sentences, not menu items
+        }
+        $facts = implode("\n\n", array_slice($paras, 0, 8));
+    }
+    if ($facts === '') {
+        $facts = trim(preg_replace('/\s+/', ' ', strip_tags($html)));
+    }
+    return mb_substr($facts, 0, $maxChars);
+}
+
+/**
  * Return up to $limit new items for a section, each with translated title/summary
  * (translated once into the publication's language and cached on the row).
  */
@@ -201,10 +237,16 @@ function scraper_promote_items(int $pubSectionId, array $itemIds): array {
         }
 
         try {
+            // Facts are fetched at promote time (not ingest), only for the items
+            // actually being published. Fall back to the stored facts if present.
+            $facts = trim((string)$item['facts']);
+            if ($facts === '') {
+                $facts = scraper_fetch_facts((string)$item['source_url']);
+            }
             $article = scraper_ai_write_article($ai['provider'], $ai['model'], $ai['prompt'], [
                 'source_title' => $item['title'],
                 'source_summary' => $item['summary'],
-                'source_facts' => $item['facts'],
+                'source_facts' => $facts,
                 'source_url' => $item['source_url'],
                 'section' => $section['ten_section'],
                 'publication' => $section['publication_key'],
