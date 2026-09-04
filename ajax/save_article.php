@@ -268,10 +268,60 @@ try {
             throw new Exception('Failed to update article: ' . $stmt->error);
         }
     } else {
-        // INSERT NEW (if needed in future)
-        echo json_encode(['status' => 'error', 'message' => 'Article ID required for updates']);
-        $conn->close();
-        exit;
+        // INSERT NEW (create). Inserts the same fields the editor modal edits, so a
+        // created article is immediately fully editable through that same modal.
+        $createdBy = '';
+        try {
+            $cn = getDBConnection();
+            $cs = $cn->prepare("SELECT full_name FROM ten_users WHERE id = ?");
+            $cs->bind_param('i', $author); $cs->execute();
+            $cr = $cs->get_result()->fetch_assoc(); $cs->close(); $cn->close();
+            $createdBy = $cr['full_name'] ?? '';
+        } catch (Throwable $e) { $createdBy = ''; }
+        if ($createdBy === '') { $createdBy = $_SESSION['ten_full_name'] ?? ($_SESSION['ten_username'] ?? ''); }
+
+        $insert = "INSERT INTO articles
+            (title, article_text, alias, tags, section, section_subcat, journalist_id, publications, canonical,
+             meta_title, meta_description, meta_keywords, evergreen, featured, sponsored, frontpage_temp, note,
+             publish_now, publish_from, publish_to, state, created_by, submission_date, modified_date)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, NOW(), NOW())";
+        $stmt = $conn->prepare($insert);
+        $stmt->bind_param('ssssssisssssiiiisissss',
+            $title, $articleText, $alias, $tags, $section, $sectionSubcat, $author, $publications, $canonical,
+            $metaTitle, $metaDescription, $metaKeywords, $evergreen, $featured, $sponsored, $headline, $note,
+            $publishNow, $publishFrom, $publishTo, $state, $createdBy
+        );
+        if ($stmt->execute()) {
+            $newId = $stmt->insert_id;
+            $stmt->close();
+
+            // Featured image (filename only) from the first body image, if any.
+            if (preg_match('#<img[^>]+src=[\'"]([^\'"]+)[\'"]#i', $articleText, $mm)) {
+                $mainImage = basename($mm[1]);
+                $u2 = $conn->prepare("UPDATE articles SET image_url = ? WHERE id = ? AND (image_url IS NULL OR image_url = '')");
+                $u2->bind_param('si', $mainImage, $newId); $u2->execute(); $u2->close();
+            }
+            // Imageless flag drives the site's imageless sections.
+            $imageless = preg_match('#<img[^>]+src=#i', $articleText) ? 0 : 1;
+            $iu = $conn->prepare("UPDATE articles SET imageless = ? WHERE id = ?");
+            $iu->bind_param('ii', $imageless, $newId); $iu->execute(); $iu->close();
+
+            $conn->close();
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Article created successfully',
+                'article_id' => $newId,
+                'state' => $state
+            ]);
+
+            if ($state === 'published') {
+                if (function_exists('fastcgi_finish_request')) { @fastcgi_finish_request(); }
+                ten_regenerate_publication_caches($publications);
+            }
+        } else {
+            throw new Exception('Failed to create article: ' . $stmt->error);
+        }
     }
     
 } catch (Exception $e) {
