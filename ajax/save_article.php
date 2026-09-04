@@ -6,8 +6,8 @@ require_once '../config_ten_admin.php';
 header('Content-Type: application/json');
 
 /**
- * After an article is published, rebuild the cached front page (index.php) of
- * each publication it appears on by calling that site's cache_index.php.
+ * After an article is published, rebuild the front page (index.php) of
+ * each publication it appears on by calling that site's generate_index_page.php.
  * Best-effort: a cache failure must never affect the save.
  */
 function ten_regenerate_publication_caches($publicationsCsv) {
@@ -23,7 +23,7 @@ function ten_regenerate_publication_caches($publicationsCsv) {
         $urls = [];
         while ($row = $res->fetch_assoc()) {
             $u = rtrim((string)$row['url'], '/');
-            if ($u !== '') $urls[] = $u . '/cache_index.php';
+            if ($u !== '') $urls[] = $u . '/generate_index_page.php';
         }
         $stmt->close();
         $conn->close();

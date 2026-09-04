@@ -71,25 +71,66 @@ try {
             echo json_encode(['success' => true, 'results' => $results]);
             break;
 
+        case 'history_query':
+            $f = [
+                'project_id'  => (int)($_POST['project_id'] ?? $_GET['project_id'] ?? 0),
+                'publication' => trim($_POST['publication'] ?? ''),
+                'section'     => trim($_POST['section'] ?? ''),
+                'from'        => trim($_POST['from'] ?? ''),
+                'to'          => trim($_POST['to'] ?? ''),
+                'search'      => trim($_POST['search'] ?? ''),
+            ];
+            echo json_encode(['success' => true, 'rows' => scraper_history_query($f), 'filters' => scraper_history_filters($f['project_id'])]);
+            break;
+
         case 'curate_pubs':
-            echo json_encode(['success' => true, 'publications' => scraper_curate_publications()]);
+            $uid = (int)($_SESSION['ten_user_id'] ?? 0);
+            echo json_encode(['success' => true, 'publications' => scraper_curate_publications_ordered($uid)]);
             break;
 
-        case 'curate_suggest':
+        case 'curate_sections':
+            $pub = trim($_POST['publication'] ?? $_GET['publication'] ?? '');
+            echo json_encode(['success' => true, 'sections' => scraper_curate_sections($pub)]);
+            break;
+
+        case 'curate_items':
             $pubSectionId = (int)($_POST['pub_section_id'] ?? $_GET['pub_section_id'] ?? 0);
-            $topN = (int)($_POST['top_n'] ?? $_GET['top_n'] ?? 10);
-            $res = scraper_curate_rank($pubSectionId, $topN);
-            echo json_encode(['success' => true, 'items' => $res['items']]);
+            $mode = ($_POST['mode'] ?? $_GET['mode'] ?? 'all') === 'curated' ? 'curated' : 'all';
+            $date = trim($_POST['date'] ?? $_GET['date'] ?? '');
+            echo json_encode(['success' => true, 'items' => scraper_curate_items($pubSectionId, $mode, $date), 'mode' => $mode]);
             break;
 
-        case 'curate_publish':
+        case 'curate_action':
             $pubSectionId = (int)($_POST['pub_section_id'] ?? 0);
             $ids = $_POST['ids'] ?? [];
             if (is_string($ids)) $ids = array_filter(array_map('trim', explode(',', $ids)), 'strlen');
-            $results = scraper_promote_items($pubSectionId, $ids, true); // force -> published
+            $publish = ($_POST['do'] ?? '') === 'publish';
+            $results = scraper_promote_items($pubSectionId, $ids, $publish);
             $section = scraper_get_section($pubSectionId);
-            if ($section) scraper_trigger_publication_cache($section['publication_key']);
+            if ($publish && $section) scraper_trigger_publication_cache($section['publication_key']);
+            // Attach editor/live links for each newly-created article so the UI can badge + link.
+            $pubKey = $section ? $section['publication_key'] : '';
+            $rows = [];
+            foreach ($results as $r) { if (!empty($r['ok'])) $rows[] = ['article_id' => $r['article_id'], 'publication_key' => $pubKey, 'status' => 'promoted']; }
+            $linked = $rows ? scraper_attach_article_links($rows) : [];
+            $byArt = [];
+            foreach ($linked as $l) { $byArt[(int)$l['article_id']] = $l; }
+            foreach ($results as &$r) {
+                if (!empty($r['ok']) && isset($byArt[(int)$r['article_id']])) {
+                    $l = $byArt[(int)$r['article_id']];
+                    $r['editor_url'] = $l['editor_url']; $r['live_url'] = $l['live_url']; $r['row_state'] = $l['row_state'];
+                }
+            }
+            unset($r);
             echo json_encode(['success' => true, 'results' => $results]);
+            break;
+
+        case 'save_pub_order':
+            $uid = (int)($_SESSION['ten_user_id'] ?? 0);
+            $order = trim($_POST['order'] ?? '');
+            $arr = array_values(array_filter(array_map('trim', explode(',', $order)), 'strlen'));
+            scraper_set_pref($uid, 'curate_pub_order', json_encode($arr));
+            echo json_encode(['success' => true]);
             break;
 
         default:
