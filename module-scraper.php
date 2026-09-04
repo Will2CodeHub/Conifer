@@ -61,9 +61,11 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
         .sc-modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
         .sc-inline { display:flex; gap:12px; }
         .sc-inline > * { flex:1; }
-        .sc-subtabs { display:flex; gap:6px; margin-bottom:16px; }
-        .sc-subtab { padding:8px 14px; border:1px solid #e5e7eb; background:#f9fafb; border-radius:8px; cursor:pointer; font-weight:600; font-size:13px; color:#374151; }
-        .sc-subtab.active { background:#2563eb; color:#fff; border-color:#2563eb; }
+        .sc-subtabs { display:flex; gap:8px; border-bottom:1px solid #e5e7eb; margin-bottom:16px; flex-wrap:wrap; }
+        .sc-subtab { padding:9px 16px; border:1px solid transparent; border-bottom:none; background:transparent; border-radius:8px 8px 0 0; cursor:pointer; font-weight:600; font-size:13px; color:#6b7280; margin-bottom:-1px; }
+        .sc-subtab:hover { color:#111827; background:#f9fafb; }
+        .sc-subtab.active { background:#fff; border-color:#e5e7eb; border-bottom-color:#fff; color:#111827; }
+        .sc-input { padding:7px 9px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; color:#111827; background:#fff; }
         .rv-item { display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border:1px solid #eef2f7; border-radius:8px; margin-bottom:8px; }
         .rv-item.sel { border-color:#2563eb; background:#eff6ff; }
         .rv-item input[type=checkbox] { margin-top:3px; width:16px; height:16px; }
@@ -113,40 +115,38 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
 
                     <?php if ($active['type'] === 'news_collation'): ?>
                         <div class="sc-subtabs">
-                            <button class="sc-subtab active" data-view="review"><i class="fas fa-list-check"></i> Review &amp; Promote</button>
-                            <button class="sc-subtab" data-view="curate"><i class="fas fa-star"></i> Curate</button>
+                            <button class="sc-subtab active" data-view="curate"><i class="fas fa-star"></i> Curate &amp; Promote</button>
                             <button class="sc-subtab" data-view="history"><i class="fas fa-clock-rotate-left"></i> History</button>
                             <?php if ($canManage): ?><button class="sc-subtab" data-view="configure"><i class="fas fa-sliders"></i> Configure</button><?php endif; ?>
                         </div>
 
-                        <div id="scViewReview" data-project-id="<?php echo (int)$active['id']; ?>">
-                            <div class="sc-toolbar" style="align-items:center;">
-                                <label style="font-size:13px;font-weight:600;color:#374151;">Section:
-                                    <select id="scReviewSection" style="margin-left:6px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;"><option value="">Loading…</option></select>
-                                </label>
-                                <span id="scReviewCounter" class="scraper-placeholder"></span>
-                                <button class="sc-btn" id="scPromote" disabled><i class="fas fa-wand-magic-sparkles"></i> Promote selected</button>
+                        <div id="scViewCurate">
+                            <p class="scraper-placeholder" style="margin:0 0 10px;">Pick a publication (drag the tabs to reorder — your order is remembered), choose a section, then work either the full day's feed or the AI-curated pick. Select stories and <strong>Publish</strong> live or <strong>Save as draft</strong>. Everything is pre-translated to English by the scraper, so loads are instant.</p>
+                            <div id="scCuratePubTabs" class="sc-subtabs" style="margin:6px 0 10px;flex-wrap:wrap;"></div>
+                            <div id="scCurateSectionBar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;"></div>
+                            <div id="scCurateModeTabs" class="sc-subtabs" style="margin-bottom:12px;display:none;">
+                                <button class="sc-subtab active" data-mode="curated"><i class="fas fa-wand-magic-sparkles"></i> Curated pick</button>
+                                <button class="sc-subtab" data-mode="all"><i class="fas fa-list"></i> All today</button>
                             </div>
-                            <div id="scPromoteLog"></div>
-                            <div id="scReviewList"><p class="scraper-placeholder">Choose a section to review its collated articles.</p></div>
-                        </div>
-
-                        <div id="scViewCurate" style="display:none;">
-                            <div class="sc-toolbar" style="align-items:center;">
-                                <span class="scraper-placeholder">Top AI-ranked, region-relevant stories per publication (count set by each section's daily limit in Configure). Select and publish straight to the live front page.</span>
+                            <div id="scCurateActionBar" class="sc-toolbar" style="align-items:center;margin-bottom:8px;display:none;">
+                                <label style="font-size:13px;font-weight:600;color:#374151;"><input type="checkbox" id="scCurAll"> Select all</label>
+                                <button class="sc-btn" id="scCurDraft"><i class="fas fa-file-pen"></i> Save as draft</button>
+                                <button class="sc-btn" id="scCurPublish"><i class="fas fa-bolt"></i> Publish live</button>
+                                <span id="scCurStatus" class="scraper-placeholder"></span>
                             </div>
-                            <div id="scCuratePubTabs" class="sc-subtabs" style="margin:6px 0 12px;flex-wrap:wrap;"></div>
                             <div id="scCurateBody"><p class="scraper-placeholder">Loading publications…</p></div>
                         </div>
 
                         <div id="scViewHistory" data-project-id="<?php echo (int)$active['id']; ?>" style="display:none;">
-                            <div class="sc-toolbar" style="align-items:center;">
-                                <label style="font-size:13px;font-weight:600;color:#374151;">Section:
-                                    <select id="scHistorySection" style="margin-left:6px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;"><option value="">Loading…</option></select>
-                                </label>
-                                <span class="scraper-placeholder">Last 30 days — what was collated, from where, and what was promoted.</span>
+                            <div class="sc-toolbar" style="flex-wrap:wrap;gap:10px;align-items:flex-end;">
+                                <label style="font-size:11px;font-weight:600;color:#6b7280;">Publication<br><select id="scHPub" class="sc-input"><option value="">All</option></select></label>
+                                <label style="font-size:11px;font-weight:600;color:#6b7280;">Section<br><select id="scHSec" class="sc-input"><option value="">All</option></select></label>
+                                <label style="font-size:11px;font-weight:600;color:#6b7280;">From<br><input type="date" id="scHFrom" class="sc-input"></label>
+                                <label style="font-size:11px;font-weight:600;color:#6b7280;">To<br><input type="date" id="scHTo" class="sc-input"></label>
+                                <label style="font-size:11px;font-weight:600;color:#6b7280;">Search<br><input type="text" id="scHSearch" class="sc-input" placeholder="title or source…" style="min-width:180px;"></label>
+                                <button class="sc-btn" id="scHApply"><i class="fas fa-filter"></i> Apply</button>
                             </div>
-                            <div id="scHistoryList"><p class="scraper-placeholder">Choose a section to see its recent history.</p></div>
+                            <div id="scHResult"><p class="scraper-placeholder">Loading history…</p></div>
                         </div>
 
                         <?php if ($canManage): ?>
@@ -167,27 +167,32 @@ if (!$active && !empty($projects)) { $active = $projects[0]; }
                         <div id="scOverlay" class="sc-overlay" style="display:none;"></div>
                         <div id="scModal" class="sc-modal" style="display:none;"><div id="scModalBody"></div></div>
 
-                        <script src="js/scraper_review.js?v=<?php echo @filemtime(__DIR__ . '/js/scraper_review.js'); ?>"></script>
                         <script src="js/scraper_curate.js?v=<?php echo @filemtime(__DIR__ . '/js/scraper_curate.js'); ?>"></script>
+                        <script src="js/scraper_history.js?v=<?php echo @filemtime(__DIR__ . '/js/scraper_history.js'); ?>"></script>
                         <?php if ($canManage): ?><script src="js/scraper_config.js?v=<?php echo @filemtime(__DIR__ . '/js/scraper_config.js'); ?>"></script><?php endif; ?>
                         <script>
                         (function () {
-                            var tabs = document.querySelectorAll('.sc-subtab');
+                            // Only the top-level view tabs (Curate / History / Configure) — NOT the
+                            // publication/mode sub-tabs, which live inside the Curate view.
+                            var tabs = Array.prototype.filter.call(
+                                document.querySelectorAll('.sc-subtabs > .sc-subtab[data-view]'),
+                                function (t) { return t.closest('#scViewCurate') === null; });
                             tabs.forEach(function (t) {
                                 t.addEventListener('click', function () {
                                     tabs.forEach(function (x) { x.classList.remove('active'); });
                                     t.classList.add('active');
                                     var v = t.getAttribute('data-view');
-                                    document.getElementById('scViewReview').style.display = (v === 'review') ? 'block' : 'none';
+                                    var cur = document.getElementById('scViewCurate');
+                                    if (cur) cur.style.display = (v === 'curate') ? 'block' : 'none';
                                     var hist = document.getElementById('scViewHistory');
                                     if (hist) hist.style.display = (v === 'history') ? 'block' : 'none';
                                     var cfg = document.getElementById('scViewConfigure');
                                     if (cfg) cfg.style.display = (v === 'configure') ? 'block' : 'none';
-                                    var cur = document.getElementById('scViewCurate');
-                                    if (cur) cur.style.display = (v === 'curate') ? 'block' : 'none';
                                     if (v === 'curate' && typeof window.scCurateInit === 'function') window.scCurateInit();
+                                    if (v === 'history' && typeof window.scHistoryInit === 'function') window.scHistoryInit();
                                 });
                             });
+                            if (typeof window.scCurateInit === 'function') window.scCurateInit();
                         })();
                         </script>
                     <?php else: ?>

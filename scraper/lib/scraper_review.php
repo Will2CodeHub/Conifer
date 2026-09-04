@@ -19,6 +19,20 @@ function scraper_effective_ai(array $section): array {
 }
 
 /**
+ * The cheap dedicated translation model (project-level), used for bulk title/summary
+ * translation — a trivial task where a Haiku/mini-class model matches the big models at
+ * a fraction of the cost. Falls back to Claude Haiku. (The smart model is reserved for
+ * article writing and curation ranking.)
+ */
+function scraper_translation_ai(array $section): array {
+    $project = scraper_get_project((int)$section['project_id']) ?: [];
+    return [
+        'provider' => ($project['translation_provider'] ?? '') ?: 'anthropic',
+        'model'    => ($project['translation_model'] ?? '') ?: 'claude-haiku-4-5',
+    ];
+}
+
+/**
  * Fetch an article page at promote time and extract condensed facts (the main
  * paragraphs) for the AI writer. Best-effort: returns '' on any failure. Done
  * here (not at ingest) so only the items actually being published are fetched.
@@ -75,6 +89,18 @@ function scraper_curate_publications(): array {
     return $out;
 }
 
+/** Human region/place name for a publication key, used to steer local ranking. */
+function scraper_publication_region(string $pub): string {
+    $map = [
+        'tme' => 'Munich and Bavaria, Germany', 'tge' => 'Germany',
+        'ten' => 'the world (international English-speaking readers)',
+        'bae' => 'Buenos Aires and Argentina', 'tbrae' => 'Brazil', 'truse' => 'Russia',
+        'tbare' => 'Barcelona and Catalonia, Spain', 'tte' => 'Tokyo and Japan',
+        'tmae' => 'Madrid and Spain', 'tce' => 'the Canary Islands, Spain', 'tpe' => 'Paris and France',
+    ];
+    return $map[strtolower(trim($pub))] ?? $pub;
+}
+
 /** AI-rank a section's 'new' items and return the top N (N from daily_count). */
 function scraper_curate_rank(int $pubSectionId, int $topN): array {
     $section = scraper_get_section($pubSectionId);
@@ -90,21 +116,22 @@ function scraper_curate_rank(int $pubSectionId, int $topN): array {
     $byId = []; $lines = '';
     foreach ($rows as $r) { $byId[(int)$r['id']] = $r; $lines .= (int)$r['id'] . ': ' . preg_replace('/\s+/', ' ', $r['t']) . "\n"; }
 
-    // Few enough that ranking adds nothing — just return by recency.
-    if (count($rows) <= $topN) {
-        $items = [];
-        foreach ($rows as $r) $items[] = ['id' => (int)$r['id'], 'title' => $r['t'], 'summary' => $r['s'], 'reason' => ''];
-        return ['items' => $items];
-    }
-
+    // Always ask the AI (it both ranks AND translates the chosen headlines into
+    // English — the source feeds are in many languages).
     $ai = scraper_effective_ai($section);
     $pub = $section['publication_key'];
-    $system = "You are the regional news editor for the publication '{$pub}'. Choose the most newsworthy, high-interest stories for readers in that region: significant, timely, locally relevant news. Drop trivia, near-duplicates and clickbait. Return ONLY JSON.";
-    $user = "From these " . count($rows) . " collated headlines (id: headline), choose the TOP {$topN} for this publication's readers. "
-          . "Return JSON {\"top\":[{\"id\":<id>,\"reason\":\"<max 12 words why>\"}]}, best first, exactly {$topN} items.\n\n" . $lines;
+    $region = scraper_publication_region($pub);
+    $isWorld = (strtolower($pub) === 'ten');
+    $focus = $isWorld
+        ? "Choose the biggest, most significant international news stories of broad interest to a global English-speaking audience."
+        : "STRONGLY prioritise LOCAL and national news for {$region} and its readers — politics, economy, society, culture, sport and events happening in or directly affecting {$region}. Only include an international/world story if it is genuinely major AND clearly relevant to {$region}; prefer a local story over a generic world story.";
+    $system = "You are the news editor of a local English-language newspaper covering {$region}. {$focus} Drop trivia, near-duplicates and clickbait. Return ONLY JSON.";
+    $user = "From these " . count($rows) . " collated headlines (id: headline), choose the TOP " . min($topN, count($rows)) . " for this publication's readers. "
+          . "The headlines may be in ANY language — translate each chosen one into natural English. "
+          . "Return JSON {\"top\":[{\"id\":<id>,\"title\":\"<the headline in ENGLISH>\",\"reason\":\"<max 12 words why>\"}]}, best first.\n\n" . $lines;
     $decoded = null;
     try {
-        $text = scraper_ai_raw($ai['provider'], $ai['model'], $system, $user, 1500, $ai['provider'] === 'openai');
+        $text = scraper_ai_raw($ai['provider'], $ai['model'], $system, $user, 2000, $ai['provider'] === 'openai');
         $decoded = scraper_ai_decode_json($text);
     } catch (Throwable $e) { $decoded = null; }
 
@@ -113,7 +140,8 @@ function scraper_curate_rank(int $pubSectionId, int $topN): array {
         foreach ($decoded['top'] as $t) {
             $id = (int)($t['id'] ?? 0);
             if (isset($byId[$id])) {
-                $items[] = ['id' => $id, 'title' => $byId[$id]['t'], 'summary' => $byId[$id]['s'], 'reason' => mb_substr((string)($t['reason'] ?? ''), 0, 120)];
+                $en = trim((string)($t['title'] ?? ''));
+                $items[] = ['id' => $id, 'title' => $en !== '' ? $en : $byId[$id]['t'], 'summary' => $byId[$id]['s'], 'reason' => mb_substr((string)($t['reason'] ?? ''), 0, 120)];
                 unset($byId[$id]);
             }
         }
@@ -124,7 +152,272 @@ function scraper_curate_rank(int $pubSectionId, int $topN): array {
     return ['items' => array_slice($items, 0, $topN)];
 }
 
-/** Rebuild a publication's cached front page by calling its cache_index.php. */
+/**
+ * CRON precompute for one section: translate every 'new' item into English (cached on
+ * the row) and AI-rank the top N (daily_count) into curate_rank/curate_reason. Run by
+ * scraper/cron/precompute.php so the Curate screen only ever reads pre-computed rows.
+ */
+function scraper_precompute_section(int $pubSectionId): array {
+    $section = scraper_get_section($pubSectionId);
+    if (!$section || (int)$section['is_active'] !== 1) return ['skipped' => 'inactive', 'more' => false];
+    $ai = scraper_translation_ai($section); // cheap model for bulk title/summary translation
+
+    // 1) Translate a bounded batch of untranslated 'new' items to English. Capped so a
+    //    single run always finishes well within the HTTP/CLI budget; remaining items are
+    //    picked up on the next run (the section keeps matching until fully translated).
+    $CAP = 60;
+    $conn = getDBConnection();
+    $rows = $conn->query("SELECT id, title, summary FROM ten_scraper_items
+                          WHERE pub_section_id=$pubSectionId AND status='new'
+                            AND (title_translated IS NULL OR title_translated=''
+                                 OR translated_lang IS NULL OR translated_lang<>'English')
+                          ORDER BY id DESC LIMIT $CAP")->fetch_all(MYSQLI_ASSOC);
+    $translated = 0;
+    if ($rows) {
+        $payload = array_map(function ($r) { return ['id' => (int)$r['id'], 'title' => $r['title'], 'summary' => (string)$r['summary']]; }, $rows);
+        try {
+            $tr = scraper_ai_translate($ai['provider'], $ai['model'], 'English', $payload);
+        } catch (Throwable $e) { $tr = []; }
+        if ($tr) {
+            $up = $conn->prepare("UPDATE ten_scraper_items SET title_translated=?, summary_translated=?, translated_lang='English', translated_at=NOW() WHERE id=?");
+            foreach ($tr as $id => $t) {
+                $ti = (string)$t['title']; $su = (string)$t['summary']; $iid = (int)$id;
+                $up->bind_param('ssi', $ti, $su, $iid); $up->execute(); $translated++;
+            }
+            $up->close();
+        }
+    }
+    // Any untranslated left? If so, defer ranking until the section is fully translated.
+    $remain = (int)$conn->query("SELECT COUNT(*) c FROM ten_scraper_items
+                                 WHERE pub_section_id=$pubSectionId AND status='new'
+                                   AND (title_translated IS NULL OR title_translated=''
+                                        OR translated_lang IS NULL OR translated_lang<>'English')")->fetch_assoc()['c'];
+    $conn->close();
+    if ($remain > 0) return ['translated' => $translated, 'ranked' => 0, 'more' => true, 'remaining' => $remain];
+
+    // 2) Rank the current 'new' pool and store the selection (clear the old one first).
+    $topN = (int)$section['daily_count']; if ($topN < 1) $topN = 5;
+    $res = scraper_curate_rank($pubSectionId, $topN); // uses the freshly-cached English titles
+    $conn = getDBConnection();
+    $conn->query("UPDATE ten_scraper_items SET curate_rank=NULL, curate_reason=NULL WHERE pub_section_id=$pubSectionId AND status='new'");
+    $ranked = 0; $rank = 0;
+    $up = $conn->prepare("UPDATE ten_scraper_items SET curate_rank=?, curate_reason=?, curated_at=NOW() WHERE id=? AND status='new'");
+    foreach ($res['items'] as $it) {
+        $rank++; $rk = $rank; $rs = (string)$it['reason']; $iid = (int)$it['id'];
+        $up->bind_param('isi', $rk, $rs, $iid); $up->execute();
+        if ($conn->affected_rows > 0) $ranked++;
+    }
+    $up->close(); $conn->close();
+    return ['translated' => $translated, 'ranked' => $ranked, 'more' => false];
+}
+
+/**
+ * Sections that need precompute: they have 'new' items still missing an English
+ * translation (fresh content arrived), OR they have 'new' items but nothing has been
+ * ranked today yet (daily re-rank). Once translated + ranked today, a section stops
+ * matching until new untranslated items arrive — so cost tracks real new content.
+ */
+function scraper_sections_needing_precompute(): array {
+    $conn = getDBConnection();
+    $res = $conn->query("SELECT ps.id
+                         FROM ten_scraper_pub_sections ps
+                         WHERE ps.is_active=1 AND (
+                             EXISTS (
+                                 SELECT 1 FROM ten_scraper_items i
+                                 WHERE i.pub_section_id=ps.id AND i.status='new'
+                                   AND (i.title_translated IS NULL OR i.title_translated=''
+                                        OR i.translated_lang IS NULL OR i.translated_lang<>'English')
+                             )
+                             OR (
+                                 EXISTS (SELECT 1 FROM ten_scraper_items n WHERE n.pub_section_id=ps.id AND n.status='new')
+                                 AND NOT EXISTS (SELECT 1 FROM ten_scraper_items c
+                                                 WHERE c.pub_section_id=ps.id AND c.curate_rank IS NOT NULL AND DATE(c.curated_at)=CURDATE())
+                             )
+                         )
+                         ORDER BY ps.id");
+    $ids = [];
+    while ($r = $res->fetch_assoc()) $ids[] = (int)$r['id'];
+    $conn->close();
+    return $ids;
+}
+
+/**
+ * Attach the promoted article's state + jump links to a set of item rows.
+ * Each row must carry: article_id (nullable), publication_key, status.
+ * Adds: article_id (int|null), article_state, row_state, editor_url, live_url.
+ */
+function scraper_attach_article_links(array $rows): array {
+    $ids = array_values(array_unique(array_filter(array_map(function ($r) { return (int)($r['article_id'] ?? 0); }, $rows))));
+    $states = []; $artUrl = []; $pubBase = [];
+    if ($ids) {
+        $a = getDBConnection_TENAdmin();
+        $res = $a->query("SELECT id, state, url FROM articles WHERE id IN (" . implode(',', $ids) . ")");
+        while ($x = $res->fetch_assoc()) { $states[(int)$x['id']] = $x['state']; $artUrl[(int)$x['id']] = $x['url']; }
+        $pubKeys = array_values(array_unique(array_filter(array_map(function ($r) { return $r['publication_key'] ?? ''; }, $rows))));
+        if ($pubKeys) {
+            $inq = implode(',', array_fill(0, count($pubKeys), '?'));
+            $ps = $a->prepare("SELECT publication, url FROM publications WHERE publication IN ($inq)");
+            $ps->bind_param(str_repeat('s', count($pubKeys)), ...$pubKeys);
+            $ps->execute();
+            $pr = $ps->get_result();
+            while ($x = $pr->fetch_assoc()) $pubBase[$x['publication']] = $x['url'];
+            $ps->close();
+        }
+        $a->close();
+    }
+    foreach ($rows as &$r) {
+        $aid = (int)($r['article_id'] ?? 0);
+        $state = $aid ? ($states[$aid] ?? null) : null;
+        $r['article_id'] = $aid ?: null;
+        $r['article_state'] = $state;
+        $r['editor_url'] = $aid ? ('module-articles.php?open=' . $aid) : null;
+        $r['live_url'] = null;
+        if ($aid && $state === 'published' && !empty($artUrl[$aid]) && !empty($pubBase[$r['publication_key'] ?? ''])) {
+            $r['live_url'] = rtrim($pubBase[$r['publication_key']], '/') . '/' . ltrim($artUrl[$aid], '/');
+        }
+        if ($aid) {
+            $r['row_state'] = $state === 'published' ? 'published' : ($state === 'deleted' ? 'ignored' : 'draft');
+        } else {
+            $r['row_state'] = ((string)($r['status'] ?? '') === 'discarded') ? 'ignored' : 'collated';
+        }
+    }
+    unset($r);
+    return $rows;
+}
+
+/** Publications (with saved per-user tab order) for the Curate screen. */
+function scraper_curate_publications_ordered(int $userId): array {
+    $pubs = scraper_curate_publications(); // [{publication_key, section_id (News-preferred), ...}]
+    $order = [];
+    $saved = scraper_get_pref($userId, 'curate_pub_order');
+    if ($saved) { $dec = json_decode($saved, true); if (is_array($dec)) $order = array_map('strval', $dec); }
+    if ($order) {
+        $pos = array_flip($order);
+        usort($pubs, function ($a, $b) use ($pos) {
+            $pa = $pos[$a['publication_key']] ?? 999; $pb = $pos[$b['publication_key']] ?? 999;
+            if ($pa === $pb) return strcmp($a['publication_key'], $b['publication_key']);
+            return $pa <=> $pb;
+        });
+    }
+    return $pubs;
+}
+
+/** Active sections under a publication, with today's item + curated counts. */
+function scraper_curate_sections(string $pub): array {
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("SELECT id, ten_section, daily_count FROM ten_scraper_pub_sections
+                            WHERE publication_key=? AND is_active=1
+                            ORDER BY (ten_section='News') DESC, ten_section ASC");
+    $stmt->bind_param('s', $pub); $stmt->execute();
+    $secs = $stmt->get_result()->fetch_all(MYSQLI_ASSOC); $stmt->close();
+    $out = [];
+    foreach ($secs as $s) {
+        $sid = (int)$s['id'];
+        $today = $conn->query("SELECT COUNT(*) c FROM ten_scraper_items WHERE pub_section_id=$sid AND DATE(fetched_at)=CURDATE()")->fetch_assoc()['c'];
+        $cur = $conn->query("SELECT COUNT(*) c FROM ten_scraper_items WHERE pub_section_id=$sid AND curate_rank IS NOT NULL AND DATE(curated_at)=CURDATE()")->fetch_assoc()['c'];
+        $out[] = ['section_id' => $sid, 'ten_section' => $s['ten_section'], 'daily_count' => (int)$s['daily_count'],
+                  'today_count' => (int)$today, 'curated_count' => (int)$cur];
+    }
+    $conn->close();
+    return $out;
+}
+
+/** Rows for the Curate screen: mode 'all' (today's feed) or 'curated' (AI selection). */
+function scraper_curate_items(int $pubSectionId, string $mode = 'all', string $date = ''): array {
+    $conn = getDBConnection();
+    $hasDate = (bool)preg_match('/^\d{4}-\d{2}-\d{2}$/', $date);
+    // Evaluate "today" in MySQL (CURDATE()) so it matches how fetched_at/curated_at are stored.
+    $dayCol = $hasDate ? '?' : 'CURDATE()';
+    $sel = "SELECT i.id, i.status, i.curate_rank, i.curate_reason,
+                   COALESCE(NULLIF(i.title_translated,''), i.title) AS title,
+                   COALESCE(NULLIF(i.summary_translated,''), i.summary) AS summary,
+                   i.title AS title_original, i.source_url, i.published_at, i.fetched_at,
+                   src.name AS source_name, d.article_id, ps.publication_key, ps.ten_section
+            FROM ten_scraper_items i
+            JOIN ten_scraper_pub_sections ps ON ps.id = i.pub_section_id
+            LEFT JOIN ten_scraper_feeds f ON f.id = i.feed_id
+            LEFT JOIN ten_scraper_sources src ON src.id = f.source_id
+            LEFT JOIN ten_scraper_drafts d ON d.item_id = i.id
+            WHERE i.pub_section_id=? ";
+    if ($mode === 'curated') {
+        $sql = $sel . "AND i.curate_rank IS NOT NULL AND DATE(i.curated_at)=$dayCol ORDER BY i.curate_rank ASC, i.id DESC";
+    } else {
+        $sql = $sel . "AND DATE(i.fetched_at)=$dayCol ORDER BY i.published_at DESC, i.id DESC LIMIT 400";
+    }
+    $stmt = $conn->prepare($sql);
+    if ($hasDate) { $stmt->bind_param('is', $pubSectionId, $date); }
+    else { $stmt->bind_param('i', $pubSectionId); }
+    $stmt->execute();
+    $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close(); $conn->close();
+    return scraper_attach_article_links($rows);
+}
+
+/** Per-user preference get/set (tab order etc.). */
+function scraper_get_pref(int $userId, string $key): ?string {
+    if ($userId < 1) return null;
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("SELECT pref_value FROM ten_scraper_user_prefs WHERE user_id=? AND pref_key=?");
+    $stmt->bind_param('is', $userId, $key); $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc(); $stmt->close(); $conn->close();
+    return $row ? $row['pref_value'] : null;
+}
+function scraper_set_pref(int $userId, string $key, string $value): void {
+    if ($userId < 1) return;
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("INSERT INTO ten_scraper_user_prefs (user_id, pref_key, pref_value) VALUES (?,?,?)
+                            ON DUPLICATE KEY UPDATE pref_value=VALUES(pref_value)");
+    $stmt->bind_param('iss', $userId, $key, $value); $stmt->execute(); $stmt->close(); $conn->close();
+}
+
+/** Filterable history across all sections of a project (for the History table). */
+function scraper_history_query(array $f): array {
+    $conn = getDBConnection();
+    $sql = "SELECT i.id, i.status,
+                   COALESCE(NULLIF(i.title_translated,''), i.title) AS title,
+                   i.source_url, i.published_at, i.fetched_at,
+                   src.name AS source_name, d.article_id,
+                   ps.publication_key, ps.ten_section
+            FROM ten_scraper_items i
+            JOIN ten_scraper_pub_sections ps ON ps.id = i.pub_section_id
+            LEFT JOIN ten_scraper_feeds f ON f.id = i.feed_id
+            LEFT JOIN ten_scraper_sources src ON src.id = f.source_id
+            LEFT JOIN ten_scraper_drafts d ON d.item_id = i.id
+            WHERE 1=1";
+    $params = []; $types = '';
+    if (!empty($f['project_id'])) { $sql .= " AND ps.project_id=?"; $params[] = (int)$f['project_id']; $types .= 'i'; }
+    if (($f['publication'] ?? '') !== '') { $sql .= " AND ps.publication_key=?"; $params[] = $f['publication']; $types .= 's'; }
+    if (($f['section'] ?? '') !== '') { $sql .= " AND ps.ten_section=?"; $params[] = $f['section']; $types .= 's'; }
+    if (($f['from'] ?? '') !== '') { $sql .= " AND i.fetched_at >= ?"; $params[] = $f['from'] . ' 00:00:00'; $types .= 's'; }
+    if (($f['to'] ?? '') !== '') { $sql .= " AND i.fetched_at <= ?"; $params[] = $f['to'] . ' 23:59:59'; $types .= 's'; }
+    if (($f['search'] ?? '') !== '') {
+        $sql .= " AND (COALESCE(NULLIF(i.title_translated,''),i.title) LIKE ? OR src.name LIKE ?)";
+        $s = '%' . $f['search'] . '%'; $params[] = $s; $params[] = $s; $types .= 'ss';
+    }
+    $sql .= " ORDER BY i.fetched_at DESC LIMIT 2000";
+    $stmt = $conn->prepare($sql);
+    if ($params) $stmt->bind_param($types, ...$params);
+    $stmt->execute();
+    $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close(); $conn->close();
+
+    // Attach the promoted article's state + jump links (editor for drafts, live URL for published).
+    return scraper_attach_article_links($rows);
+}
+
+/** Distinct publications + sections in a project, for the History filter dropdowns. */
+function scraper_history_filters(int $projectId): array {
+    $conn = getDBConnection();
+    $pubs = []; $secs = [];
+    $r = $conn->query("SELECT DISTINCT publication_key FROM ten_scraper_pub_sections WHERE project_id=$projectId ORDER BY publication_key");
+    while ($x = $r->fetch_assoc()) $pubs[] = $x['publication_key'];
+    $r = $conn->query("SELECT DISTINCT ten_section FROM ten_scraper_pub_sections WHERE project_id=$projectId ORDER BY ten_section");
+    while ($x = $r->fetch_assoc()) $secs[] = $x['ten_section'];
+    $conn->close();
+    return ['publications' => $pubs, 'sections' => $secs];
+}
+
+/** Rebuild a publication's front page by calling its generate_index_page.php. */
 function scraper_trigger_publication_cache(string $pubKey): void {
     try {
         $a = getDBConnection_TENAdmin();
@@ -132,7 +425,7 @@ function scraper_trigger_publication_cache(string $pubKey): void {
         $st->bind_param('s', $pubKey); $st->execute();
         $row = $st->get_result()->fetch_assoc(); $st->close(); $a->close();
         if ($row && !empty($row['url'])) {
-            $ch = curl_init(rtrim($row['url'], '/') . '/cache_index.php');
+            $ch = curl_init(rtrim($row['url'], '/') . '/generate_index_page.php');
             curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30, CURLOPT_SSL_VERIFYPEER => false]);
             curl_exec($ch); curl_close($ch);
         }

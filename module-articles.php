@@ -3715,6 +3715,22 @@ document.getElementById('modal_publish_now').addEventListener('change', function
 })();
 
 
+    // Deep-link: module-articles.php?open=<id> opens that article straight in the editor
+    // (used by the Scraper History / Curate screens to jump to a promoted draft).
+    (function () {
+        try {
+            var m = new URLSearchParams(window.location.search).get('open');
+            var oid = m ? parseInt(m, 10) : 0;
+            if (oid > 0) {
+                var tryOpen = function (tries) {
+                    if (typeof window.openEdit === 'function') { window.openEdit(oid); }
+                    else if (tries > 0) { setTimeout(function () { tryOpen(tries - 1); }, 200); }
+                };
+                if (document.readyState === 'complete' || document.readyState === 'interactive') tryOpen(25);
+                else document.addEventListener('DOMContentLoaded', function () { tryOpen(25); });
+            }
+        } catch (e) { /* no-op */ }
+    })();
     </script>
     <script src="js/scraper_image_suggest.js?v=<?php echo @filemtime(__DIR__ . '/js/scraper_image_suggest.js'); ?>"></script>
 </body>
