@@ -29,8 +29,9 @@ $pageTitle = 'Article Management';
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.js"></script>
     <style>
         :root {
-            --primary: #2563eb;
-            --primary-dark: #1e40af;
+            --primary: #3c4f6d;      /* slate-blue — matches the Data Scraper page */
+            --primary-dark: #31415a;
+            --accent: #b45309;        /* amber editorial accent */
             --success: #10b981;
             --warning: #f59e0b;
             --danger: #ef4444;
@@ -53,7 +54,7 @@ $pageTitle = 'Article Management';
         }
         
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             background: var(--gray-50);
             color: var(--gray-900);
             font-size: 14px;
@@ -590,7 +591,7 @@ $pageTitle = 'Article Management';
             background: #f3f4f6 !important;
         }
         .option-toggle:has(input:checked) {
-            border-color: #2563eb !important;
+            border-color: #3c4f6d !important;
             background: #eff6ff !important;
         }
         /* Editor image float wrap */
@@ -600,6 +601,27 @@ $pageTitle = 'Article Management';
             max-width: 50%;
             height: auto;
         }
+
+        /* ===== Match the Data Scraper page: serif headings, amber-underline tabs,
+                slate-blue primary, refined table. (Overrides earlier rules by order.) ===== */
+        .page-header h1 { font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif; font-weight:600; letter-spacing:-0.01em; color:#15181e; font-size:26px; }
+        .page-header h1 i { color:var(--primary); font-size:23px; }
+        .card { border-color:#e6e8ec; border-radius:12px; box-shadow:0 1px 2px rgba(16,24,40,.05),0 1px 3px rgba(16,24,40,.05); }
+        .card h2 { font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif; font-weight:600; color:#15181e; letter-spacing:-0.01em; font-size:19px; }
+
+        /* Top tabs → underline tabs with amber active indicator (like the scraper view tabs) */
+        .tabs { border-bottom:1px solid #e6e8ec; background:transparent; padding:0; gap:2px; border-radius:0; }
+        .tab { padding:12px 16px; border-bottom:none; color:#6b7280; }
+        .tab:hover { color:#15181e; background:#f8fafb; }
+        .tab.active { color:#15181e; background:transparent; border-bottom:none; }
+        .tab.active::after { content:""; position:absolute; left:12px; right:12px; bottom:-1px; height:2px; background:var(--accent); border-radius:2px 2px 0 0; }
+
+        /* Buttons */
+        .btn-primary:hover { box-shadow:0 4px 10px rgba(60,79,109,.25); }
+
+        /* Articles table → uppercase muted header + row hover, like the scraper tables */
+        #articlesTable thead th { text-transform:uppercase; letter-spacing:.04em; font-size:11px; color:#6b7280; background:#f8fafb; }
+        #articlesTable tbody tr:hover { background:#f8fafb; }
     </style>
 </head>
 <body>
@@ -634,7 +656,12 @@ $pageTitle = 'Article Management';
             <!-- Tab 1: View All Articles -->
             <div id="view-articles" class="tab-content active">
                 <div class="card">
-                    <h2><i class="fas fa-list"></i> All Articles</h2>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                        <h2 style="margin:0;"><i class="fas fa-list"></i> All Articles</h2>
+                        <button type="button" class="btn btn-primary" id="createArticleBtn" onclick="if(window.openCreateArticle)window.openCreateArticle();">
+                            <i class="fas fa-plus-circle"></i> Create New Article
+                        </button>
+                    </div>
                     <div style="width:100%;max-width:1200px;margin:0 auto;padding:12px;font-family:inherit;">
 
                         <!-- Search -->
@@ -717,7 +744,7 @@ $pageTitle = 'Article Management';
                                     <button onclick="clearFilters()" type="button" style="background:#fff;border:1px solid #d1d5db;color:#374151;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;">
                                         Clear Filters
                                     </button>
-                                    <button onclick="applyFilters()" type="button" style="background:#2563eb;border:none;color:#fff;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;">
+                                    <button onclick="applyFilters()" type="button" style="background:#3c4f6d;border:none;color:#fff;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;">
                                         Apply Filters
                                     </button>
                                 </div>
@@ -790,9 +817,9 @@ $pageTitle = 'Article Management';
                     <img src="loading.gif" id="loading_image" style="display: none; position: absolute; width: 100px; margin: 0px auto; z-index: 100; text-align: center; justify-content: center; right: 0px; left: 0px;" />
 
                     <form id="ten_add_article" method="post" onsubmit="return false;">
-                        <div class="form-group">
-                            <label for="article_title">Article Title</label>
-                            <input type="text" id="article_title" name="article_title" class="form-control" placeholder="Enter article title" style="width: 100%;">
+                        <div style="margin-bottom:14px;">
+                            <label class="ed-lbl" for="article_title">Article Title <span style="color:#dc2626;">*</span></label>
+                            <input type="text" id="article_title" name="article_title" class="ed-input" placeholder="Enter article title..." style="font-size:16px;font-weight:600;padding:12px 14px;">
                         </div>
 
                         <div class="form-group">
@@ -840,8 +867,52 @@ $pageTitle = 'Article Management';
                             </div>
                         </div>
 
+                        <!-- Settings tabs — mirror the edit modal on the View All Articles tab -->
+                        <div class="ed-tabs">
+                            <button type="button" class="ed-tab" data-edtab="apub"><i class="fas fa-newspaper"></i> Publications</button>
+                            <button type="button" class="ed-tab" data-edtab="aauthor"><i class="fas fa-user"></i> Author &amp; Section</button>
+                            <button type="button" class="ed-tab" data-edtab="aflags"><i class="fas fa-sliders-h"></i> Flags</button>
+                            <button type="button" class="ed-tab" data-edtab="aseo"><i class="fas fa-hashtag"></i> SEO &amp; Metadata</button>
+                        </div>
+                        <div class="ed-tabwrap">
+                            <div class="ed-tabpanel" data-edpanel="apub">
+                                <label class="ed-lbl">Publication <span style="color:#dc2626;">*</span> <span style="font-weight:400;text-transform:none;color:#94a3b8;">— tick each publication; choose one as the canonical (primary) site.</span></label>
+                                <div id="add_article_publications"><span style="color:#9ca3af;font-size:13px;">Loading publications…</span></div>
+                            </div>
+                            <div class="ed-tabpanel" data-edpanel="aauthor">
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                                    <div id="add_article_author_wrapper">
+                                        <label class="ed-lbl">Author</label>
+                                        <select id="add_article_author" name="add_article_author" class="ed-input"><option value="">Loading authors…</option></select>
+                                    </div>
+                                    <div>
+                                        <label class="ed-lbl">Section <span style="color:#dc2626;">*</span></label>
+                                        <select id="add_article_section" name="add_article_section" class="ed-input"><option value="">Loading sections…</option></select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="ed-tabpanel" data-edpanel="aflags">
+                                <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                                    <label class="ed-flag" title="Show this article as the main front-page headline story."><input type="checkbox" id="add_article_headline"><i class="fas fa-fire" style="color:#ef4444;"></i> Frontpage Headline</label>
+                                    <label class="ed-flag" title="Show this article as the section headline."><input type="checkbox" id="add_article_featured"><i class="fas fa-star" style="color:#f59e0b;"></i> Section Headline</label>
+                                    <label class="ed-flag" title="Never expires."><input type="checkbox" id="add_article_evergreen"><i class="fas fa-leaf" style="color:#10b981;"></i> Evergreen</label>
+                                    <label class="ed-flag" title="Paid/partner content."><input type="checkbox" id="add_article_sponsored" name="add_article_sponsored" value="1"><i class="fas fa-ad" style="color:#8b5cf6;"></i> Sponsored</label>
+                                </div>
+                            </div>
+                            <div class="ed-tabpanel" data-edpanel="aseo">
+                                <label class="ed-lbl">Meta title <span style="font-weight:400;text-transform:none;color:#94a3b8;">(≤60 chars)</span></label>
+                                <input type="text" id="add_article_meta_title" class="ed-input" maxlength="70">
+                                <label class="ed-lbl" style="margin-top:10px;">Meta description <span style="font-weight:400;text-transform:none;color:#94a3b8;">(≤155 chars)</span></label>
+                                <textarea id="add_article_meta_description" class="ed-input" rows="2" maxlength="180" style="resize:vertical;"></textarea>
+                                <label class="ed-lbl" style="margin-top:10px;">Meta keywords <span style="font-weight:400;text-transform:none;color:#94a3b8;">(comma separated)</span></label>
+                                <input type="text" id="add_article_meta_keywords" class="ed-input">
+                                <label class="ed-lbl" style="margin-top:10px;">Tags <span style="font-weight:400;text-transform:none;color:#94a3b8;">(comma separated)</span></label>
+                                <input type="text" id="add_article_tags" class="ed-input">
+                            </div>
+                        </div>
+
                         <div class="form-group">
-                            <label>Article Content</label>
+                            <label class="ed-lbl">Article Content <span style="color:#dc2626;">*</span></label>
                             <div class="editor-container">
                                 <div class="editor-controls">
                                     <button type="button" id="bold" data-tooltip="Bold"><i class="fas fa-bold"></i></button>
@@ -872,46 +943,10 @@ $pageTitle = 'Article Management';
                             <!-- link-modal moved to root level below -->
                         </div>
 
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label for="add_article_section">Section *</label>
-                                <select id="add_article_section" name="add_article_section" class="form-control">
-                                    <option value="">Loading sections...</option>
-                                </select>
-                            </div>
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label>Publication *</label>
-                                <div id="add_article_publications" style="padding:10px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;min-height:42px;">
-                                    <span style="color:#9ca3af;font-size:13px;">Loading publications...</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="form-group" style="margin-bottom:20px;" id="add_article_author_wrapper">
-                            <label for="add_article_author">Author</label>
-                            <select id="add_article_author" name="add_article_author" class="form-control">
-                                <option value="">Loading authors...</option>
-                            </select>
-                        </div>
-
-                        <div class="form-group" style="margin-bottom:16px;">
-                            <label style="display:block;font-weight:600;margin-bottom:8px;color:#374151;font-size:13px;">Article Options</label>
-                            <div style="display:flex;flex-wrap:wrap;gap:10px;padding:14px;border:1px solid #d1d5db;border-radius:6px;background:#f9fafb;">
-                                <label title="Sponsored: Mark this as sponsored/paid content." style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 14px;border:1px solid #d1d5db;border-radius:20px;background:#fff;font-size:13px;color:#374151;user-select:none;">
-                                    <input type="checkbox" id="add_article_sponsored" name="add_article_sponsored" value="1" style="accent-color:#f59e0b;width:16px;height:16px;cursor:pointer;">
-                                    <i class="fas fa-ad" style="color:#f59e0b;font-size:12px;"></i>
-                                    <span style="font-weight:500;">Sponsored</span>
-                                </label>
-                            </div>
-                        </div>
-
-                        <div class="form-group">
-                            <label class="switch" for="article_submission_terms_checkbox">
-                                <input type="checkbox" id="article_submission_terms_checkbox" name="article_submission_terms_checkbox" value="1" CHECKED>
-                                <span></span>
-                            </label>
-                            <label for="article_submission_terms_checkbox" style="display: inline; margin-left: 12px; cursor: pointer;">
-                                I agree to the <a href="#" onclick="$('#modal-article-terms').fadeIn(); return false;">Terms of Article Submission</a>
+                        <div class="form-group" style="margin-top:14px;">
+                            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#475569;cursor:pointer;">
+                                <input type="checkbox" id="article_submission_terms_checkbox" name="article_submission_terms_checkbox" value="1" checked style="width:16px;height:16px;cursor:pointer;">
+                                I agree to the <a href="#" onclick="$('#modal-article-terms').fadeIn(); return false;" style="color:#3c4f6d;font-weight:600;">Terms of Article Submission</a>
                             </label>
                         </div>
 
@@ -930,17 +965,18 @@ $pageTitle = 'Article Management';
                     <h2><i class="fas fa-image"></i> Add Article Image</h2>
                     <p style="color:#6b7280;margin:-4px 0 18px;font-size:14px;">Search royalty-free images across multiple sources (Openverse, Wikimedia Commons, Pexels, Unsplash, Pixabay), or upload your own — then crop and save to your image library.</p>
 
-                    <!-- Add-image actions -->
+                    <!-- Add-image actions: inline free-image search (rendered in the tab) -->
                     <div id="image_upload_section" style="display: block;">
                         <div class="form-group" id="file-upload-area" style="display: block;">
-                            <button type="button" class="btn btn-primary" id="search-free-images-tab2">
-                                <i class="fas fa-images"></i> Search free images
-                            </button>
-                            <label for="file-input-tab2" class="btn btn-primary" style="cursor: pointer; display: inline-block; margin-left: 10px; background:#475569; border-color:#475569;">
-                                <i class="fas fa-upload"></i> Upload from your computer
-                            </label>
+                            <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+                                <input type="text" id="tab2ISQuery" class="form-control" placeholder="Search for an image — e.g. Munich town hall, wind turbines, football stadium" style="flex:1;min-width:240px;">
+                                <button type="button" class="btn btn-primary" id="tab2ISSearchBtn"><i class="fas fa-search"></i> Search</button>
+                            </div>
+                            <div id="tab2ISSources" style="display:flex;flex-wrap:wrap;gap:8px 16px;margin-bottom:10px;align-items:center;"></div>
+                            <p style="font-size:12.5px;color:#6b7280;margin:0 0 14px;">All sources are royalty-free. Pick a thumbnail, then crop and save to your library. <a href="#" id="tab2UploadLink" style="color:#475569;font-weight:600;text-decoration:none;">— or upload from your computer</a></p>
+                            <div id="tab2ISResults"><div style="color:#98a0ac;font-size:14px;padding:24px 0;">Enter a search above to find royalty-free images.</div></div>
                             <input style="display: none;" type="file" id="file-input-tab2" accept="image/*">
-                            <span id="filename-display" style="margin-left: 15px; color: #666;"></span>
+                            <span id="filename-display" style="display:none;color:#666;"></span>
                         </div>
 
                         <div id="image-container-tab2" style="margin-top: 20px; display: none;">
@@ -1208,8 +1244,11 @@ $pageTitle = 'Article Management';
         </div><!-- end body -->
 
         <!-- ── Modal Footer ── -->
-        <div style="padding:14px 24px;border-top:1px solid #e2e8f0;background:#f8fafc;flex-shrink:0;display:flex;justify-content:space-between;align-items:center;">
-            <div style="font-size:12px;color:#94a3b8;">Changes are saved to the database immediately when you click Save.</div>
+        <div style="padding:14px 24px;border-top:1px solid #e2e8f0;background:#f8fafc;flex-shrink:0;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#475569;cursor:pointer;">
+                <input type="checkbox" id="modal_terms_checkbox" checked style="width:16px;height:16px;cursor:pointer;">
+                I agree to the <a href="#" onclick="$('#modal-article-terms').fadeIn();return false;" style="color:#3c4f6d;font-weight:600;">Terms of Article Submission</a>
+            </label>
             <div style="display:flex;gap:8px;">
                 <button id="deleteArticleBtn" title="Move this article to the Deleted state (kept in the database)" style="background:#fff;border:1px solid #fecaca;color:#dc2626;padding:9px 18px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;">
                     <i class="fas fa-trash"></i> Delete
@@ -1235,7 +1274,7 @@ $pageTitle = 'Article Management';
 <div id="link-modal" style="display:none;position:fixed;z-index:9999;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,0.3);min-width:420px;max-width:520px;padding:0;font-family:inherit;">
     <div style="padding:16px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;align-items:center;gap:8px;">
-            <i class="fas fa-link" style="color:#2563eb;"></i>
+            <i class="fas fa-link" style="color:#3c4f6d;"></i>
             <strong style="font-size:15px;color:#111827;">Insert / Edit Link</strong>
         </div>
         <button type="button" id="close-link-modal2" style="background:none;border:none;font-size:20px;color:#9ca3af;cursor:pointer;line-height:1;">&times;</button>
@@ -1275,7 +1314,7 @@ $pageTitle = 'Article Management';
     <div style="padding:14px 20px;border-top:1px solid #e5e7eb;display:flex;gap:8px;justify-content:flex-end;background:#f9fafb;border-radius:0 0 10px 10px;">
         <button type="button" id="preview-link" style="background:#fff;color:#374151;border:1px solid #d1d5db;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px;"><i class="fas fa-external-link-alt"></i> Preview</button>
         <button type="button" id="close-link-modal" style="background:#fff;color:#374151;border:1px solid #d1d5db;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;">Cancel</button>
-        <button type="button" id="insert-link" style="background:#2563eb;color:#fff;border:none;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;"><i class="fas fa-link"></i> Insert Link</button>
+        <button type="button" id="insert-link" style="background:#3c4f6d;color:#fff;border:none;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;"><i class="fas fa-link"></i> Insert Link</button>
     </div>
 </div>
 <!-- Also a root-level overlay for link modal -->
@@ -1288,22 +1327,28 @@ document.getElementById('modal_publish_now').addEventListener('change', function
     dateFields.style.display = this.checked ? 'none' : 'flex';
 });
 
-/* Settings tabs: keep the tab row fixed; open the chosen panel below it. */
+/* Settings tabs: keep the tab row fixed; open the chosen panel below it.
+   Scoped per .ed-tabs group (its own .ed-tabwrap sibling + panels) so multiple
+   groups on the page — the edit modal AND the Add Article tab — work independently. */
 (function () {
-    var tabs = document.querySelectorAll('.ed-tab');
-    var wrap = document.querySelector('.ed-tabwrap');
-    if (!tabs.length || !wrap) return;
-    tabs.forEach(function (t) {
-        t.addEventListener('click', function () {
-            var key = t.getAttribute('data-edtab');
-            var wasActive = t.classList.contains('active');
-            tabs.forEach(function (x) { x.classList.remove('active'); });
-            document.querySelectorAll('.ed-tabpanel').forEach(function (p) { p.classList.remove('active'); });
-            if (wasActive) { wrap.classList.remove('open'); return; }
-            t.classList.add('active');
-            var panel = document.querySelector('.ed-tabpanel[data-edpanel="' + key + '"]');
-            if (panel) panel.classList.add('active');
-            wrap.classList.add('open');
+    document.querySelectorAll('.ed-tabs').forEach(function (group) {
+        var tabs = group.querySelectorAll('.ed-tab');
+        var wrap = group.nextElementSibling;
+        while (wrap && !wrap.classList.contains('ed-tabwrap')) wrap = wrap.nextElementSibling;
+        if (!tabs.length || !wrap) return;
+        var panels = wrap.querySelectorAll('.ed-tabpanel');
+        tabs.forEach(function (t) {
+            t.addEventListener('click', function () {
+                var key = t.getAttribute('data-edtab');
+                var wasActive = t.classList.contains('active');
+                tabs.forEach(function (x) { x.classList.remove('active'); });
+                panels.forEach(function (p) { p.classList.remove('active'); });
+                if (wasActive) { wrap.classList.remove('open'); return; }
+                t.classList.add('active');
+                var panel = wrap.querySelector('.ed-tabpanel[data-edpanel="' + key + '"]');
+                if (panel) panel.classList.add('active');
+                wrap.classList.add('open');
+            });
         });
     });
 })();
@@ -2029,25 +2074,38 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                         }
                     }
 
-                    // Populate publications
+                    // Populate publications — checkbox + canonical radio, like the edit modal.
                     var pubContainer = document.getElementById('add_article_publications');
                     pubContainer.innerHTML = '';
                     if (json.all_publications && json.all_publications.length > 0) {
+                        var only = (json.all_publications.length === 1);
                         json.all_publications.forEach(function(pub) {
-                            var label = document.createElement('label');
-                            label.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:4px;';
+                            var row = document.createElement('div');
+                            row.style.cssText = 'display:grid;grid-template-columns:1fr auto;align-items:center;gap:16px;padding:8px 10px;border-bottom:1px solid #f0f0f0;';
+                            var left = document.createElement('label');
+                            left.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;color:#1e293b;';
                             var cb = document.createElement('input');
-                            cb.type = 'checkbox';
-                            cb.value = pub.name;
+                            cb.type = 'checkbox'; cb.className = 'add_pub_cb'; cb.value = pub.name;
                             cb.id = 'add_pub_' + pub.name;
-                            cb.checked = pub.selected || (json.all_publications.length === 1);
-                            cb.style.cssText = 'width:16px;height:16px;';
-                            var span = document.createElement('span');
-                            span.textContent = pub.title || pub.name;
-                            span.style.fontSize = '14px';
-                            label.appendChild(cb);
-                            label.appendChild(span);
-                            pubContainer.appendChild(label);
+                            cb.checked = pub.selected || only;
+                            cb.style.cssText = 'width:16px;height:16px;cursor:pointer;';
+                            var span = document.createElement('span'); span.textContent = pub.title || pub.name;
+                            left.appendChild(cb); left.appendChild(span);
+                            var right = document.createElement('label');
+                            right.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:12px;color:#64748b;cursor:pointer;white-space:nowrap;';
+                            var radio = document.createElement('input');
+                            radio.type = 'radio'; radio.name = 'add_canonical_radio'; radio.className = 'add_pub_canonical'; radio.value = pub.name;
+                            radio.style.cssText = 'width:15px;height:15px;cursor:pointer;';
+                            radio.disabled = !cb.checked;
+                            radio.checked = cb.checked && only;
+                            var rlab = document.createElement('span'); rlab.textContent = 'Canonical';
+                            right.appendChild(radio); right.appendChild(rlab);
+                            cb.addEventListener('change', function(){
+                                radio.disabled = !cb.checked;
+                                if (!cb.checked && radio.checked) radio.checked = false;
+                            });
+                            row.appendChild(left); row.appendChild(right);
+                            pubContainer.appendChild(row);
                         });
                     }
 
@@ -2077,91 +2135,85 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                 .catch(function(e) { console.error('Error loading article dropdowns:', e); });
             })();
 
-            // Form submission
+            // Form submission — posts to the SAME create endpoint the edit modal uses
+            // (ajax/save_article.php with a blank id => INSERT), so the fields here
+            // (publications+canonical, flags, SEO) are saved identically.
             $("#ten_add_article").submit(function(event) {
                 event.preventDefault();
 
-                var tmp_var_title = $('#article_title').val();
-                var tmp_var_terms = $('#article_submission_terms_checkbox').is(":checked");
-                var tmp_var_section = $('#add_article_section').val();
+                var title = ($('#article_title').val() || '').trim();
+                var terms = $('#article_submission_terms_checkbox').is(":checked");
+                var section = $('#add_article_section').val();
 
-                if (tmp_var_title == '' || tmp_var_title == false) {
-                    Swal.fire('Error', 'Please enter a title for this article', 'error');
-                    return;
-                }
-                else if (!tmp_var_section) {
-                    Swal.fire('Error', 'Please select a section for this article', 'error');
-                    return;
-                }
-                else if (tmp_var_terms == false) {
-                    Swal.fire('Error', 'You must agree to the Terms of Article Submission', 'error');
-                    return;
-                }
+                if (!title) { Swal.fire('Error', 'Please enter a title for this article', 'error'); return; }
+                if (!section) { Swal.fire('Error', 'Please select a section for this article', 'error'); return; }
+                if (!terms) { Swal.fire('Error', 'You must agree to the Terms of Article Submission', 'error'); return; }
 
-                // Get article text from editor
                 var article_text = $("#article_text").html();
+                if (!article_text || !article_text.trim()) { Swal.fire('Error', 'Please add some article content', 'error'); return; }
 
-                // Get selected publications
                 var selectedPubs = [];
-                $('#add_article_publications input[type="checkbox"]:checked').each(function() {
-                    selectedPubs.push($(this).val());
-                });
-                if (selectedPubs.length === 0) {
-                    Swal.fire('Error', 'Please select at least one publication', 'error');
-                    return;
-                }
+                $('#add_article_publications input.add_pub_cb:checked').each(function() { selectedPubs.push($(this).val()); });
+                if (selectedPubs.length === 0) { Swal.fire('Error', 'Please select at least one publication', 'error'); return; }
+                var canonical = $('#add_article_publications input.add_pub_canonical:checked').val() || selectedPubs[0];
 
-                // Show loading
                 $('#loading_image').show();
 
-                var datastring = $("#ten_add_article").serialize();
-                datastring += '&article_text=' + encodeURIComponent(article_text);
-                datastring += '&add_article_section=' + encodeURIComponent(tmp_var_section);
-                datastring += '&add_article_publications=' + encodeURIComponent(selectedPubs.join(','));
-                datastring += '&sponsored=' + ($('#add_article_sponsored').is(':checked') ? '1' : '0');
-                var selectedAuthor = $('#add_article_author').val();
-                if (selectedAuthor) {
-                    datastring += '&journalist_id=' + encodeURIComponent(selectedAuthor);
-                }
+                var fd = new FormData();
+                fd.append('id', '');                    // blank => create
+                fd.append('title', title);
+                fd.append('article_text', article_text);
+                fd.append('alias', '');
+                fd.append('tags', $('#add_article_tags').val() || '');
+                fd.append('section', section);
+                fd.append('section_subcat', '');
+                fd.append('author', $('#add_article_author').val() || '');
+                fd.append('publications', selectedPubs.join(','));
+                fd.append('canonical', canonical);
+                fd.append('meta_title', $('#add_article_meta_title').val() || '');
+                fd.append('meta_description', $('#add_article_meta_description').val() || '');
+                fd.append('meta_keywords', $('#add_article_meta_keywords').val() || '');
+                fd.append('evergreen', $('#add_article_evergreen').is(':checked') ? '1' : '0');
+                fd.append('featured', $('#add_article_featured').is(':checked') ? '1' : '0');
+                fd.append('sponsored', $('#add_article_sponsored').is(':checked') ? '1' : '0');
+                fd.append('frontpage_temp', $('#add_article_headline').is(':checked') ? '1' : '0');
+                fd.append('publish_now', '1');
+                fd.append('publish_from', '');
+                fd.append('publish_to', '');
+                fd.append('action', 'save');            // create as a draft
 
-                $.ajax({
-                    type: "POST",
-                    url: "save_article.php",
-                    data: datastring,
-                    dataType: "json",
-                    success: function(data) {
-                        $('#loading_image').hide();
-
-                        if (data.status === 'success') {
-                            // Reload articles list and switch to View All Articles tab
-                            if (typeof loadArticles === 'function') loadArticles();
-
-                            Swal.fire({
-                                icon: 'success',
-                                title: 'Article Saved!',
-                                html: data.message || '<p>Your article has been saved as a draft.</p>',
-                                confirmButtonText: 'View All Articles',
-                                showCancelButton: true,
-                                cancelButtonText: 'Add Another'
-                            }).then(function(result) {
-                                if (result.isConfirmed) {
-                                    document.querySelector('.tab[data-tab="view-articles"]').click();
-                                } else {
-                                    // Clear the form for another article
-                                    $('#article_title').val('');
-                                    $('#article_text').html('');
-                                    $('#article_submission_terms_checkbox').prop('checked', true);
-                                }
-                            });
-                        } else {
-                            Swal.fire('Error', data.message || 'There was an error (1) saving your article. Please try again.', 'error');
-                        }
-                    },
-                    error: function(xhr, status, error) {
-                        $('#loading_image').hide();
-                        console.error('AJAX Error:', status, error);
-                        Swal.fire('Error', 'There was an error (2) saving your article. Please try again.', 'error');
+                fetch('/management/ajax/save_article.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    $('#loading_image').hide();
+                    if (data.status === 'success') {
+                        if (typeof loadArticles === 'function') loadArticles();
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Article Saved!',
+                            html: '<p>Your article has been saved as a <strong>draft</strong>' + (data.article_id ? ' (#' + data.article_id + ')' : '') + '.</p>',
+                            confirmButtonText: 'View All Articles',
+                            showCancelButton: true,
+                            cancelButtonText: 'Add Another'
+                        }).then(function(result) {
+                            if (result.isConfirmed) {
+                                document.querySelector('.tab[data-tab="view-articles"]').click();
+                            } else {
+                                $('#article_title').val('');
+                                $('#article_text').html('');
+                                $('#add_article_meta_title,#add_article_meta_description,#add_article_meta_keywords,#add_article_tags').val('');
+                                $('#add_article_headline,#add_article_featured,#add_article_evergreen,#add_article_sponsored').prop('checked', false);
+                                $('#article_submission_terms_checkbox').prop('checked', true);
+                            }
+                        });
+                    } else {
+                        Swal.fire('Error', data.message || 'There was an error saving your article. Please try again.', 'error');
                     }
+                })
+                .catch(function(err) {
+                    $('#loading_image').hide();
+                    console.error('Save error:', err);
+                    Swal.fire('Error', 'There was a network error saving your article. Please try again.', 'error');
                 });
             });
         });
@@ -2186,30 +2238,93 @@ document.getElementById('modal_publish_now').addEventListener('change', function
             };
             let cropperTab2;
 
-            // Search free images — same multi-source modal as the article editor, but
-            // in "save to library" mode (no article body to insert into here).
-            $('#search-free-images-tab2').click(function() {
-                if (typeof window.openImageSearch !== 'function') { return; }
-                window.openImageSearch({
-                    insertIntoArticle: false,
-                    onSaved: function(data, attribution) {
-                        if (!data || data.status !== 'success') return;
-                        document.getElementById('preview-content-tab2').innerHTML =
-                            '<div style="text-align:center;">' +
-                                '<img src="' + data.url + '" alt="Saved image" style="max-width:100%;border-radius:8px;margin-bottom:15px;">' +
-                                '<p style="color:#374151;font-weight:600;">Image URL: <a href="' + data.url + '" target="_blank">' + data.url + '</a></p>' +
-                                (attribution ? '<p style="color:#6b7280;"><em>Attribution: ' + attribution + '</em></p>' : '') +
-                            '</div>';
-                        document.getElementById('preview-tab2').style.display = 'block';
-                        document.getElementById('image-container-tab2').style.display = 'none';
-                        // Add it to the image browser (Tab 1 modal) so it's immediately available.
-                        if (data.image_html) {
-                            const c = document.getElementById('image_block_container');
-                            if (c) { const t = document.createElement('div'); t.innerHTML = data.image_html; if (t.firstChild) c.insertBefore(t.firstChild, c.firstChild); }
-                        }
-                    }
-                });
-            });
+            /* ---- Inline free-image search (rendered in the tab, not a modal) ----
+             * search text + source checkboxes -> thumbnail grid -> preview -> Select &
+             * crop downloads the image (by index, SSRF-safe) and loads it straight into
+             * this tab's existing cropper, then the normal Crop & Save saves to library. */
+            const IMG_EP = 'ajax/image_search.php';
+            function isEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+            function isPost(params){ const fd=new FormData(); Object.keys(params).forEach(k=>fd.append(k,params[k])); return fetch(IMG_EP,{method:'POST',body:fd,credentials:'same-origin'}).then(r=>r.json()); }
+            let tab2Items = [];
+
+            // Provider checkboxes (loaded once; only sources with a key show).
+            isPost({action:'providers'}).then(function(j){
+                const box=document.getElementById('tab2ISSources'); if(!box) return;
+                const list=(j&&j.providers)||[];
+                if(!list.length){ box.innerHTML='<span style="font-size:12px;color:#98a0ac;">No image sources configured.</span>'; return; }
+                box.innerHTML='<span style="font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#98a0ac;">Sources</span>'+
+                    list.map(p=>'<label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#2b313b;font-weight:600;cursor:pointer;"><input type="checkbox" class="tab2ISProv" value="'+isEsc(p.key)+'" checked style="width:15px;height:15px;"> '+isEsc(p.label)+'</label>').join('');
+            }).catch(function(){});
+
+            function tab2RunSearch(){
+                const q=(document.getElementById('tab2ISQuery').value||'').trim();
+                if(!q){ document.getElementById('tab2ISQuery').focus(); return; }
+                const provs=Array.prototype.map.call(document.querySelectorAll('.tab2ISProv:checked'),c=>c.value);
+                if(!provs.length){ Swal.fire('Pick a source','Select at least one image source.','info'); return; }
+                const res=document.getElementById('tab2ISResults');
+                res.innerHTML='<div style="color:#6b7280;font-size:14px;padding:24px 0;"><i class="fas fa-spinner fa-spin"></i> Searching '+provs.length+' source'+(provs.length===1?'':'s')+'…</div>';
+                isPost({action:'search',q:q,providers:provs.join(',')}).then(function(j){
+                    if(j.status!=='success'){ res.innerHTML='<div style="color:#98a0ac;padding:24px 0;">'+isEsc(j.message||'Search failed.')+'</div>'; return; }
+                    tab2Items=j.items||[]; tab2RenderGrid();
+                }).catch(function(e){ res.innerHTML='<div style="color:#98a0ac;padding:24px 0;">Error: '+isEsc(e.message)+'</div>'; });
+            }
+
+            function tab2RenderGrid(){
+                const res=document.getElementById('tab2ISResults');
+                if(!tab2Items.length){ res.innerHTML='<div style="color:#98a0ac;padding:24px 0;">No images found — try different words or more sources.</div>'; return; }
+                res.innerHTML='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;">'+
+                    tab2Items.map(function(it){
+                        return '<div class="tab2ISCell" data-i="'+it.index+'" style="border:1px solid #e6e8ec;border-radius:10px;overflow:hidden;cursor:pointer;background:#fff;">'+
+                            '<img loading="lazy" src="'+isEsc(it.thumb)+'" alt="'+isEsc(it.title||'')+'" style="display:block;width:100%;height:120px;object-fit:cover;background:#f1f5f9;">'+
+                            '<div style="font-size:11px;font-weight:700;color:#6b7280;padding:6px 8px;text-align:center;text-transform:uppercase;letter-spacing:.02em;">'+isEsc(it.provider_label||it.provider)+'</div>'+
+                        '</div>';
+                    }).join('')+'</div>';
+                Array.prototype.forEach.call(res.querySelectorAll('.tab2ISCell'),function(c){ c.addEventListener('click',function(){ tab2ShowPreview(parseInt(c.getAttribute('data-i'),10)); }); });
+            }
+
+            function tab2ItemByIndex(i){ for(let k=0;k<tab2Items.length;k++) if(tab2Items[k].index===i) return tab2Items[k]; return null; }
+
+            function tab2ShowPreview(i){
+                const it=tab2ItemByIndex(i); if(!it) return;
+                const res=document.getElementById('tab2ISResults');
+                const srcLink=it.source_page?'<div style="font-size:13px;margin-bottom:8px;"><a href="'+isEsc(it.source_page)+'" target="_blank" rel="noopener" style="color:#15181e;font-weight:600;">View on '+isEsc(it.provider_label||it.provider)+' ↗</a></div>':'';
+                res.innerHTML='<div style="display:flex;gap:20px;flex-wrap:wrap;">'+
+                    '<div style="flex:1;min-width:280px;"><img src="'+isEsc(it.thumb)+'" alt="'+isEsc(it.title||'')+'" style="width:100%;border-radius:10px;border:1px solid #e6e8ec;"></div>'+
+                    '<div style="flex:1;min-width:220px;">'+
+                        '<span style="display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#b45309;background:#fff7ed;border:1px solid #fbe3c6;padding:3px 10px;border-radius:999px;margin-bottom:12px;">'+isEsc(it.provider_label||it.provider)+'</span>'+
+                        (it.title?'<h4 style="font-size:16px;font-weight:600;color:#15181e;margin:0 0 10px;line-height:1.4;">'+isEsc(it.title)+'</h4>':'')+
+                        (it.attribution?'<div style="font-size:13px;color:#475467;margin-bottom:8px;"><b style="color:#15181e;">Attribution:</b> '+isEsc(it.attribution)+'</div>':'')+
+                        (it.license?'<div style="font-size:13px;color:#475467;margin-bottom:8px;"><b style="color:#15181e;">Licence:</b> '+isEsc(it.license)+'</div>':'')+
+                        srcLink+
+                        '<div style="display:flex;gap:10px;margin-top:18px;">'+
+                            '<button type="button" class="btn btn-primary" id="tab2ISCrop"><i class="fas fa-crop-alt"></i> Select &amp; crop</button>'+
+                            '<button type="button" class="btn" id="tab2ISBack" style="background:#fff;color:#2b313b;border:1px solid #d3d8e0;"><i class="fas fa-arrow-left"></i> Back to results</button>'+
+                        '</div>'+
+                    '</div>'+
+                '</div>';
+                document.getElementById('tab2ISCrop').addEventListener('click',function(){ tab2SelectCrop(it); });
+                document.getElementById('tab2ISBack').addEventListener('click',tab2RenderGrid);
+            }
+
+            function tab2SelectCrop(it){
+                Swal.fire({title:'Fetching image…',allowOutsideClick:false,didOpen:function(){Swal.showLoading();}});
+                isPost({action:'download',index:it.index}).then(function(d){
+                    Swal.close();
+                    if(d.status!=='success'){ Swal.fire('Error',d.message||'Download failed','error'); return; }
+                    document.getElementById('attribution-tab2').value = d.attribution || it.attribution || '';
+                    imageTab2.src = d.dataUrl;                       // data URI → same-origin, no canvas taint
+                    imageContainerTab2.style.display = 'block';
+                    document.getElementById('preview-tab2').style.display = 'none';
+                    if (cropperTab2) { cropperTab2.destroy(); }
+                    cropperTab2 = new Cropper(imageTab2, cropperOptions);
+                    imageContainerTab2.scrollIntoView({behavior:'smooth',block:'nearest'});
+                }).catch(function(e){ Swal.close(); Swal.fire('Error',e.message,'error'); });
+            }
+
+            document.getElementById('tab2ISSearchBtn').addEventListener('click',tab2RunSearch);
+            document.getElementById('tab2ISQuery').addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); tab2RunSearch(); } });
+            const tab2UploadLink=document.getElementById('tab2UploadLink');
+            if(tab2UploadLink) tab2UploadLink.addEventListener('click',function(e){ e.preventDefault(); document.getElementById('file-input-tab2').click(); });
 
             // Pixabay search functionality
             $('#pixabay-search-form-tab2').on('submit', function(e) {
@@ -2905,6 +3020,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
     const editorSlot = document.getElementById('modal_editor_slot');
 
     let activeArticleId = null;
+    let isCreateMode = false;
     let movedEditor = false;
     let originalEditor = null;
     let originalEditorParent = null;
@@ -3042,6 +3158,12 @@ document.getElementById('modal_publish_now').addEventListener('change', function
         if (cloneUsed) {
             cleanupClonedEditor();
         }
+        // Strict reset: empty the shared editor so no article content lingers in the
+        // Add Article tab or the next modal open (prevents cross-context contamination).
+        const etReset = document.getElementById('article_text');
+        if (etReset) etReset.innerHTML = '';
+        activeArticleId = null;
+        isCreateMode = false;
         releaseFocusTrap();
     }
 
@@ -3133,11 +3255,17 @@ document.getElementById('modal_publish_now').addEventListener('change', function
     // Resizer logic (resize modal dialog)
 
     // openEdit exposed for table buttons to call
+    // Open the modal to CREATE a new article (reuses the same edit modal + save path).
+    window.openCreateArticle = function () { window.openEdit(0); };
+
     window.openEdit = function (id) {
-        activeArticleId = id;
-        modalArticleIdSpan.textContent = '#' + id;
+        const creating = !id || parseInt(id, 10) === 0;
+        activeArticleId = creating ? null : id;
+        isCreateMode = creating;
+        modalArticleIdSpan.textContent = creating ? 'New article' : ('#' + id);
         save_status.style.color = '#666';
-        save_status.textContent = 'Loading article...';
+        save_status.textContent = creating ? '' : 'Loading article...';
+        if (deleteArticleBtn) deleteArticleBtn.style.display = creating ? 'none' : '';
         showModal();
 
         // Clear fields
@@ -3161,10 +3289,15 @@ document.getElementById('modal_publish_now').addEventListener('change', function
         if (!moved) {
             cloneEditorToModal();
         }
+        // Create mode: start from a genuinely empty editor (no lingering content).
+        if (creating) {
+            const etNew = document.getElementById('article_text');
+            if (etNew) etNew.innerHTML = '';
+        }
 
-        // POST load article
+        // POST load article data (id=0 returns blank defaults + the dropdown lists).
         const fd = new FormData();
-        fd.append('id', id);
+        fd.append('id', creating ? 0 : id);
 
         fetch('/management/ajax/get_article_data.php', {
             method: 'POST',
@@ -3429,6 +3562,14 @@ document.getElementById('modal_publish_now').addEventListener('change', function
             return false;
         }
 
+        // Must agree to the submission terms.
+        const termsCb = document.getElementById('modal_terms_checkbox');
+        if (termsCb && !termsCb.checked) {
+            save_status.style.color = '#dc3545';
+            save_status.textContent = 'You must agree to the Terms of Article Submission.';
+            return false;
+        }
+
         // check chosen pubs
         const checkboxes = pub_container.querySelectorAll('input[type="checkbox"]');
         let anyPub = false;
@@ -3525,7 +3666,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
 
     // Generic save handler
     function saveArticle(action) {
-        if (!activeArticleId) return;
+        // No activeArticleId => creating a new article (id sent blank => server INSERTs).
         if (!validateBeforeSave()) return;
 
         const btnMap = {
@@ -3611,7 +3752,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
 
         // Prepare POST
         const fd = new FormData();
-        fd.append('id', activeArticleId);
+        fd.append('id', activeArticleId || '');   // blank => create
         fd.append('title', fld_title.value || '');
         fd.append('article_text', articleHtml || '');
         fd.append('alias', fld_alias.value || '');
@@ -3653,9 +3794,17 @@ document.getElementById('modal_publish_now').addEventListener('change', function
             console.log('Save response:', resp);
             
             if (resp && resp.status === 'success') {
+                // A create returns the new id — adopt it so any further save updates
+                // (not re-creates) this same article, and the modal is now in edit mode.
+                if (!activeArticleId && resp.article_id) {
+                    activeArticleId = resp.article_id;
+                    isCreateMode = false;
+                    if (deleteArticleBtn) deleteArticleBtn.style.display = '';
+                    modalArticleIdSpan.textContent = '#' + resp.article_id;
+                }
                 save_status.style.color = '#28a745';
                 save_status.textContent = 'Saved successfully.';
-                
+
                 // Show SweetAlert with higher z-index
                 Swal.fire({
                     icon: 'success',
