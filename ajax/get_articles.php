@@ -24,6 +24,7 @@ $search     = isset($_GET['search']) ? trim($_GET['search']) : '';
 $sortCol    = isset($_GET['sort_col']) ? $_GET['sort_col'] : 'submission_date';
 $sortDir    = (isset($_GET['sort_dir']) && strtolower($_GET['sort_dir']) === 'asc') ? 'ASC' : 'DESC';
 $hide_imageless = isset($_GET['hide_imageless']) ? intval($_GET['hide_imageless']) : 0;
+$scrapedOnly = isset($_GET['scraped']) ? intval($_GET['scraped']) : 0;
 
 // Filter parameters
 $filterUser = isset($_GET['user']) ? intval($_GET['user']) : 0;
@@ -31,6 +32,9 @@ $filterSection = isset($_GET['section']) ? trim($_GET['section']) : '';
 $filterPublication = isset($_GET['publication']) ? trim($_GET['publication']) : '';
 $filterDateFrom = isset($_GET['date_from']) ? trim($_GET['date_from']) : '';
 $filterDateTo = isset($_GET['date_to']) ? trim($_GET['date_to']) : '';
+$filterState = isset($_GET['state']) ? trim($_GET['state']) : '';
+$allowedStates = array('published', 'draft', 'under review', 'expired', 'deleted');
+$hasStateFilter = ($filterState !== '' && in_array($filterState, $allowedStates, true));
 
 $allowedSort = array('id', 'title', 'state', 'submission_date');
 if (!in_array($sortCol, $allowedSort)) {
@@ -55,7 +59,9 @@ while ($row = $res->fetch_assoc()) {
 // -----------------------------------------------------------------------------
 // WHERE clause
 // -----------------------------------------------------------------------------
-$where = "state != 'deleted'";
+// When a specific state is chosen, filter to it (this also allows viewing 'deleted');
+// otherwise keep the default of hiding deleted articles. The '?' is the FIRST bound param.
+$where = $hasStateFilter ? "state = ?" : "state != 'deleted'";
 
 // Add role-based filtering BEFORE user filters
 if ($position === 'Section Editor' && !empty($section) && !empty($publication)) {
@@ -83,6 +89,11 @@ if ($search !== "") {
 
 if ($hide_imageless == 1) {
     $where .= " AND (imageless IS NULL OR imageless != 1)";
+}
+
+// Scraped-only: articles the scraper wrote carry a source-URL hash (independent of imageless).
+if ($scrapedOnly == 1) {
+    $where .= " AND news_scrape_url_hash IS NOT NULL AND news_scrape_url_hash <> ''";
 }
 
 // User/Author filter
@@ -123,6 +134,12 @@ if (!$stmt) {
 // Build parameter binding dynamically
 $bindParams = array();
 $bindTypes = '';
+
+// State placeholder is first in $where, so bind it first.
+if ($hasStateFilter) {
+    $bindParams[] = &$filterState;
+    $bindTypes .= 's';
+}
 
 if ($search !== "") {
     $likeSearch = '%' . $search . '%';
@@ -191,6 +208,12 @@ if (!$stmt) {
 // Build parameter binding dynamically (same as count query)
 $bindParams2 = array();
 $bindTypes2 = '';
+
+// State placeholder is first in $where, so bind it first.
+if ($hasStateFilter) {
+    $bindParams2[] = &$filterState;
+    $bindTypes2 .= 's';
+}
 
 if ($search !== "") {
     $likeSearch = '%' . $search . '%';

@@ -676,7 +676,19 @@ $pageTitle = 'Article Management';
                                             <option value="">All Publications</option>
                                         </select>
                                     </div>
-                                    
+
+                                    <div>
+                                        <label style="display:block;font-weight:600;margin-bottom:6px;color:#374151;font-size:13px;">State</label>
+                                        <select id="filterState" style="width:100%;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;background:#fff;font-size:14px;">
+                                            <option value="">All States</option>
+                                            <option value="published">Published</option>
+                                            <option value="draft">Draft</option>
+                                            <option value="under review">Under Review</option>
+                                            <option value="expired">Expired</option>
+                                            <option value="deleted">Deleted</option>
+                                        </select>
+                                    </div>
+
                                     <div>
                                         <label style="display:block;font-weight:600;margin-bottom:6px;color:#374151;font-size:13px;">Date From</label>
                                         <input type="date" id="filterDateFrom" style="width:100%;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;">
@@ -693,8 +705,12 @@ $pageTitle = 'Article Management';
                                             <input type="checkbox" id="filterHideImageless" style="width:18px;height:18px;">
                                             <span style="font-weight:500;font-size:14px;color:#374151;">Hide Imageless</span>
                                         </label>
+                                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;background:#fff;margin-top:8px;">
+                                            <input type="checkbox" id="filterScraped" style="width:18px;height:18px;">
+                                            <span style="font-weight:500;font-size:14px;color:#374151;">Scraped only</span>
+                                        </label>
                                     </div>
-                                    
+
                                 </div>
                                 
                                 <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end;">
@@ -835,6 +851,7 @@ $pageTitle = 'Article Management';
                                     <button type="button" id="ordered-list" data-tooltip="Ordered List"><i class="fas fa-list-ol"></i></button>
                                     <button type="button" id="add-link" data-tooltip="Add Link"><i class="fas fa-link"></i></button>
                                     <button type="button" id="add-image-editor" data-tooltip="Add Image"><i class="fas fa-image"></i></button>
+                                    <button type="button" id="search-free-images" data-tooltip="Search free images"><i class="fas fa-images"></i></button>
                                     <button type="button" id="maximize" data-tooltip="Maximize"><i class="fas fa-expand"></i></button>
                                     <button type="button" id="search" data-tooltip="Search"><i class="fas fa-search"></i></button>
                                     <button type="button" id="toggle-source" data-tooltip="Source"><i class="fas fa-code"></i></button>
@@ -910,42 +927,18 @@ $pageTitle = 'Article Management';
             <!-- Tab 3: Add Image -->
             <div id="add-image" class="tab-content">
                 <div class="card">
-                    <h2><i class="fas fa-image"></i> Upload Article Image</h2>
-                    
-                    <!-- Pixabay Search Section -->
-                    <div id="pixabay-search-section" style="display: none; margin-top: 20px; padding: 20px; background: #f9fafb; border: 1px solid #ddd;">
-                        <h3 style="color: #111827; margin-bottom: 15px;"><i class="fas fa-search"></i> Search Free Images on Pixabay</h3>
-                        <form id="pixabay-search-form-tab2" style="margin-bottom: 20px;" onsubmit="return false;">
-                            <div style="display: flex; gap: 12px;">
-                                <input type="text" id="pixabay-query-tab2" class="form-control" placeholder="Search for images (e.g., 'nature', 'business', 'technology')" style="flex: 1;">
-                                <button type="submit" class="btn btn-primary">
-                                    <i class="fas fa-search"></i> Search
-                                </button>
-                            </div>
-                        </form>
-                        
-                        <div id="pixabay-loading-tab2" style="display: none; text-align: center; padding: 40px;">
-                            <img src="loading.gif" style="width: 50px;">
-                            <p style="color: #333; margin-top: 10px;">Searching Pixabay...</p>
-                        </div>
-                        
-                        <div id="pixabay-results-tab2" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; max-height: 500px; overflow-y: auto;"></div>
-                        
-                        <div id="pixabay-no-results-tab2" style="display: none; text-align: center; padding: 40px; color: #666;">
-                            <i class="fas fa-image" style="font-size: 48px; margin-bottom: 15px; opacity: 0.3;"></i>
-                            <p>No images found. Try a different search term.</p>
-                        </div>
-                    </div>
+                    <h2><i class="fas fa-image"></i> Add Article Image</h2>
+                    <p style="color:#6b7280;margin:-4px 0 18px;font-size:14px;">Search royalty-free images across multiple sources (Openverse, Wikimedia Commons, Pexels, Unsplash, Pixabay), or upload your own — then crop and save to your image library.</p>
 
-                    <!-- Upload Section -->
+                    <!-- Add-image actions -->
                     <div id="image_upload_section" style="display: block;">
                         <div class="form-group" id="file-upload-area" style="display: block;">
-                            <label for="file-input-tab2" class="btn btn-primary" style="cursor: pointer; display: inline-block;">
-                                <i class="fas fa-upload"></i> Choose Image from Your Computer
-                            </label>
-                            <button type="button" class="btn btn-primary" id="search-pixabay-toggle" style="margin-left: 10px;">
-                                <i class="fas fa-search"></i> Search Pixabay Images
+                            <button type="button" class="btn btn-primary" id="search-free-images-tab2">
+                                <i class="fas fa-images"></i> Search free images
                             </button>
+                            <label for="file-input-tab2" class="btn btn-primary" style="cursor: pointer; display: inline-block; margin-left: 10px; background:#475569; border-color:#475569;">
+                                <i class="fas fa-upload"></i> Upload from your computer
+                            </label>
                             <input style="display: none;" type="file" id="file-input-tab2" accept="image/*">
                             <span id="filename-display" style="margin-left: 15px; color: #666;"></span>
                         </div>
@@ -1809,8 +1802,8 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                     return;
                 }
                 var attribution = document.getElementById('attribution').value;
-                const croppedCanvas = cropper.getCroppedCanvas({ width: 490, height: 310, fillColor: '#ffffff' });
-                const croppedImage = croppedCanvas.toDataURL('image/jpeg');
+                const croppedCanvas = cropper.getCroppedCanvas({ width: 490, height: 310, fillColor: '#ffffff', imageSmoothingEnabled: true, imageSmoothingQuality: 'high' });
+                const croppedImage = croppedCanvas.toDataURL('image/jpeg', 0.95);
                 $("#loading").show();
                 fetch('crop_webp.php', {
                     method: 'POST',
@@ -2193,16 +2186,29 @@ document.getElementById('modal_publish_now').addEventListener('change', function
             };
             let cropperTab2;
 
-            // Pixabay toggle button
-            $('#search-pixabay-toggle').click(function() {
-                const pixabaySection = $('#pixabay-search-section');
-                if (pixabaySection.is(':visible')) {
-                    pixabaySection.hide();
-                    $(this).html('<i class="fas fa-search"></i> Search Pixabay Images');
-                } else {
-                    pixabaySection.show();
-                    $(this).html('<i class="fas fa-times"></i> Hide Pixabay Search');
-                }
+            // Search free images — same multi-source modal as the article editor, but
+            // in "save to library" mode (no article body to insert into here).
+            $('#search-free-images-tab2').click(function() {
+                if (typeof window.openImageSearch !== 'function') { return; }
+                window.openImageSearch({
+                    insertIntoArticle: false,
+                    onSaved: function(data, attribution) {
+                        if (!data || data.status !== 'success') return;
+                        document.getElementById('preview-content-tab2').innerHTML =
+                            '<div style="text-align:center;">' +
+                                '<img src="' + data.url + '" alt="Saved image" style="max-width:100%;border-radius:8px;margin-bottom:15px;">' +
+                                '<p style="color:#374151;font-weight:600;">Image URL: <a href="' + data.url + '" target="_blank">' + data.url + '</a></p>' +
+                                (attribution ? '<p style="color:#6b7280;"><em>Attribution: ' + attribution + '</em></p>' : '') +
+                            '</div>';
+                        document.getElementById('preview-tab2').style.display = 'block';
+                        document.getElementById('image-container-tab2').style.display = 'none';
+                        // Add it to the image browser (Tab 1 modal) so it's immediately available.
+                        if (data.image_html) {
+                            const c = document.getElementById('image_block_container');
+                            if (c) { const t = document.createElement('div'); t.innerHTML = data.image_html; if (t.firstChild) c.insertBefore(t.firstChild, c.firstChild); }
+                        }
+                    }
+                });
             });
 
             // Pixabay search functionality
@@ -2342,15 +2348,15 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                 }
 
                 const attribution = document.getElementById('attribution-tab2').value;
-                const croppedCanvas = cropperTab2.getCroppedCanvas({ 
-                    width: 490, 
-                    height: 310, 
+                const croppedCanvas = cropperTab2.getCroppedCanvas({
+                    width: 490,
+                    height: 310,
                     fillColor: '#ffffff',
                     imageSmoothingEnabled: true,
                     imageSmoothingQuality: 'high'
                 });
-                
-                const croppedImage = croppedCanvas.toDataURL('image/jpeg', 0.9);
+
+                const croppedImage = croppedCanvas.toDataURL('image/jpeg', 0.95);
                 
                 $("#loading-tab2").show();
                 
@@ -2439,6 +2445,8 @@ document.getElementById('modal_publish_now').addEventListener('change', function
         let filterDateFrom = '';
         let filterDateTo = '';
         let filterHideImageless = false;
+        let filterState = '';
+        let filterScraped = false;
 
         // Elements
         const tbody = document.querySelector('#articlesTable tbody');
@@ -2487,6 +2495,8 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                       '&publication=' + encodeURIComponent(filterPublication || '') +
                       '&date_from=' + encodeURIComponent(filterDateFrom || '') +
                       '&date_to=' + encodeURIComponent(filterDateTo || '') +
+                      '&state=' + encodeURIComponent(filterState || '') +
+                      '&scraped=' + (filterScraped ? '1' : '') +
                       '&hide_imageless=' + (filterHideImageless ? '1' : '');
 
             fetch(q)
@@ -2688,9 +2698,11 @@ document.getElementById('modal_publish_now').addEventListener('change', function
             filterUser = document.getElementById('filterUser').value;
             filterSection = document.getElementById('filterSection').value;
             filterPublication = document.getElementById('filterPublication').value;
+            filterState = document.getElementById('filterState').value;
             filterDateFrom = document.getElementById('filterDateFrom').value;
             filterDateTo = document.getElementById('filterDateTo').value;
             filterHideImageless = document.getElementById('filterHideImageless').checked;
+            filterScraped = document.getElementById('filterScraped').checked;
             
             currentPage = 1;
             loadArticles();
@@ -2701,16 +2713,20 @@ document.getElementById('modal_publish_now').addEventListener('change', function
             document.getElementById('filterUser').value = '';
             document.getElementById('filterSection').value = '';
             document.getElementById('filterPublication').value = '';
+            document.getElementById('filterState').value = '';
             document.getElementById('filterDateFrom').value = '';
             document.getElementById('filterDateTo').value = '';
             document.getElementById('filterHideImageless').checked = false;
-            
+            document.getElementById('filterScraped').checked = false;
+
             filterUser = '';
             filterSection = '';
             filterPublication = '';
+            filterState = '';
             filterDateFrom = '';
             filterDateTo = '';
             filterHideImageless = false;
+            filterScraped = false;
             
             currentPage = 1;
             loadArticles();
@@ -2778,16 +2794,18 @@ document.getElementById('modal_publish_now').addEventListener('change', function
         loadFilterDropdowns();
 
         // Auto-trigger filters on change
-        ['filterUser', 'filterSection', 'filterPublication'].forEach(function(id) {
+        ['filterUser', 'filterSection', 'filterPublication', 'filterState'].forEach(function(id) {
             const el = document.getElementById(id);
             if (el) el.addEventListener('change', applyFilters);
         });
         const filterDateFromEl = document.getElementById('filterDateFrom');
         const filterDateToEl = document.getElementById('filterDateTo');
         const filterHideImagelessEl = document.getElementById('filterHideImageless');
+        const filterScrapedEl = document.getElementById('filterScraped');
         if (filterDateFromEl) filterDateFromEl.addEventListener('change', applyFilters);
         if (filterDateToEl) filterDateToEl.addEventListener('change', applyFilters);
         if (filterHideImagelessEl) filterHideImagelessEl.addEventListener('change', applyFilters);
+        if (filterScrapedEl) filterScrapedEl.addEventListener('change', applyFilters);
 
         // Sorting attach to headers
         function initSorting() {
@@ -3733,5 +3751,6 @@ document.getElementById('modal_publish_now').addEventListener('change', function
     })();
     </script>
     <script src="js/scraper_image_suggest.js?v=<?php echo @filemtime(__DIR__ . '/js/scraper_image_suggest.js'); ?>"></script>
+    <script src="js/image_search.js?v=<?php echo @filemtime(__DIR__ . '/js/image_search.js'); ?>"></script>
 </body>
 </html>

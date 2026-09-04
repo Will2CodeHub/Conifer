@@ -76,6 +76,7 @@ try {
                 'project_id'  => (int)($_POST['project_id'] ?? $_GET['project_id'] ?? 0),
                 'publication' => trim($_POST['publication'] ?? ''),
                 'section'     => trim($_POST['section'] ?? ''),
+                'state'       => trim($_POST['state'] ?? ''),
                 'from'        => trim($_POST['from'] ?? ''),
                 'to'          => trim($_POST['to'] ?? ''),
                 'search'      => trim($_POST['search'] ?? ''),
@@ -123,6 +124,12 @@ try {
             }
             unset($r);
             echo json_encode(['success' => true, 'results' => $results]);
+            break;
+
+        case 'curate_published_today':
+            $pubSectionId = (int)($_POST['pub_section_id'] ?? $_GET['pub_section_id'] ?? 0);
+            $r = scraper_published_today($pubSectionId);
+            echo json_encode(['success' => true, 'items' => $r['items'], 'front_page_url' => $r['front_page_url']]);
             break;
 
         case 'save_pub_order':
