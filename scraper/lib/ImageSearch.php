@@ -106,17 +106,78 @@ function scraper_img_unsplash(string $q, int $n): array {
     return $out;
 }
 
+function scraper_img_pixabay(string $q, int $n): array {
+    if (!defined('PIXABAY_API_KEY') || PIXABAY_API_KEY === '') return [];
+    $url = 'https://pixabay.com/api/?key=' . rawurlencode(PIXABAY_API_KEY) . '&q=' . rawurlencode($q)
+        . '&per_page=' . max(3, $n) . '&image_type=photo&safesearch=true';
+    $data = json_decode(scraper_img_http($url), true);
+    $out = [];
+    foreach (($data['hits'] ?? []) as $r) {
+        $out[] = [
+            'provider' => 'pixabay',
+            'thumb' => $r['webformatURL'] ?? $r['previewURL'] ?? '',
+            'url' => $r['largeImageURL'] ?? $r['webformatURL'] ?? '',
+            'title' => $r['tags'] ?? '',
+            'attribution' => 'Image by ' . ($r['user'] ?? 'Pixabay') . ' from Pixabay',
+            'license' => 'Pixabay License',
+            'source_page' => $r['pageURL'] ?? '',
+        ];
+    }
+    return $out;
+}
+
+/** Registry of image providers: key => [label, search fn, always-on|key constant]. */
+function scraper_image_provider_registry(): array {
+    return [
+        'openverse' => ['label' => 'Openverse',         'fn' => 'scraper_img_openverse', 'key' => null],
+        'wikimedia' => ['label' => 'Wikimedia Commons', 'fn' => 'scraper_img_wikimedia', 'key' => null],
+        'pexels'    => ['label' => 'Pexels',            'fn' => 'scraper_img_pexels',    'key' => 'PEXELS_API_KEY'],
+        'unsplash'  => ['label' => 'Unsplash',          'fn' => 'scraper_img_unsplash',  'key' => 'UNSPLASH_API_KEY'],
+        'pixabay'   => ['label' => 'Pixabay',           'fn' => 'scraper_img_pixabay',   'key' => 'PIXABAY_API_KEY'],
+    ];
+}
+
+/** Providers usable right now: keyless ones always, keyed ones only if configured. */
+function scraper_image_providers_available(): array {
+    $out = [];
+    foreach (scraper_image_provider_registry() as $k => $p) {
+        $ok = $p['key'] === null || (defined($p['key']) && constant($p['key']) !== '');
+        if ($ok) $out[$k] = $p['label'];
+    }
+    return $out;
+}
+
+/** Host allowlist (provider domains + their image CDNs) for safe server-side download. */
+function scraper_image_host_allowed(string $url): bool {
+    $host = strtolower((string)parse_url($url, PHP_URL_HOST));
+    if ($host === '') return false;
+    $suffixes = [
+        'openverse.org', 'wikimedia.org', 'wikipedia.org', 'wmcloud.org',
+        'pexels.com', 'unsplash.com', 'pixabay.com', 'pixabaycdn.com', 'pixabay.org',
+    ];
+    foreach ($suffixes as $s) {
+        if ($host === $s || substr($host, -(strlen($s) + 1)) === '.' . $s) return true;
+    }
+    return false;
+}
+
 /**
- * Combined search: a few results from each available provider.
+ * Combined search across the given providers (default: all available).
  * Never throws — provider failures are skipped.
  */
-function scraper_image_search(string $query, int $perProvider = 4): array {
+function scraper_image_search(string $query, int $perProvider = 4, ?array $providers = null): array {
     $query = trim($query);
     if ($query === '') return [];
+    $reg = scraper_image_provider_registry();
+    $avail = scraper_image_providers_available();
+    $keys = $providers !== null
+        ? array_values(array_intersect($providers, array_keys($avail)))
+        : array_keys($avail);
+    if (!$keys) return [];
     $out = [];
-    foreach (['scraper_img_openverse', 'scraper_img_pexels', 'scraper_img_unsplash', 'scraper_img_wikimedia'] as $fn) {
+    foreach ($keys as $k) {
         try {
-            $out = array_merge($out, $fn($query, $perProvider));
+            $out = array_merge($out, ($reg[$k]['fn'])($query, $perProvider));
         } catch (Throwable $e) {
             // skip provider
         }

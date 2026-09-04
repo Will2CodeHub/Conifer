@@ -86,6 +86,27 @@ function scraper_curate_publications(): array {
         $out[] = ['publication_key' => $k, 'section_id' => $sid, 'ten_section' => $r['ten_section'], 'top_n' => (int)$r['daily_count'], 'new_count' => (int)$c];
     }
     $conn->close();
+
+    // Enrich with each publication's display name + front-page URL (admin_ten.publications)
+    // for the tab tooltips and front-page links.
+    $keys = array_map(function ($p) { return $p['publication_key']; }, $out);
+    if ($keys) {
+        $a = getDBConnection_TENAdmin();
+        $inq = implode(',', array_fill(0, count($keys), '?'));
+        $ps = $a->prepare("SELECT publication, title, url FROM publications WHERE publication IN ($inq)");
+        $ps->bind_param(str_repeat('s', count($keys)), ...$keys);
+        $ps->execute();
+        $meta = [];
+        $pr = $ps->get_result();
+        while ($x = $pr->fetch_assoc()) $meta[$x['publication']] = $x;
+        $ps->close(); $a->close();
+        foreach ($out as &$p) {
+            $m = $meta[$p['publication_key']] ?? null;
+            $p['name'] = ($m && !empty($m['title'])) ? $m['title'] : strtoupper($p['publication_key']);
+            $p['front_page_url'] = ($m && !empty($m['url'])) ? rtrim($m['url'], '/') . '/' : null;
+        }
+        unset($p);
+    }
     return $out;
 }
 
@@ -328,7 +349,9 @@ function scraper_curate_items(int $pubSectionId, string $mode = 'all', string $d
     $hasDate = (bool)preg_match('/^\d{4}-\d{2}-\d{2}$/', $date);
     // Evaluate "today" in MySQL (CURDATE()) so it matches how fetched_at/curated_at are stored.
     $dayCol = $hasDate ? '?' : 'CURDATE()';
-    $sel = "SELECT i.id, i.status, i.curate_rank, i.curate_reason,
+    // Aggregate the drafts link so multiple drafts for one item can't duplicate the
+    // row or hide the article id (pick the highest article_id any draft recorded).
+    $sel = "SELECT i.id, i.status, i.curate_rank, i.curate_reason, i.source_url_hash,
                    COALESCE(NULLIF(i.title_translated,''), i.title) AS title,
                    COALESCE(NULLIF(i.summary_translated,''), i.summary) AS summary,
                    i.title AS title_original, i.source_url, i.published_at, i.fetched_at,
@@ -337,7 +360,8 @@ function scraper_curate_items(int $pubSectionId, string $mode = 'all', string $d
             JOIN ten_scraper_pub_sections ps ON ps.id = i.pub_section_id
             LEFT JOIN ten_scraper_feeds f ON f.id = i.feed_id
             LEFT JOIN ten_scraper_sources src ON src.id = f.source_id
-            LEFT JOIN ten_scraper_drafts d ON d.item_id = i.id
+            LEFT JOIN (SELECT item_id, MAX(article_id) AS article_id FROM ten_scraper_drafts GROUP BY item_id) d
+                   ON d.item_id = i.id
             WHERE i.pub_section_id=? ";
     if ($mode === 'curated') {
         $sql = $sel . "AND i.curate_rank IS NOT NULL AND DATE(i.curated_at)=$dayCol ORDER BY i.curate_rank ASC, i.id DESC";
@@ -350,7 +374,102 @@ function scraper_curate_items(int $pubSectionId, string $mode = 'all', string $d
     $stmt->execute();
     $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close(); $conn->close();
+
+    // Fallback: some promoted items have no draft link (article id missing) — resolve
+    // it from the article the scraper wrote, matched on its stored source-URL hash.
+    scraper_fill_article_ids_by_hash($rows);
     return scraper_attach_article_links($rows);
+}
+
+/**
+ * Fill a missing article_id on any row by matching the item's source_url_hash to
+ * articles.news_scrape_url_hash (the hash the scraper stamps on the article it
+ * writes). Mutates $rows in place. Highest article id wins on collisions.
+ */
+function scraper_fill_article_ids_by_hash(array &$rows): void {
+    $hashes = [];
+    foreach ($rows as $r) {
+        if (empty($r['article_id']) && !empty($r['source_url_hash'])) $hashes[$r['source_url_hash']] = true;
+    }
+    if (!$hashes) return;
+    $hashes = array_keys($hashes);
+    $a = getDBConnection_TENAdmin();
+    $inq = implode(',', array_fill(0, count($hashes), '?'));
+    $ps = $a->prepare("SELECT id, news_scrape_url_hash FROM articles WHERE news_scrape_url_hash IN ($inq) ORDER BY id ASC");
+    $ps->bind_param(str_repeat('s', count($hashes)), ...$hashes);
+    $ps->execute();
+    $map = [];
+    $rs = $ps->get_result();
+    while ($x = $rs->fetch_assoc()) { $map[$x['news_scrape_url_hash']] = (int)$x['id']; } // ASC so last wins = max id
+    $ps->close(); $a->close();
+    foreach ($rows as &$r) {
+        if (empty($r['article_id']) && !empty($r['source_url_hash']) && isset($map[$r['source_url_hash']])) {
+            $r['article_id'] = $map[$r['source_url_hash']];
+        }
+    }
+    unset($r);
+}
+
+/**
+ * Articles the scraper published today from one section: promoted today
+ * (ten_scraper_drafts.created_at = today) and currently live (article state
+ * 'published'). Each row carries a live link, whether it's the front-page
+ * headline (articles.frontpage_temp = 1), and the publication's front-page URL.
+ */
+function scraper_published_today(int $pubSectionId): array {
+    $section = scraper_get_section($pubSectionId);
+    if (!$section) return ['items' => [], 'front_page_url' => null];
+    $pubKey = $section['publication_key'];
+
+    // 1) Scraper DB: article ids promoted from this section today.
+    $conn = getDBConnection();
+    $stmt = $conn->prepare(
+        "SELECT d.article_id, MAX(d.created_at) AS promoted_at
+         FROM ten_scraper_drafts d
+         JOIN ten_scraper_items i ON i.id = d.item_id
+         WHERE i.pub_section_id = ? AND d.article_id IS NOT NULL
+           AND DATE(d.created_at) = CURDATE()
+         GROUP BY d.article_id
+         ORDER BY promoted_at DESC"
+    );
+    $stmt->bind_param('i', $pubSectionId);
+    $stmt->execute();
+    $drafts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close(); $conn->close();
+
+    $ids = array_values(array_unique(array_filter(array_map(function ($r) { return (int)$r['article_id']; }, $drafts))));
+    if (!$ids) return ['items' => [], 'front_page_url' => null];
+    $promotedAt = [];
+    foreach ($drafts as $r) { $promotedAt[(int)$r['article_id']] = $r['promoted_at']; }
+
+    // 2) admin_ten: article details + publication front-page base URL.
+    $a = getDBConnection_TENAdmin();
+    $res = $a->query("SELECT id, title, url, state, frontpage_temp FROM articles WHERE id IN (" . implode(',', $ids) . ")");
+    $arts = [];
+    while ($x = $res->fetch_assoc()) { $arts[(int)$x['id']] = $x; }
+    $base = null;
+    $ps = $a->prepare("SELECT url FROM publications WHERE publication=? LIMIT 1");
+    $ps->bind_param('s', $pubKey); $ps->execute();
+    $pr = $ps->get_result()->fetch_assoc(); $ps->close();
+    if ($pr && !empty($pr['url'])) $base = rtrim($pr['url'], '/');
+    $a->close();
+
+    $frontPage = $base ? $base . '/' : null;
+    $items = [];
+    foreach ($ids as $aid) {
+        $art = $arts[$aid] ?? null;
+        if (!$art || $art['state'] !== 'published') continue;   // only currently-live articles
+        $isHeadline = (int)$art['frontpage_temp'] === 1;
+        $items[] = [
+            'article_id'     => $aid,
+            'title'          => $art['title'],
+            'live_url'       => ($base && !empty($art['url'])) ? $base . '/' . ltrim($art['url'], '/') : null,
+            'is_headline'    => $isHeadline,
+            'front_page_url' => $isHeadline ? $frontPage : null,
+            'promoted_at'    => $promotedAt[$aid] ?? null,
+        ];
+    }
+    return ['items' => $items, 'front_page_url' => $frontPage];
 }
 
 /** Per-user preference get/set (tab order etc.). */
@@ -370,39 +489,102 @@ function scraper_set_pref(int $userId, string $key, string $value): void {
     $stmt->bind_param('iss', $userId, $key, $value); $stmt->execute(); $stmt->close(); $conn->close();
 }
 
-/** Filterable history across all sections of a project (for the History table). */
+/**
+ * History = articles the scraper PUBLISHED in the last 30 days. Each row carries
+ * the publish date and a link to the article on its canonical publication
+ * (articles.canonical -> that site's URL + the article slug; falls back to the
+ * first listed publication when canonical is unset). Filterable by publication,
+ * section and text.
+ */
 function scraper_history_query(array $f): array {
+    // 1) Scraper side: promoted items (candidate articles) matching the filters.
     $conn = getDBConnection();
-    $sql = "SELECT i.id, i.status,
+    $sql = "SELECT d.article_id,
                    COALESCE(NULLIF(i.title_translated,''), i.title) AS title,
-                   i.source_url, i.published_at, i.fetched_at,
-                   src.name AS source_name, d.article_id,
+                   src.name AS source_name,
                    ps.publication_key, ps.ten_section
             FROM ten_scraper_items i
             JOIN ten_scraper_pub_sections ps ON ps.id = i.pub_section_id
             LEFT JOIN ten_scraper_feeds f ON f.id = i.feed_id
             LEFT JOIN ten_scraper_sources src ON src.id = f.source_id
-            LEFT JOIN ten_scraper_drafts d ON d.item_id = i.id
+            JOIN ten_scraper_drafts d ON d.item_id = i.id AND d.article_id IS NOT NULL
             WHERE 1=1";
     $params = []; $types = '';
     if (!empty($f['project_id'])) { $sql .= " AND ps.project_id=?"; $params[] = (int)$f['project_id']; $types .= 'i'; }
     if (($f['publication'] ?? '') !== '') { $sql .= " AND ps.publication_key=?"; $params[] = $f['publication']; $types .= 's'; }
     if (($f['section'] ?? '') !== '') { $sql .= " AND ps.ten_section=?"; $params[] = $f['section']; $types .= 's'; }
-    if (($f['from'] ?? '') !== '') { $sql .= " AND i.fetched_at >= ?"; $params[] = $f['from'] . ' 00:00:00'; $types .= 's'; }
-    if (($f['to'] ?? '') !== '') { $sql .= " AND i.fetched_at <= ?"; $params[] = $f['to'] . ' 23:59:59'; $types .= 's'; }
     if (($f['search'] ?? '') !== '') {
         $sql .= " AND (COALESCE(NULLIF(i.title_translated,''),i.title) LIKE ? OR src.name LIKE ?)";
         $s = '%' . $f['search'] . '%'; $params[] = $s; $params[] = $s; $types .= 'ss';
     }
-    $sql .= " ORDER BY i.fetched_at DESC LIMIT 2000";
+    $sql .= " ORDER BY d.id DESC LIMIT 5000";
     $stmt = $conn->prepare($sql);
     if ($params) $stmt->bind_param($types, ...$params);
     $stmt->execute();
-    $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $cand = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close(); $conn->close();
 
-    // Attach the promoted article's state + jump links (editor for drafts, live URL for published).
-    return scraper_attach_article_links($rows);
+    // One candidate row per article (keep the first — scraper title/source/section).
+    $byArt = [];
+    foreach ($cand as $c) { $aid = (int)$c['article_id']; if ($aid && !isset($byArt[$aid])) $byArt[$aid] = $c; }
+    $ids = array_keys($byArt);
+    if (!$ids) return [];
+
+    // 2) admin_ten: filter the articles by state + publish-date range.
+    $a = getDBConnection_TENAdmin();
+    $conds = ["id IN (" . implode(',', $ids) . ")"];
+    // State filter (default: any state except deleted). "when it was published" uses submission_date.
+    $state = trim((string)($f['state'] ?? ''));
+    $allowedStates = ['published', 'draft', 'under review', 'expired', 'deleted'];
+    if ($state !== '' && in_array($state, $allowedStates, true)) {
+        $conds[] = "state = '" . $a->real_escape_string($state) . "'";
+    } else {
+        $conds[] = "state <> 'deleted'";
+    }
+    // Date range on submission_date; defaults to the last 30 days when no From is given.
+    $from = trim((string)($f['from'] ?? ''));
+    $to   = trim((string)($f['to'] ?? ''));
+    if ($from !== '') { $conds[] = "submission_date >= '" . $a->real_escape_string($from) . " 00:00:00'"; }
+    else              { $conds[] = "submission_date >= (NOW() - INTERVAL 30 DAY)"; }
+    if ($to !== '')   { $conds[] = "submission_date <= '" . $a->real_escape_string($to) . " 23:59:59'"; }
+    $res = $a->query("SELECT id, title, url, canonical, publications, submission_date, state
+                      FROM articles WHERE " . implode(' AND ', $conds));
+    $arts = [];
+    while ($x = $res->fetch_assoc()) { $arts[(int)$x['id']] = $x; }
+    // Publication base URLs for building canonical links.
+    $pubMap = [];
+    $pr = $a->query("SELECT publication, url FROM publications WHERE pub_live=1");
+    while ($x = $pr->fetch_assoc()) { if (!empty($x['url'])) $pubMap[$x['publication']] = rtrim($x['url'], '/'); }
+    $a->close();
+
+    $rows = [];
+    foreach ($arts as $aid => $art) {
+        $c = $byArt[$aid];
+        // Canonical publication: articles.canonical if valid, else the first listed publication.
+        $canon = trim((string)($art['canonical'] ?? ''));
+        if ($canon === '' || !isset($pubMap[$canon])) {
+            $parts = array_filter(array_map('trim', explode(',', (string)$art['publications'])));
+            foreach ($parts as $p) { if (isset($pubMap[$p])) { $canon = $p; break; } }
+        }
+        // A live link only makes sense for published articles.
+        $canonUrl = ($art['state'] === 'published' && isset($pubMap[$canon]) && !empty($art['url']))
+            ? $pubMap[$canon] . '/' . ltrim($art['url'], '/') : null;
+        $rows[] = [
+            'article_id'     => $aid,
+            'title'          => ($art['title'] !== '' ? $art['title'] : $c['title']),
+            'published_at'   => $art['submission_date'],
+            'state'          => $art['state'],
+            'editor_url'     => 'module-articles.php?open=' . $aid,
+            'publication_key'=> $c['publication_key'],
+            'ten_section'    => $c['ten_section'],
+            'source_name'    => $c['source_name'],
+            'canonical_pub'  => $canon !== '' ? $canon : null,
+            'canonical_url'  => $canonUrl,
+        ];
+    }
+    // Newest published first.
+    usort($rows, function ($x, $y) { return strcmp((string)$y['published_at'], (string)$x['published_at']); });
+    return $rows;
 }
 
 /** Distinct publications + sections in a project, for the History filter dropdowns. */

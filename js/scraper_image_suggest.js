@@ -138,7 +138,7 @@
         if (!cropper) { alertErr("Cropper not ready"); return; }
         var attribution = document.getElementById("scCropAttr").value;
         var canvas = cropper.getCroppedCanvas({ width: 790, height: 500, fillColor: "#ffffff", imageSmoothingEnabled: true, imageSmoothingQuality: "high" });
-        var jpeg = canvas.toDataURL("image/jpeg", 0.9);
+        var jpeg = canvas.toDataURL("image/jpeg", 0.95);
         var btn = document.getElementById("scCropSave");
         btn.disabled = true;
         btn.textContent = "Saving…";

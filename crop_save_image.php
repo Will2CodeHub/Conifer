@@ -25,7 +25,7 @@ function scraper_make_image_size($srcImage, int $srcW, int $srcH, string $destDi
     $white = imagecolorallocate($canvas, 255, 255, 255);
     imagefill($canvas, 0, 0, $white);
     imagecopyresampled($canvas, $srcImage, 0, 0, 0, 0, $nw, $nh, $srcW, $srcH);
-    imagewebp($canvas, rtrim($destDir, '/') . '/' . $filename, 85);
+    imagewebp($canvas, rtrim($destDir, '/') . '/' . $filename, 92);
     imagedestroy($canvas);
 }
 
@@ -125,8 +125,8 @@ if (!is_dir($base_path) || !is_writable($base_path)) {
 $filename = 'ten_' . date('Y_m_d_H_i_s') . '.webp';
 $filepath = $base_path . $filename;
 
-// Convert to WebP format with good quality
-$success = imagewebp($image, $filepath, 90);
+// Convert to WebP format with high quality (larger file, noticeably sharper).
+$success = imagewebp($image, $filepath, 95);
 
 if ($success) {
     // Generate placement-size versions in subfolders (legacy folders/sizes).

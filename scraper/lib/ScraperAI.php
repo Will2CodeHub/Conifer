@@ -185,8 +185,19 @@ function scraper_ai_write_article(string $provider, string $model, string $promp
         . "flowing paragraphs — no opinion, analysis or editorialising, and avoid libel (report any allegation only as "
         . "an attributed claim, never as established fact). Do NOT litter the piece with subheadings; over-use of "
         . "headings reads as machine-generated. Use a subheading only if genuinely warranted, and even then rarely — "
-        . "most articles need none. NEVER begin the article with a heading: it MUST open with a body paragraph. Follow "
-        . "the instructions exactly and return ONLY the requested JSON object — no markdown fences, no commentary.";
+        . "most articles need none. NEVER begin the article with a heading: it MUST open with a body paragraph. "
+        . "COPYRIGHT (CRITICAL): reproduce NO copyrighted material whatsoever. Never copy the source's sentences, "
+        . "distinctive phrasing, wording or structure — extract only the underlying facts and rewrite EVERYTHING "
+        . "entirely in your own original words. Facts are not copyrightable, but the source's expression of them is, so "
+        . "no passage of your article may be recognisable as lifted from the source. You may report what a named person "
+        . "or official publicly stated and may include a short direct quotation of their own words where it matters, but "
+        . "never reproduce the source outlet's prose. "
+        . "SOURCE ATTRIBUTION: because you reproduce no copyrighted text and facts are free to report, the great "
+        . "majority of articles need NO source credit. Indicate this with an extra JSON field \"attribution_needed\": "
+        . "set it to true ONLY when the report genuinely relies on a single outlet's exclusive or original reporting "
+        . "that could not be independently verified; otherwise false (the usual case). "
+        . "Follow the instructions exactly and return ONLY the requested JSON object plus that one \"attribution_needed\" "
+        . "field — no markdown fences, no commentary.";
     $text = scraper_ai_raw($provider, $model, $system, $prompt, 8000, $provider === 'openai');
     $decoded = scraper_ai_decode_json($text);
     if (!$decoded) {
@@ -215,9 +226,14 @@ function scraper_ai_write_article(string $provider, string $model, string $promp
         return preg_replace('/,\s*,/', ',', $s);
     };
     $body = $dedash($body);
-    // Append the source reference as its own line at the very bottom.
+    // Append the source reference as its own line at the very bottom — but ONLY when
+    // the writer judged attribution genuinely necessary (direct quotes, copyrighted
+    // expression, or an outlet's exclusive reporting). Plain factual reporting needs
+    // none, so most articles now carry no source line. (Internal provenance —
+    // news_scrape_url + hash on the article row — is stored regardless.)
+    $needsAttr = filter_var($decoded['attribution_needed'] ?? false, FILTER_VALIDATE_BOOLEAN);
     $srcUrl = trim((string)($vars['source_url'] ?? ''));
-    if ($srcUrl !== '') {
+    if ($needsAttr && $srcUrl !== '') {
         $host = parse_url($srcUrl, PHP_URL_HOST);
         $host = $host ? preg_replace('#^www\.#i', '', $host) : 'original report';
         $body .= '<p class="article-source" style="margin:1.6em 0 0;font-size:0.9em;color:#555;">Source: <a href="'
