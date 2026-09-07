@@ -322,7 +322,28 @@ try {
         
         $result->free();
     }
-    
+
+    // Ensure the article's CURRENT author is always in the dropdown so it shows as
+    // the selected author when an editor opens someone else's (e.g. a journalist's)
+    // article — the lists above may not otherwise include journalists.
+    if (!$dropdownDataOnly && !empty($author)) {
+        $authorId = (int)$author;
+        $present = false;
+        foreach ($all_journalists as $j) { if ((int)$j['id'] === $authorId) { $present = true; break; } }
+        if (!$present) {
+            $as = $connManagement->prepare("SELECT id, full_name, username FROM ten_users WHERE id = ?");
+            $as->bind_param('i', $authorId);
+            $as->execute();
+            if ($ar = $as->get_result()->fetch_assoc()) {
+                array_unshift($all_journalists, [
+                    'id' => $ar['id'],
+                    'name' => $ar['full_name'] . ' (' . $ar['username'] . ')'
+                ]);
+            }
+            $as->close();
+        }
+    }
+
     // Close TEN_Management connection
     $connManagement->close();
     
