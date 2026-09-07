@@ -24,6 +24,31 @@ function scraper_user_scope(): array {
     return ['seeAll' => $seeAll, 'position' => $position, 'pubs' => $pubs, 'sections' => $sections];
 }
 
+/** True if the current user may work the given publication in the scraper. */
+function scraper_user_can_access_pub(string $pubKey): bool {
+    $s = scraper_user_scope();
+    if ($s['seeAll']) return true;
+    return $pubKey !== '' && in_array($pubKey, $s['pubs'], true);
+}
+
+/** True if the current user may work the given pub_section (publication + section scope). */
+function scraper_user_can_access_section(int $pubSectionId): bool {
+    $s = scraper_user_scope();
+    if ($s['seeAll']) return true;
+    if ($pubSectionId <= 0) return false;
+    $conn = getDBConnection();
+    $stmt = $conn->prepare("SELECT publication_key, ten_section FROM ten_scraper_pub_sections WHERE id=?");
+    $stmt->bind_param('i', $pubSectionId); $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc(); $stmt->close(); $conn->close();
+    if (!$row) return false;
+    if (!in_array($row['publication_key'], $s['pubs'], true)) return false;
+    if ($s['position'] === 'Section Editor' && $s['sections']) {
+        $allow = array_map('strtolower', $s['sections']);
+        if (!in_array(strtolower($row['ten_section']), $allow, true)) return false;
+    }
+    return true;
+}
+
 /** Resolve effective AI provider/model/prompt for a section (section overrides project). */
 function scraper_effective_ai(array $section): array {
     $project = scraper_get_project((int)$section['project_id']) ?: [];

@@ -184,6 +184,10 @@ try {
     if ($author == 0) {
         $author = $userId;
     }
+    // Journalists can only ever author as themselves — ignore any posted author.
+    if ($position === 'Journalist') {
+        $author = $userId;
+    }
     
     // Update or insert
     if ($articleId > 0) {
