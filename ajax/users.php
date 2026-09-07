@@ -1,5 +1,6 @@
 <?php
 require_once '../config.php';
+require_once '../config_ten_admin.php';
 requireLogin();
 
 header('Content-Type: application/json');
@@ -8,9 +9,8 @@ $action = $_POST['action'] ?? '';
 $response = ['success' => false, 'message' => ''];
 
 // Check permissions
-$action = $_POST['action'] ?? '';
 $requiresManage = in_array($action, ['delete_user']);
-$requiresEdit = in_array($action, ['update_user']);
+$requiresEdit = in_array($action, ['update_user', 'admin_upload_photo', 'send_reset']);
 $requiresCreate = in_array($action, ['create_user']);
 
 if (!isAdmin()) {
@@ -179,6 +179,8 @@ try {
             $status = sanitize($_POST['status'] ?? 'active');
             $section = csvFromInput($_POST['section'] ?? '');
             $publication = csvFromInput($_POST['publication'] ?? '');
+            $byline = trim($_POST['byline'] ?? '');
+            $bio = trim($_POST['bio'] ?? '');
             $roles = $_POST['roles'] ?? [];
 
             if ($userId <= 0) {
@@ -214,13 +216,22 @@ try {
             $checkStmt->close();
             
             // Update user
-            $stmt = $conn->prepare("UPDATE ten_users SET username = ?, email = ?, full_name = ?, status = ?, section = ?, publication = ?, updated_at = NOW() WHERE id = ?");
-            $stmt->bind_param("ssssssi", $username, $email, $fullName, $status, $section, $publication, $userId);
-            
+            $stmt = $conn->prepare("UPDATE ten_users SET username = ?, email = ?, full_name = ?, status = ?, section = ?, publication = ?, byline = ?, bio = ?, updated_at = NOW() WHERE id = ?");
+            $stmt->bind_param("ssssssssi", $username, $email, $fullName, $status, $section, $publication, $byline, $bio, $userId);
+
             if (!$stmt->execute()) {
                 throw new Exception('Failed to update user: ' . $stmt->error);
             }
             $stmt->close();
+
+            // Mirror byline/bio to the old admin_ten.users row (matched by email as
+            // username) for any un-migrated publications that still read it.
+            try {
+                $ca = getDBConnection_TENAdmin();
+                $ma = $ca->prepare("UPDATE users SET byline = ?, bio = ? WHERE username = ?");
+                $ma->bind_param('sss', $byline, $bio, $email);
+                $ma->execute(); $ma->close(); $ca->close();
+            } catch (Throwable $e) { error_log('users.php admin_ten byline mirror failed: ' . $e->getMessage()); }
             
             // Update roles - delete existing and add new ones
             $deleteStmt = $conn->prepare("DELETE FROM ten_user_roles WHERE user_id = ?");
@@ -282,7 +293,75 @@ try {
             $response['success'] = true;
             $response['message'] = 'User deleted successfully';
             break;
-            
+
+        case 'admin_upload_photo':
+            $userId = intval($_POST['user_id'] ?? 0);
+            if ($userId <= 0) { throw new Exception('Invalid user ID'); }
+            if (!isset($_FILES['photo']) || $_FILES['photo']['error'] !== UPLOAD_ERR_OK) {
+                throw new Exception('No file uploaded or upload error');
+            }
+            // Resolve the target's email → old admin_ten user id (photos are named by it).
+            $es = $conn->prepare("SELECT email FROM ten_users WHERE id = ?");
+            $es->bind_param('i', $userId); $es->execute();
+            $targetEmail = $es->get_result()->fetch_assoc()['email'] ?? '';
+            $es->close();
+
+            $adminUserId = null;
+            try {
+                $ca = getDBConnection_TENAdmin();
+                $as = $ca->prepare("SELECT id FROM users WHERE username = ?");
+                $as->bind_param('s', $targetEmail); $as->execute();
+                $ar = $as->get_result()->fetch_assoc(); $as->close();
+                $adminUserId = $ar ? (int)$ar['id'] : null;
+                $photoUserId = $adminUserId ?: $userId;
+                $uploadDir = __DIR__ . '/../../journalist-photo/';
+                if (!is_dir($uploadDir)) { @mkdir($uploadDir, 0755, true); }
+                $filename = 'bio_photo_' . $photoUserId . '.png';
+                if (!move_uploaded_file($_FILES['photo']['tmp_name'], $uploadDir . $filename)) {
+                    $ca->close();
+                    throw new Exception('Failed to save file');
+                }
+                if ($adminUserId) {
+                    $up = $ca->prepare("UPDATE users SET photo = ? WHERE id = ?");
+                    $up->bind_param('si', $filename, $adminUserId); $up->execute(); $up->close();
+                }
+                $ca->close();
+                $relative = '/journalist-photo/' . $filename;
+                $um = $conn->prepare("UPDATE ten_users SET profile_image = ? WHERE id = ?");
+                $um->bind_param('si', $relative, $userId); $um->execute(); $um->close();
+                logActivity('admin_user_photo', 'user', $userId, 'Admin updated user photo');
+                $response['success'] = true;
+                $response['message'] = 'Photo updated';
+                $response['path'] = $relative;
+            } catch (Throwable $e) {
+                throw new Exception('Photo upload failed: ' . $e->getMessage());
+            }
+            break;
+
+        case 'send_reset':
+            $userId = intval($_POST['user_id'] ?? 0);
+            if ($userId <= 0) { throw new Exception('Invalid user ID'); }
+            $us = $conn->prepare("SELECT email, full_name FROM ten_users WHERE id = ?");
+            $us->bind_param('i', $userId); $us->execute();
+            $u = $us->get_result()->fetch_assoc(); $us->close();
+            if (!$u || empty($u['email'])) { throw new Exception('User has no email address'); }
+            $token = bin2hex(random_bytes(32));
+            $expiresAt = date('Y-m-d H:i:s', time() + 24 * 3600);
+            $tk = $conn->prepare("INSERT INTO ten_password_resets (user_id, token, expires_at) VALUES (?, ?, ?)");
+            $tk->bind_param('iss', $userId, $token, $expiresAt); $tk->execute(); $tk->close();
+            $link = SITE_URL . '/reset-password.php?token=' . $token;
+            $safeName = htmlspecialchars($u['full_name'], ENT_QUOTES, 'UTF-8');
+            $emailBody = "<h2>Password reset</h2><p>Hi $safeName,</p>"
+                . "<p>A password reset was requested for your TEN Management account. Click below to set a new password:</p>"
+                . "<p><a href='$link' style='display:inline-block;padding:10px 18px;background:#3c4f6d;color:#fff;text-decoration:none;border-radius:6px;'>Reset your password</a></p>"
+                . "<p>Or paste this link into your browser:<br><a href='$link'>$link</a></p>"
+                . "<p>This link is valid for 24 hours. If you didn't expect this, you can ignore this email.</p>";
+            $sent = sendEmail($u['email'], 'Reset your TEN Management password', $emailBody);
+            logActivity('admin_send_reset', 'user', $userId, 'Admin sent password reset email');
+            $response['success'] = (bool)$sent;
+            $response['message'] = $sent ? ('Reset email sent to ' . $u['email']) : 'Could not send email (check mail config)';
+            break;
+
         default:
             throw new Exception('Invalid action');
     }

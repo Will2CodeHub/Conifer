@@ -507,7 +507,30 @@ $currentPage = 'users';
                         </div>
                         <small style="color:#6b7280;">Assign section(s) to a Journalist or Section Editor to scope their articles. Leave empty to allow all sections (Editors and above see all sections in their publications).</small>
                     </div>
-                    
+
+                    <div class="form-group">
+                        <label><?php echo t('users.byline', 'Byline'); ?></label>
+                        <input type="text" name="byline" id="byline" placeholder="How their name appears on published articles">
+                    </div>
+                    <div class="form-group">
+                        <label><?php echo t('users.bio', 'Biography'); ?></label>
+                        <textarea name="bio" id="bio" rows="4" placeholder="Short biography shown on their articles"></textarea>
+                    </div>
+
+                    <div class="form-group" id="photoGroup" style="display:none;">
+                        <label><?php echo t('users.photo', 'Profile / byline photo'); ?></label>
+                        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                            <img id="userPhotoPreview" src="" alt="" style="width:64px;height:64px;border-radius:50%;object-fit:cover;background:#f3f4f6;display:none;border:1px solid #e5e7eb;">
+                            <input type="file" id="userPhotoFile" accept="image/*" style="flex:1;min-width:180px;">
+                            <button type="button" class="action-btn btn-edit" onclick="uploadUserPhoto()"><i class="fas fa-upload"></i> Upload</button>
+                        </div>
+                    </div>
+
+                    <div class="form-group" id="adminActionsGroup" style="display:none;gap:10px;flex-wrap:wrap;">
+                        <button type="button" class="action-btn btn-edit" onclick="sendResetEmail()"><i class="fas fa-key"></i> Send password reset email</button>
+                        <a id="previewBylineLink" href="#" target="_blank" class="action-btn btn-edit" style="text-decoration:none;"><i class="fas fa-eye"></i> Preview byline &amp; bio</a>
+                    </div>
+
                     <button type="submit" class="btn-primary" style="width: 100%;">
                         <i class="fas fa-save"></i>
                         <?php echo t('users.save', 'Save User'); ?>
@@ -597,6 +620,18 @@ $currentPage = 'users';
         document.querySelectorAll('input[name="publication[]"]').forEach(function(cb){ cb.checked = userPubs.includes(cb.value); });
         var userSecs = (user.section || '').split(',').map(function(s){return s.trim();}).filter(Boolean);
         document.querySelectorAll('input[name="section[]"]').forEach(function(cb){ cb.checked = userSecs.includes(cb.value); });
+
+        // Journalist profile: byline, bio, photo + admin actions (edit mode only).
+        window._editUserId = user.id;
+        document.getElementById('byline').value = user.byline || '';
+        document.getElementById('bio').value = user.bio || '';
+        var img = document.getElementById('userPhotoPreview');
+        if (user.profile_image) { img.src = (user.profile_image.charAt(0) === '/' ? '' : '/') + user.profile_image.replace(/^\/?management\//,'/management/'); img.style.display = 'block'; }
+        else { img.src = ''; img.style.display = 'none'; }
+        document.getElementById('photoGroup').style.display = 'block';
+        document.getElementById('adminActionsGroup').style.display = 'flex';
+        document.getElementById('previewBylineLink').href = 'preview_byline.php?user_id=' + encodeURIComponent(user.id);
+
         document.getElementById('passwordGroup').style.display = 'none';
         document.getElementById('password').required = false;
         // Invites are for new users only.
@@ -629,8 +664,48 @@ $currentPage = 'users';
         document.getElementById('password').required = true;
         document.getElementById('inviteGroup').style.display = 'block';
         document.getElementById('send_invite').checked = false;
+        document.getElementById('byline').value = '';
+        document.getElementById('bio').value = '';
+        document.getElementById('photoGroup').style.display = 'none';
+        document.getElementById('adminActionsGroup').style.display = 'none';
+        window._editUserId = null;
         document.querySelectorAll('input[name="roles[]"]').forEach(cb => cb.checked = false);
         document.getElementById('userModal').classList.add('active');
+    }
+
+    async function uploadUserPhoto() {
+        const uid = window._editUserId;
+        const f = document.getElementById('userPhotoFile').files[0];
+        if (!uid || !f) { Swal.fire('Select a photo', 'Choose an image file first.', 'info'); return; }
+        const fd = new FormData();
+        fd.append('action', 'admin_upload_photo');
+        fd.append('user_id', uid);
+        fd.append('photo', f);
+        try {
+            const res = await fetch('/management/ajax/users.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.success) {
+                const img = document.getElementById('userPhotoPreview');
+                img.src = (data.path || '') + '?v=' + Date.now();
+                img.style.display = 'block';
+                Swal.fire({ icon: 'success', title: 'Photo updated', showConfirmButton: false, timer: 1200 });
+            } else { Swal.fire('Error', data.message || 'Upload failed', 'error'); }
+        } catch (e) { Swal.fire('Error', 'Upload failed', 'error'); }
+    }
+
+    async function sendResetEmail() {
+        const uid = window._editUserId;
+        if (!uid) return;
+        const c = await Swal.fire({ title: 'Send password reset email?', text: 'The user will receive a link to set a new password.', icon: 'question', showCancelButton: true, confirmButtonText: 'Send' });
+        if (!c.isConfirmed) return;
+        const fd = new FormData();
+        fd.append('action', 'send_reset');
+        fd.append('user_id', uid);
+        try {
+            const res = await fetch('/management/ajax/users.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            Swal.fire(data.success ? 'Sent' : 'Error', data.message || '', data.success ? 'success' : 'error');
+        } catch (e) { Swal.fire('Error', 'Could not send email', 'error'); }
     }
 
     // When "email a set-password link" is ticked, the admin need not set a password.
