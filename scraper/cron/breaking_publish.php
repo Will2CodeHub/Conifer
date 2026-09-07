@@ -9,6 +9,7 @@
  */
 ini_set('display_errors', '0');
 @set_time_limit(0);
+ignore_user_abort(true); // finish even if the (browser) client disconnects
 
 $CRON_TOKEN = 'bpub_9x2k7Q';
 $isCli = (php_sapi_name() === 'cli');

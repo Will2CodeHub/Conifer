@@ -172,8 +172,12 @@ function scraper_breaking_auto_publish(int $perDay = 2): array {
     // Dedup against today's already-published breaking topics + within this run.
     $usedTokens = scraper_covered_today_titles('tme', 'breaking-news', 'articles_breaking_news');
 
+    // Bound work per run (facts fetches are slow); the cron runs several times/day.
+    $processed = 0; $maxProcess = 10;
+
     foreach ($cands as $it) {
         if ($need <= 0) break;
+        if ($processed++ >= $maxProcess) { $log['note'] = 'processing cap reached'; break; }
         $tok = scraper_title_tokens((string)$it['title']);
         $dup = false;
         foreach ($usedTokens as $c2) {
