@@ -111,17 +111,16 @@ class LogAnalyzer {
             return $this->getEmptyStats();
         }
         
-        $content = @file_get_contents($this->logPath);
-        if ($content === false) {
-            error_log("LogAnalyzer: Failed to read log file at {$this->logPath}");
+        // Stream the file line-by-line — the visitor log can be very large and
+        // loading it all into memory (file_get_contents) exhausts PHP's memory
+        // limit and fatals, which is what used to break the stats tool.
+        $fh = @fopen($this->logPath, 'r');
+        if ($fh === false) {
+            error_log("LogAnalyzer: Failed to open log file at {$this->logPath}");
             return $this->getEmptyStats();
         }
-        
-        $lines = array_filter(explode("\n", $content), function($line) {
-            return trim($line) !== '';
-        });
-        
-        error_log("LogAnalyzer: Processing " . count($lines) . " log lines for period " . 
+
+        error_log("LogAnalyzer: Streaming log for period " .
                   date('Y-m-d H:i:s', $startTime) . " to " . date('Y-m-d H:i:s', $endTime));
         
         $stats = [
@@ -140,7 +139,8 @@ class LogAnalyzer {
         $processedLines = 0;
         $skippedLines = 0;
         
-        foreach ($lines as $line) {
+        while (($line = fgets($fh)) !== false) {
+            if (trim($line) === '') { continue; }
             $parsed = $this->parseLogLine($line);
             if (!$parsed) {
                 $skippedLines++;
@@ -195,7 +195,8 @@ class LogAnalyzer {
                 $stats['user_agents'][$browser]++;
             }
         }
-        
+        fclose($fh);
+
         error_log("LogAnalyzer: Processed $processedLines lines, skipped $skippedLines invalid lines");
         error_log("LogAnalyzer: Found {$stats['total_visits']} visits, {$stats['human_visits']} human, " . 
                   "{$stats['bot_visits']} bots, {$stats['spam_visits']} spam");
