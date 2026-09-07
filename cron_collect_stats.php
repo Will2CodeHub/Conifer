@@ -156,24 +156,19 @@ try {
         $insertStmt->close();
     }
     
-    // Clean up old entries from log file if stats were saved successfully
-    // DISABLED - cleanup function was deleting all entries due to format mismatch
-    /*
+    // Rotate the visitor log so it never grows unbounded (which used to break the
+    // stats tool). Keep the last few days; uses the CORRECT [date] line format and
+    // refuses to wipe the file if parsing looks wrong.
     if ($success) {
-        echo "\nCleaning up log file...\n";
-        $cleanupResult = cleanupLogFile($logPath, $yesterdayEnd);
-        if ($cleanupResult['success']) {
-            echo "✓ Removed {$cleanupResult['removed']} old entries\n";
-            echo "✓ Kept {$cleanupResult['kept']} recent entries\n";
-            if ($cleanupResult['size_before'] > 0) {
-                $reduction = round((1 - $cleanupResult['size_after'] / $cleanupResult['size_before']) * 100, 1);
-                echo "✓ File size reduced by {$reduction}%\n";
-            }
+        echo "\nRotating visitor log (keep last 3 days)...\n";
+        $rot = rotateVisitorLog($logPath, 3);
+        if ($rot['success']) {
+            echo "✓ Kept {$rot['kept']} entries, removed {$rot['removed']}\n";
+            echo "✓ Size {$rot['size_before']} → {$rot['size_after']} bytes\n";
         } else {
-            echo "⚠ Warning: Could not clean log file: " . $cleanupResult['error'] . "\n";
+            echo "⚠ Rotation skipped (log left intact): {$rot['error']}\n";
         }
     }
-    */
     
 } catch (Exception $e) {
     echo "✗ Error processing site: " . $e->getMessage() . "\n";
@@ -190,82 +185,58 @@ echo "Finished at: " . date('Y-m-d H:i:s') . "\n";
 exit($success ? 0 : 1);
 
 /**
- * Clean up old entries from the log file, keeping only entries from the current day forward
- * 
- * @param string $logPath Path to the log file
- * @param int $cutoffTimestamp Timestamp - entries before this will be removed
- * @return array Result with success status and statistics
+ * Rotate the visitor log, keeping only the last $keepDays of entries plus a hard
+ * cap on line count. Each line is "[<date string>] visitorId ip userAgent ...",
+ * so we parse the bracketed date with strtotime (the OLD cleanup wrongly read it
+ * as "unixts|ip|ua", got intval 0, and deleted everything — hence it was off).
+ *
+ * SAFETY: if parsing would keep almost nothing from a large file (a sign the
+ * format changed), it ABORTS and leaves the file untouched rather than wipe it.
+ *
+ * @param string $logPath
+ * @param int    $keepDays  days of history to retain
+ * @param int    $maxLines  final hard cap on retained lines
+ * @return array
  */
-function cleanupLogFile($logPath, $cutoffTimestamp) {
-    $result = [
-        'success' => false,
-        'removed' => 0,
-        'kept' => 0,
-        'size_before' => 0,
-        'size_after' => 0,
-        'error' => ''
-    ];
-    
-    try {
-        // Check if file exists and is writable
-        if (!file_exists($logPath)) {
-            $result['error'] = 'Log file does not exist';
-            return $result;
+function rotateVisitorLog($logPath, $keepDays = 3, $maxLines = 300000) {
+    $result = ['success' => false, 'removed' => 0, 'kept' => 0, 'size_before' => 0, 'size_after' => 0, 'error' => ''];
+
+    if (!file_exists($logPath))  { $result['error'] = 'Log file does not exist'; return $result; }
+    if (!is_writable($logPath))  { $result['error'] = 'Log file is not writable'; return $result; }
+
+    $result['size_before'] = filesize($logPath);
+    $lines = file($logPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if ($lines === false) { $result['error'] = 'Could not read log file'; return $result; }
+
+    $total  = count($lines);
+    $cutoff = strtotime('-' . max(1, (int)$keepDays) . ' days');
+    $kept   = [];
+    foreach ($lines as $line) {
+        if (preg_match('/^\[(.*?)\]/', $line, $m)) {
+            $t = strtotime(trim($m[1]));
+            if ($t !== false && $t >= $cutoff) { $kept[] = $line; }
         }
-        
-        if (!is_writable($logPath)) {
-            $result['error'] = 'Log file is not writable';
-            return $result;
-        }
-        
-        $result['size_before'] = filesize($logPath);
-        
-        // Read the entire file
-        $lines = file($logPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        if ($lines === false) {
-            $result['error'] = 'Could not read log file';
-            return $result;
-        }
-        
-        // Filter lines to keep only recent entries
-        $keptLines = [];
-        foreach ($lines as $line) {
-            // Parse the line: timestamp|ip|user_agent
-            $parts = explode('|', $line, 2);
-            if (count($parts) >= 1) {
-                $timestamp = intval($parts[0]);
-                // Keep entries from today and future (in case of clock skew)
-                if ($timestamp > $cutoffTimestamp) {
-                    $keptLines[] = $line;
-                    $result['kept']++;
-                } else {
-                    $result['removed']++;
-                }
-            }
-        }
-        
-        // Write back only the kept lines
-        $tempFile = $logPath . '.tmp';
-        $written = file_put_contents($tempFile, implode("\n", $keptLines) . "\n");
-        
-        if ($written === false) {
-            $result['error'] = 'Could not write temporary file';
-            return $result;
-        }
-        
-        // Replace original file with cleaned version
-        if (!rename($tempFile, $logPath)) {
-            $result['error'] = 'Could not replace log file';
-            @unlink($tempFile); // Clean up temp file
-            return $result;
-        }
-        
-        $result['size_after'] = filesize($logPath);
-        $result['success'] = true;
-        
-    } catch (Exception $e) {
-        $result['error'] = $e->getMessage();
+        // Unparseable or older-than-cutoff lines are dropped.
     }
-    
+
+    // SAFETY: never destroy the log on a format mismatch.
+    if ($total > 50 && count($kept) < ($total * 0.02)) {
+        $result['error'] = 'safety abort — parser kept <2% of lines (format mismatch?)';
+        return $result;
+    }
+
+    // Final hard cap so the file can never grow without bound.
+    if (count($kept) > $maxLines) { $kept = array_slice($kept, -$maxLines); }
+
+    $result['kept']    = count($kept);
+    $result['removed'] = $total - $result['kept'];
+
+    $tempFile = $logPath . '.tmp';
+    $payload  = $kept ? (implode("\n", $kept) . "\n") : '';
+    if (file_put_contents($tempFile, $payload) === false) { $result['error'] = 'Could not write temporary file'; return $result; }
+    if (!rename($tempFile, $logPath)) { @unlink($tempFile); $result['error'] = 'Could not replace log file'; return $result; }
+
+    $result['size_after'] = filesize($logPath);
+    $result['success'] = true;
     return $result;
 }
