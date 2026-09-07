@@ -259,7 +259,22 @@ try {
     // - All Journalists (for higher roles)
     // - Plus all management roles (Managing Editor, Editor-in-Chief, Admin, etc.)
     
-    if ($position === 'Section Editor' && !empty($section) && !empty($publication)) {
+    if ($position === 'Journalist') {
+        // Journalists can only author as themselves — return just their own row so
+        // the author field auto-fills with their name and offers no other choice.
+        $meStmt = $connManagement->prepare("SELECT id, full_name, username FROM ten_users WHERE id = ?");
+        $meStmt->bind_param('i', $userId);
+        $meStmt->execute();
+        $meRes = $meStmt->get_result();
+        if ($meRow = $meRes->fetch_assoc()) {
+            $all_journalists[] = [
+                'id' => $meRow['id'],
+                'name' => $meRow['full_name'] . ' (' . $meRow['username'] . ')'
+            ];
+        }
+        $meStmt->close();
+
+    } elseif ($position === 'Section Editor' && !empty($section) && !empty($publication)) {
         // Section Editors see: Section Editors in their section + Editors + Administrators
         $query = "SELECT u.id, u.full_name, u.username, r.role_name
                   FROM ten_users u

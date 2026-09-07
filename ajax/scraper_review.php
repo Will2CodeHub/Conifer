@@ -20,6 +20,24 @@ if (!$canUse) {
 
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
 
+// Publication/section scoping: non-admin editorial users may only act on the
+// publications (and, for Section Editors, sections) they're assigned to.
+$sectionScopedActions = ['list', 'history', 'promote', 'curate_items', 'curate_action', 'curate_published_today'];
+if (in_array($action, $sectionScopedActions, true)) {
+    $psid = (int)($_POST['pub_section_id'] ?? $_GET['pub_section_id'] ?? 0);
+    if (!scraper_user_can_access_section($psid)) {
+        echo json_encode(['success' => false, 'message' => 'Unauthorized for this publication/section']);
+        exit();
+    }
+}
+if ($action === 'curate_sections') {
+    $pubReq = trim($_POST['publication'] ?? $_GET['publication'] ?? '');
+    if (!scraper_user_can_access_pub($pubReq)) {
+        echo json_encode(['success' => false, 'message' => 'Unauthorized for this publication']);
+        exit();
+    }
+}
+
 try {
     switch ($action) {
 

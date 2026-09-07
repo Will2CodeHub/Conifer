@@ -956,9 +956,12 @@ $pageTitle = 'Article Management';
                             </label>
                         </div>
 
-                        <div class="form-actions">
-                            <button type="submit" class="btn btn-primary">
+                        <div class="form-actions" style="display:flex;gap:10px;">
+                            <button type="submit" class="btn btn-primary" onclick="window._addArticleAction='save';">
                                 <i class="fa fa-save"></i> Save Draft Article
+                            </button>
+                            <button type="submit" class="btn" style="background:#f59e0b;color:#fff;border:none;" onclick="window._addArticleAction='submit';">
+                                <i class="fa fa-paper-plane"></i> Submit for Review
                             </button>
                         </div>
                     </form>
@@ -2188,7 +2191,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                 fd.append('publish_now', '1');
                 fd.append('publish_from', '');
                 fd.append('publish_to', '');
-                fd.append('action', 'save');            // create as a draft
+                fd.append('action', (window._addArticleAction === 'submit') ? 'submit' : 'save'); // Save Draft or Submit for Review
 
                 fetch('/management/ajax/save_article.php', { method: 'POST', body: fd, credentials: 'same-origin' })
                 .then(function(r) { return r.json(); })
