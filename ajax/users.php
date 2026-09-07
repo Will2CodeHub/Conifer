@@ -41,8 +41,10 @@ try {
             $username = sanitize($_POST['username'] ?? '');
             $password = $_POST['password'] ?? '';
             $status = sanitize($_POST['status'] ?? 'pending');
+            $section = sanitize($_POST['section'] ?? '');
+            $publication = sanitize($_POST['publication'] ?? '');
             $roles = $_POST['roles'] ?? [];
-            
+
             // Validate required fields
             if (empty($fullName) || empty($email) || empty($username) || empty($password)) {
                 throw new Exception('All required fields must be filled');
@@ -70,8 +72,8 @@ try {
             $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
             
             // Insert user
-            $stmt = $conn->prepare("INSERT INTO ten_users (username, email, password, full_name, status, email_verified, created_at) VALUES (?, ?, ?, ?, ?, 1, NOW())");
-            $stmt->bind_param("sssss", $username, $email, $hashedPassword, $fullName, $status);
+            $stmt = $conn->prepare("INSERT INTO ten_users (username, email, password, full_name, status, section, publication, email_verified, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW())");
+            $stmt->bind_param("sssssss", $username, $email, $hashedPassword, $fullName, $status, $section, $publication);
             
             if (!$stmt->execute()) {
                 throw new Exception('Failed to create user: ' . $stmt->error);
@@ -107,8 +109,10 @@ try {
             $email = sanitize($_POST['email'] ?? '');
             $username = sanitize($_POST['username'] ?? '');
             $status = sanitize($_POST['status'] ?? 'active');
+            $section = sanitize($_POST['section'] ?? '');
+            $publication = sanitize($_POST['publication'] ?? '');
             $roles = $_POST['roles'] ?? [];
-            
+
             if ($userId <= 0) {
                 throw new Exception('Invalid user ID');
             }
@@ -137,8 +141,8 @@ try {
             $checkStmt->close();
             
             // Update user
-            $stmt = $conn->prepare("UPDATE ten_users SET username = ?, email = ?, full_name = ?, status = ?, updated_at = NOW() WHERE id = ?");
-            $stmt->bind_param("ssssi", $username, $email, $fullName, $status, $userId);
+            $stmt = $conn->prepare("UPDATE ten_users SET username = ?, email = ?, full_name = ?, status = ?, section = ?, publication = ?, updated_at = NOW() WHERE id = ?");
+            $stmt->bind_param("ssssssi", $username, $email, $fullName, $status, $section, $publication, $userId);
             
             if (!$stmt->execute()) {
                 throw new Exception('Failed to update user: ' . $stmt->error);

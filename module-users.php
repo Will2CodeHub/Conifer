@@ -1,5 +1,6 @@
 <?php
 require_once 'config.php';
+require_once 'config_ten_admin.php';
 requireLogin();
 
 if (!hasPermission('users.view') && !isAdmin()) {
@@ -9,8 +10,28 @@ if (!hasPermission('users.view') && !isAdmin()) {
 
 $conn = getDBConnection();
 
+// Sections and publications for the Section/Publication assignment dropdowns.
+// These live in the admin_ten (news portal) database, same source the article
+// editor and profile page use. Assigning them writes ten_users.section /
+// ten_users.publication, which drive a journalist's article behaviour.
+$allSections = [];
+$allPublications = [];
+try {
+    $connAdmin = getDBConnection_TENAdmin();
+    if ($connAdmin) {
+        $secRes = $connAdmin->query("SELECT DISTINCT name FROM main_menu WHERE name != '' AND section_item = '1' AND parent_item = 0 AND id != 79 ORDER BY name");
+        while ($secRes && ($r = $secRes->fetch_assoc())) { $allSections[] = $r['name']; }
+
+        $pubRes = $connAdmin->query("SELECT publication, title FROM publications WHERE pub_live = '1' ORDER BY title");
+        while ($pubRes && ($r = $pubRes->fetch_assoc())) { $allPublications[] = $r; }
+        $connAdmin->close();
+    }
+} catch (Throwable $e) {
+    error_log('module-users: failed loading sections/publications: ' . $e->getMessage());
+}
+
 // Get all users
-$usersQuery = "SELECT u.*, 
+$usersQuery = "SELECT u.*,
                (SELECT GROUP_CONCAT(r.role_name SEPARATOR ', ') 
                 FROM ten_user_roles ur 
                 JOIN ten_roles r ON ur.role_id = r.id 
@@ -436,6 +457,28 @@ $currentPage = 'users';
                     </div>
                     
                     <div class="form-group">
+                        <label><?php echo t('users.section', 'Section'); ?></label>
+                        <select name="section" id="section">
+                            <option value=""><?php echo t('users.section.none', 'No section (can choose per article)'); ?></option>
+                            <?php foreach ($allSections as $sectionName): ?>
+                                <option value="<?php echo htmlspecialchars($sectionName); ?>"><?php echo htmlspecialchars($sectionName); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small style="color:#6b7280;">Assign a section to a journalist to lock their articles to it. Leave blank to let them choose.</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label><?php echo t('users.publication', 'Publication'); ?></label>
+                        <select name="publication" id="publication">
+                            <option value=""><?php echo t('users.publication.none', 'No publication (can choose per article)'); ?></option>
+                            <?php foreach ($allPublications as $pub): ?>
+                                <option value="<?php echo htmlspecialchars($pub['publication']); ?>"><?php echo htmlspecialchars($pub['title'] . ' (' . $pub['publication'] . ')'); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small style="color:#6b7280;">Assign a publication to lock a journalist's articles to it. Leave blank to let them choose.</small>
+                    </div>
+
+                    <div class="form-group">
                         <label><?php echo t('users.roles', 'Roles'); ?></label>
                         <div class="checkbox-group">
                             <?php foreach ($allRoles as $role): ?>
@@ -519,6 +562,8 @@ $currentPage = 'users';
         document.getElementById('email').value = user.email;
         document.getElementById('username').value = user.username;
         document.getElementById('status').value = user.status;
+        document.getElementById('section').value = user.section || '';
+        document.getElementById('publication').value = user.publication || '';
         document.getElementById('formAction').value = 'update_user';
         document.getElementById('passwordGroup').style.display = 'none';
         document.getElementById('password').required = false;

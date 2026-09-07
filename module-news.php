@@ -2,6 +2,14 @@
 require_once 'config.php';
 requireLogin();
 
+// Match the sidebar gate (ten_modules.required_permission = 'news.view') so the
+// page can't be reached by direct URL by users who don't hold the permission
+// (e.g. journalists).
+if (!hasPermission('news.view') && !isAdmin()) {
+    header('Location: dashboard.php?error=unauthorized');
+    exit();
+}
+
 $currentUser = getCurrentUser();
 $canEdit = isAdmin();
 ?>

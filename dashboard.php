@@ -2,6 +2,12 @@
 require_once 'config.php';
 requireLogin();
 
+// Journalists have no dashboard — send them straight to Article Management.
+if (($_SESSION['ten_position'] ?? '') === 'Journalist') {
+    header('Location: module-articles.php');
+    exit();
+}
+
 $currentUser = getCurrentUser();
 $userModules = getUserModules();
 $userRoles = getUserRoles();

@@ -2,6 +2,14 @@
 require_once 'config.php';
 requireLogin();
 
+// Match the sidebar gate (ten_modules.required_permission = 'projects.view') so
+// the page can't be reached by direct URL by users without the permission
+// (e.g. journalists).
+if (!hasPermission('projects.view') && !isAdmin()) {
+    header('Location: dashboard.php?error=unauthorized');
+    exit();
+}
+
 $conn = getDBConnection();
 $currentUser = getCurrentUser();
 $userId = $_SESSION['ten_user_id'];

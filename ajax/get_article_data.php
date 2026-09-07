@@ -252,15 +252,19 @@ try {
     $all_sections = [];
     $all_subcategories = [];
     
-    // Section Editors only see their own section
-    if ($position === 'Section Editor' && !empty($section)) {
+    // Section Editors — and Journalists who have been ASSIGNED a section — only
+    // see their own section. Collapsing the list to one option makes the Add
+    // Article form auto-select it (module-articles.php), so an assigned
+    // journalist never has to pick a section. A journalist with no assigned
+    // section falls through to the "all sections" branch and chooses.
+    if (($position === 'Section Editor' || $position === 'Journalist') && !empty($section)) {
         // Only show their assigned section
         $all_sections[] = [
             'value' => $section,
             'label' => $section
         ];
     } elseif ($canViewAll || $position === 'Journalist') {
-        // High-level roles and Journalists see all sections
+        // High-level roles and unassigned Journalists see all sections
         $query = "SELECT DISTINCT name, parent_item FROM main_menu WHERE section_item = '1' AND id != 79 ORDER BY name ASC";
         
         $stmt = $connArticles->prepare($query);
