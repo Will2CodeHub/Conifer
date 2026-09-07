@@ -271,7 +271,26 @@ if ($action === 'save_newsportal_profile') {
         }
         
         $connAdmin->close();
-        
+
+        // Mirror byline/bio onto ten_users too. The public site now reads
+        // ten_users for bylines/bios (users migration STAGE C), so this is what
+        // actually shows on published articles. (admin_ten.users is kept in sync
+        // above for any un-migrated readers.)
+        // NB: we deliberately do NOT sync `section` here — a journalist's section
+        // is assigned by an admin in User Management (ten_users.section) and drives
+        // their article section; letting the profile page overwrite it would let a
+        // journalist re-assign themselves.
+        try {
+            $connMain = getDBConnection();
+            $upd = $connMain->prepare("UPDATE ten_users SET byline = ?, bio = ? WHERE id = ?");
+            $upd->bind_param("ssi", $byline, $bio, $userId);
+            $upd->execute();
+            $upd->close();
+            $connMain->close();
+        } catch (Throwable $e) {
+            error_log('save_profile: ten_users byline/bio mirror failed: ' . $e->getMessage());
+        }
+
         logActivity('newsportal_profile_updated', 'user', $userId, 'Updated news portal profile');
         
         echo json_encode([

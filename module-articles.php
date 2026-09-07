@@ -9,6 +9,10 @@ requireLogin();
 
 $apiKey = '35893630-f396d86d2cc73061b0e733d53';
 
+// Journalists get a reduced Article Management page: their own articles only
+// (enforced in ajax/get_articles.php) and no Sponsored Articles tab.
+$isJournalist = (($_SESSION['ten_position'] ?? '') === 'Journalist');
+
 $currentPage = 'articles';
 $pageTitle = 'Article Management';
 
@@ -648,9 +652,11 @@ $pageTitle = 'Article Management';
                 <button class="tab" data-tab="add-image">
                     <i class="fas fa-image"></i> Add Image
                 </button>
+                <?php if (!$isJournalist): ?>
                 <button class="tab" data-tab="sponsored-articles">
                     <i class="fas fa-list"></i> Sponsored Articles
                 </button>
+                <?php endif; ?>
             </div>
 
             <!-- Tab 1: View All Articles -->
@@ -1020,12 +1026,14 @@ $pageTitle = 'Article Management';
             </div>
 
             <!-- Tab 4: View Sponsored Articles -->
+            <?php if (!$isJournalist): ?>
             <div id="sponsored-articles" class="tab-content">
                 <div class="card">
                     <h2><i class="fas fa-list"></i> Sponsored Articles</h2>
                     <p>Sponsored articles will be added here</p>
                 </div>
             </div>
+            <?php endif; ?>
         </div>
     </div>
 

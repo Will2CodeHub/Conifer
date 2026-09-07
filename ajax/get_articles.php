@@ -323,8 +323,10 @@ while ($row = $result->fetch_assoc()) {
         }
     }
 
-    // Editing allowed based on role
-    $canEdit = isAdmin() || in_array($position, ['Admin', 'Super Admin', 'Editor-in-Chief', 'Managing Editor', 'General Editor', 'Edition Editor-in-Chief', 'Section Editor']);
+    // Editing allowed based on role. Journalists only ever receive their OWN
+    // rows (WHERE journalist_id = them, above), so their rows are editable —
+    // ajax/save_article.php independently re-checks ownership on save.
+    $canEdit = isAdmin() || in_array($position, ['Admin', 'Super Admin', 'Editor-in-Chief', 'Managing Editor', 'General Editor', 'Edition Editor-in-Chief', 'Section Editor', 'Journalist']);
     $editable = $canEdit ? 1 : 0;
 
     // Add row

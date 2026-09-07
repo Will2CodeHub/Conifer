@@ -58,16 +58,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_SESSION['ten_position'] = 'User'; // Default position if no role found
                 }
                 $roleStmt->close();
-                
+
                 // Reset login attempts
                 $resetStmt = $conn->prepare("UPDATE ten_users SET login_attempts = 0, locked_until = NULL, last_login = NOW() WHERE id = ?");
                 $resetStmt->bind_param("i", $user['id']);
                 $resetStmt->execute();
                 $resetStmt->close();
-                
+
                 $conn->close();
-                
-                header('Location: dashboard.php');
+
+                // Journalists only use the Article Management page — land them there,
+                // not on the dashboard (which they cannot access).
+                if (($_SESSION['ten_position'] ?? '') === 'Journalist') {
+                    header('Location: module-articles.php');
+                } else {
+                    header('Location: dashboard.php');
+                }
                 exit();
             } else {
                 // Failed login
