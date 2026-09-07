@@ -213,7 +213,7 @@ function rotateVisitorLog($logPath, $keepDays = 3, $maxLines = 200000) {
     $out = @fopen($tmp, 'w');
     if (!$out) { fclose($in); $result['error'] = 'Could not open temp file'; return $result; }
 
-    $total = 0; $kept = 0;
+    $total = 0; $kept = 0; $parsedOk = 0;
     while (($line = fgets($in)) !== false) {
         if (trim($line) === '') { continue; }
         $total++;
@@ -224,14 +224,17 @@ function rotateVisitorLog($logPath, $keepDays = 3, $maxLines = 200000) {
             $c = preg_replace('/:/', ' ', $c, 1);
             $t = strtotime($c);
         }
+        if ($t !== false) { $parsedOk++; }                     // date understood
         if ($t !== false && $t >= $cutoff) { fwrite($out, rtrim($line, "\r\n") . "\n"); $kept++; }
     }
     fclose($in); fclose($out);
 
-    // SAFETY: never destroy the log on a format mismatch.
-    if ($total > 50 && $kept < ($total * 0.02)) {
+    // SAFETY: abort only if we could not PARSE most lines (a real format change).
+    // Keeping few lines is EXPECTED when trimming a long backlog to a few days, so
+    // that alone must NOT trigger an abort.
+    if ($total > 50 && $parsedOk < ($total * 0.5)) {
         @unlink($tmp);
-        $result['error'] = 'safety abort — kept <2% of lines (format mismatch?)';
+        $result['error'] = "safety abort — only $parsedOk/$total lines had a parseable date (format mismatch?)";
         return $result;
     }
 
