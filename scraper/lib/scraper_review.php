@@ -400,6 +400,74 @@ function scraper_curate_sections(string $pub): array {
     return $out;
 }
 
+/** Significant lowercase word tokens of a headline (stopwords + short words dropped). */
+function scraper_title_tokens(string $t): array {
+    $t = function_exists('mb_strtolower') ? mb_strtolower($t) : strtolower($t);
+    $t = preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $t);
+    $stop = array_flip(['the','a','an','and','or','of','to','in','on','for','at','by','with','from','as','is','are','was','were','be','been','after','amid','over','into','new','say','says','said','it','its','his','her','their','they','he','she','will','has','have','had','that','this','than','but','not','you','your','who','what','how','why','when','where','amid','out','up','down','off']);
+    $out = [];
+    foreach (preg_split('/\s+/', trim($t)) as $w) {
+        if ($w !== '' && mb_strlen($w) > 2 && !isset($stop[$w])) $out[$w] = true;
+    }
+    return array_keys($out);
+}
+
+/** Jaccard overlap of two token sets (0..1). */
+function scraper_titles_similar(array $a, array $b): float {
+    if (!$a || !$b) return 0.0;
+    $inter = count(array_intersect($a, $b));
+    $union = count(array_unique(array_merge($a, $b)));
+    return $union ? $inter / $union : 0.0;
+}
+
+/**
+ * Token sets of headlines already covered TODAY for a publication+section
+ * (state-agnostic; a topic promoted today counts as covered). $table is a fixed
+ * internal value ('articles' or 'articles_breaking_news'), never user input.
+ */
+function scraper_covered_today_titles(string $pubKey, string $sectionName, string $table = 'articles'): array {
+    if (!in_array($table, ['articles', 'articles_breaking_news'], true)) $table = 'articles';
+    $a = getDBConnection_TENAdmin();
+    $sec = function_exists('mb_strtolower') ? mb_strtolower($sectionName) : strtolower($sectionName);
+    $like = '%' . $pubKey . '%';
+    $stmt = $a->prepare("SELECT title FROM `$table` WHERE DATE(submission_date)=CURDATE() AND publications LIKE ? AND LOWER(section)=?");
+    $stmt->bind_param('ss', $like, $sec);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $out = [];
+    while ($r = $res->fetch_assoc()) $out[] = scraper_title_tokens((string)$r['title']);
+    $stmt->close();
+    $a->close();
+    return $out;
+}
+
+/**
+ * Drop candidate rows whose topic was already covered today (same pub+section)
+ * or is a near-duplicate of a higher-ranked row already kept. Promoted rows are
+ * always kept (their badge must show) and also suppress later new duplicates.
+ */
+function scraper_dedup_curate_rows(array $rows): array {
+    if (!$rows) return $rows;
+    $pk = $rows[0]['publication_key'] ?? '';
+    $sn = $rows[0]['ten_section'] ?? '';
+    $covered = ($pk && $sn) ? scraper_covered_today_titles($pk, $sn, 'articles') : [];
+    $kept = [];
+    $keptTokens = $covered; // new rows dedup against today's covered topics too
+    foreach ($rows as $r) {
+        $tok = scraper_title_tokens((string)($r['title_original'] ?? $r['title'] ?? ''));
+        if (($r['status'] ?? '') === 'new') {
+            $dup = false;
+            foreach ($keptTokens as $c) {
+                if (scraper_titles_similar($tok, $c) >= 0.5) { $dup = true; break; }
+            }
+            if ($dup) continue;
+        }
+        $kept[] = $r;
+        $keptTokens[] = $tok;
+    }
+    return $kept;
+}
+
 /** Rows for the Curate screen: mode 'all' (today's feed) or 'curated' (AI selection). */
 function scraper_curate_items(int $pubSectionId, string $mode = 'all', string $date = ''): array {
     $conn = getDBConnection();
@@ -431,6 +499,10 @@ function scraper_curate_items(int $pubSectionId, string $mode = 'all', string $d
     $stmt->execute();
     $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close(); $conn->close();
+
+    // Topic dedup: hide new items about a topic already covered today, and collapse
+    // near-duplicate new items to the highest-ranked one.
+    $rows = scraper_dedup_curate_rows($rows);
 
     // Fallback: some promoted items have no draft link (article id missing) — resolve
     // it from the article the scraper wrote, matched on its stored source-URL hash.
