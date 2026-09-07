@@ -9,6 +9,15 @@
 
 require_once __DIR__ . '/scraper_review.php';
 
+/** True if the text contains a direct multi-word quotation (double quotes) — we
+ * never reproduce another outlet's quoted speech/interviews. */
+function scraper_breaking_has_quote(string $text): bool {
+    if (preg_match('/[“"][^”"\n]{15,}[”"]/u', $text, $m)) {
+        return (bool) preg_match('/\s/u', $m[0]); // multi-word span => a quotation
+    }
+    return false;
+}
+
 /** Mark a scraper item discarded so it isn't retried every run. */
 function scraper_breaking_discard_item(int $itemId): void {
     $d = getDBConnection();
@@ -26,12 +35,14 @@ function scraper_breaking_discard_item(int $itemId): void {
 function scraper_ai_rewrite_breaking(string $provider, string $model, string $sourceTitle, string $sourceText): ?array {
     $system = "You are a news sub-editor for The Munich Eye. You are given a REAL news article. REWRITE it faithfully in clear, concise English (translate to English if it is in another language) as a short breaking-news item.\n"
         . "ABSOLUTE RULES:\n"
-        . "1. Use ONLY information explicitly present in the article below. Do NOT add, infer, assume, or invent ANY fact, name, number, date, time, place, quote, cause, or consequence not in the text.\n"
+        . "1. Use ONLY information explicitly present in the article below. Do NOT add, infer, assume, or invent ANY fact, name, number, date, time, place, cause, or consequence not in the text.\n"
         . "2. Do NOT localise to Munich and do NOT add any local angle, background, or context the source did not state.\n"
-        . "3. Keep every proper noun, figure and quotation exactly as in the source. Rewrite the wording in your own words (do not copy sentences verbatim), but never change or invent the facts.\n"
-        . "4. If the source is short, your rewrite MUST be short too — never pad. Target 120-350 words and never longer than the source.\n"
-        . "5. Neutral and factual, no opinion. The body must OPEN with a paragraph, never a heading.\n"
-        . "Return ONLY a JSON object: {\"title\":\"...\",\"body_html\":\"<p>...</p><p>...</p>\",\"meta_title\":\"...\",\"meta_description\":\"...\",\"meta_keywords\":\"...\"}. No commentary, no code fences.";
+        . "3. Keep every proper noun and figure exactly as in the source, but rewrite ALL wording in your own words — do not copy any sentence or phrase verbatim.\n"
+        . "4. NO DIRECT QUOTATIONS. This is critical: do NOT reproduce ANY quoted speech, interview answers, or statements from the source. Never put quotation marks around anything a person said. Paraphrase every statement entirely in your own words (e.g. write 'a resident said the compensation fell short' — never quote their exact words). Reproducing another outlet's interview quotes is not allowed.\n"
+        . "5. If the source is short, your rewrite MUST be short too — never pad. Target 120-320 words and never longer than the source.\n"
+        . "6. Neutral and factual, no opinion. The body must OPEN with a paragraph, never a heading. Do not use quotation marks around speech anywhere in the article.\n"
+        . "7. Also judge newsworthiness. Set \"is_current_hard_news\" to true ONLY if this is a SERIOUS, CURRENT international/world news event happening now or just now — politics, government, conflict/war, disaster, economy, security, diplomacy, major world developments. Set it to FALSE for anniversaries, retrospectives, 'X years after' pieces, features, analysis, human-interest, lifestyle, sport, entertainment, celebrity, or purely local stories with no global significance.\n"
+        . "Return ONLY a JSON object: {\"title\":\"...\",\"body_html\":\"<p>...</p><p>...</p>\",\"meta_title\":\"...\",\"meta_description\":\"...\",\"meta_keywords\":\"...\",\"is_current_hard_news\":true|false}. No commentary, no code fences.";
     $user = "SOURCE HEADLINE: " . $sourceTitle . "\n\nSOURCE ARTICLE:\n" . mb_substr($sourceText, 0, 9000);
     $text = scraper_ai_raw($provider, $model, $system, $user, 2000, $provider === 'openai');
     $decoded = scraper_ai_decode_json($text);
@@ -47,6 +58,7 @@ function scraper_ai_rewrite_breaking(string $provider, string $model, string $so
         'meta_title'       => substr(trim((string)($decoded['meta_title'] ?? $decoded['title'] ?? '')), 0, 200),
         'meta_description' => substr(trim((string)($decoded['meta_description'] ?? '')), 0, 500),
         'meta_keywords'    => substr(trim((string)($decoded['meta_keywords'] ?? '')), 0, 500),
+        'is_current_hard_news' => filter_var($decoded['is_current_hard_news'] ?? true, FILTER_VALIDATE_BOOLEAN),
     ];
 }
 
@@ -158,10 +170,11 @@ function scraper_breaking_auto_publish(int $perDay = 2): array {
 
     // Candidates: ranked 'new' items first, then most recent.
     $c = getDBConnection();
+    // Freshest first — breaking news must be current world events happening now.
     $stmt = $c->prepare("SELECT id, title, summary, facts, source_url, source_url_hash, cluster_id
                          FROM ten_scraper_items
                          WHERE pub_section_id=? AND status='new'
-                         ORDER BY (curate_rank IS NULL), curate_rank ASC, published_at DESC, id DESC
+                         ORDER BY published_at DESC, fetched_at DESC, id DESC
                          LIMIT 25");
     $stmt->bind_param('i', $sid);
     $stmt->execute();
@@ -209,6 +222,20 @@ function scraper_breaking_auto_publish(int $perDay = 2): array {
             $plain = trim(preg_replace('/\s+/', ' ', strip_tags($article['body_html'] ?? '')));
             if (mb_strlen($plain) < 350) {
                 $log['skipped'][] = 'output too short: ' . $it['title'];
+                scraper_breaking_discard_item((int)$it['id']);
+                continue;
+            }
+
+            // Only serious, current world/hard news — skip features, retrospectives, soft news.
+            if (empty($article['is_current_hard_news'])) {
+                $log['skipped'][] = 'not current hard news: ' . $it['title'];
+                scraper_breaking_discard_item((int)$it['id']);
+                continue;
+            }
+
+            // No reproduced quotes (avoids lifting another outlet's interview).
+            if (scraper_breaking_has_quote($plain) || scraper_breaking_has_quote(strip_tags($article['title']))) {
+                $log['skipped'][] = 'contains direct quote — rejected: ' . $it['title'];
                 scraper_breaking_discard_item((int)$it['id']);
                 continue;
             }
