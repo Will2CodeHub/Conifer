@@ -457,39 +457,47 @@ $currentPage = 'users';
                     </div>
                     
                     <div class="form-group">
-                        <label><?php echo t('users.section', 'Section'); ?></label>
-                        <select name="section" id="section">
-                            <option value=""><?php echo t('users.section.none', 'No section (can choose per article)'); ?></option>
-                            <?php foreach ($allSections as $sectionName): ?>
-                                <option value="<?php echo htmlspecialchars($sectionName); ?>"><?php echo htmlspecialchars($sectionName); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <small style="color:#6b7280;">Assign a section to a journalist to lock their articles to it. Leave blank to let them choose.</small>
-                    </div>
-
-                    <div class="form-group">
-                        <label><?php echo t('users.publication', 'Publication'); ?></label>
-                        <select name="publication" id="publication">
-                            <option value=""><?php echo t('users.publication.none', 'No publication (can choose per article)'); ?></option>
-                            <?php foreach ($allPublications as $pub): ?>
-                                <option value="<?php echo htmlspecialchars($pub['publication']); ?>"><?php echo htmlspecialchars($pub['title'] . ' (' . $pub['publication'] . ')'); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <small style="color:#6b7280;">Assign a publication to lock a journalist's articles to it. Leave blank to let them choose.</small>
-                    </div>
-
-                    <div class="form-group">
                         <label><?php echo t('users.roles', 'Roles'); ?></label>
                         <div class="checkbox-group">
                             <?php foreach ($allRoles as $role): ?>
                                 <div class="checkbox-item">
-                                    <input type="checkbox" name="roles[]" value="<?php echo $role['id']; ?>" id="role_<?php echo $role['id']; ?>">
+                                    <input type="checkbox" name="roles[]" value="<?php echo $role['id']; ?>" id="role_<?php echo $role['id']; ?>" data-role-name="<?php echo htmlspecialchars($role['role_name']); ?>">
                                     <label for="role_<?php echo $role['id']; ?>" style="margin: 0; font-weight: 500;">
                                         <?php echo htmlspecialchars($role['role_name']); ?>
                                     </label>
                                 </div>
                             <?php endforeach; ?>
                         </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label><?php echo t('users.publications', 'Publications (TEN sites)'); ?></label>
+                        <div class="checkbox-group" id="publicationGroup" style="max-height:180px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;padding:10px;">
+                            <?php foreach ($allPublications as $pub): ?>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" name="publication[]" value="<?php echo htmlspecialchars($pub['publication']); ?>" id="pub_<?php echo htmlspecialchars($pub['publication']); ?>">
+                                    <label for="pub_<?php echo htmlspecialchars($pub['publication']); ?>" style="margin:0;font-weight:500;">
+                                        <?php echo htmlspecialchars($pub['title'] . ' (' . $pub['publication'] . ')'); ?>
+                                    </label>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <small style="color:#6b7280;">Editorial roles (Journalist, Section Editor, Editor, Managing/General Editor) must be assigned at least one publication. Leave empty for non-editorial roles.</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label><?php echo t('users.sections', 'Sections'); ?></label>
+                        <div class="checkbox-group" id="sectionGroup" style="max-height:180px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;padding:10px;">
+                            <?php foreach ($allSections as $sectionName): ?>
+                                <div class="checkbox-item">
+                                    <input type="checkbox" name="section[]" value="<?php echo htmlspecialchars($sectionName); ?>" id="sec_<?php echo htmlspecialchars(preg_replace('/[^A-Za-z0-9]/','_',$sectionName)); ?>">
+                                    <label for="sec_<?php echo htmlspecialchars(preg_replace('/[^A-Za-z0-9]/','_',$sectionName)); ?>" style="margin:0;font-weight:500;">
+                                        <?php echo htmlspecialchars($sectionName); ?>
+                                    </label>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <small style="color:#6b7280;">Assign section(s) to a Journalist or Section Editor to scope their articles. Leave empty to allow all sections (Editors and above see all sections in their publications).</small>
                     </div>
                     
                     <button type="submit" class="btn-primary" style="width: 100%;">
@@ -510,6 +518,17 @@ $currentPage = 'users';
         e.preventDefault();
         
         const formData = new FormData(this);
+
+        // Editorial (TEN news) roles must have at least one publication assigned.
+        const editorialRoles = ['Journalist', 'Section Editor', 'Editor', 'Managing Editor', 'General Editor'];
+        const hasEditorialRole = Array.from(document.querySelectorAll('input[name="roles[]"]:checked'))
+            .some(cb => editorialRoles.includes(cb.getAttribute('data-role-name')));
+        const pubCount = document.querySelectorAll('input[name="publication[]"]:checked').length;
+        if (hasEditorialRole && pubCount === 0) {
+            Swal.fire('Publication required', 'Editorial roles (Journalist, Section Editor, Editor, Managing/General Editor) must be assigned at least one publication.', 'warning');
+            return;
+        }
+
         const submitBtn = this.querySelector('button[type="submit"]');
         const originalBtnText = submitBtn.innerHTML;
         
@@ -562,9 +581,14 @@ $currentPage = 'users';
         document.getElementById('email').value = user.email;
         document.getElementById('username').value = user.username;
         document.getElementById('status').value = user.status;
-        document.getElementById('section').value = user.section || '';
-        document.getElementById('publication').value = user.publication || '';
         document.getElementById('formAction').value = 'update_user';
+
+        // Tick the publication / section checkboxes from the user's stored
+        // comma-separated lists.
+        var userPubs = (user.publication || '').split(',').map(function(s){return s.trim();}).filter(Boolean);
+        document.querySelectorAll('input[name="publication[]"]').forEach(function(cb){ cb.checked = userPubs.includes(cb.value); });
+        var userSecs = (user.section || '').split(',').map(function(s){return s.trim();}).filter(Boolean);
+        document.querySelectorAll('input[name="section[]"]').forEach(function(cb){ cb.checked = userSecs.includes(cb.value); });
         document.getElementById('passwordGroup').style.display = 'none';
         document.getElementById('password').required = false;
         

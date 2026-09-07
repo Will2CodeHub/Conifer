@@ -33,6 +33,30 @@ if (!isAdmin()) {
 
 $conn = getDBConnection();
 
+// Build a clean comma-separated string from a checkbox array (publication[] /
+// section[]) or a legacy comma string. De-dupes and drops blanks.
+function csvFromInput($v) {
+    if (is_array($v)) {
+        $parts = array_map('sanitize', $v);
+    } else {
+        $parts = array_map('sanitize', explode(',', (string)$v));
+    }
+    $parts = array_values(array_unique(array_filter(array_map('trim', $parts), fn($x) => $x !== '')));
+    return implode(',', $parts);
+}
+
+// True if any of the given role ids is a TEN-news editorial role that requires
+// a publication assignment.
+function selectionHasEditorialRole($conn, $roleIds) {
+    $roleIds = array_values(array_filter(array_map('intval', (array)$roleIds)));
+    if (!$roleIds) return false;
+    $in = implode(',', $roleIds);
+    $editorial = "'Journalist','Section Editor','Editor','Managing Editor','General Editor'";
+    $res = $conn->query("SELECT COUNT(*) AS c FROM ten_roles WHERE id IN ($in) AND role_name IN ($editorial)");
+    $row = $res ? $res->fetch_assoc() : ['c' => 0];
+    return ((int)$row['c']) > 0;
+}
+
 try {
     switch ($action) {
         case 'create_user':
@@ -41,13 +65,18 @@ try {
             $username = sanitize($_POST['username'] ?? '');
             $password = $_POST['password'] ?? '';
             $status = sanitize($_POST['status'] ?? 'pending');
-            $section = sanitize($_POST['section'] ?? '');
-            $publication = sanitize($_POST['publication'] ?? '');
+            $section = csvFromInput($_POST['section'] ?? '');
+            $publication = csvFromInput($_POST['publication'] ?? '');
             $roles = $_POST['roles'] ?? [];
 
             // Validate required fields
             if (empty($fullName) || empty($email) || empty($username) || empty($password)) {
                 throw new Exception('All required fields must be filled');
+            }
+
+            // Editorial (TEN news) roles require at least one publication.
+            if (selectionHasEditorialRole($conn, $roles) && $publication === '') {
+                throw new Exception('Editorial roles must be assigned at least one publication');
             }
             
             // Check if email already exists
@@ -109,12 +138,17 @@ try {
             $email = sanitize($_POST['email'] ?? '');
             $username = sanitize($_POST['username'] ?? '');
             $status = sanitize($_POST['status'] ?? 'active');
-            $section = sanitize($_POST['section'] ?? '');
-            $publication = sanitize($_POST['publication'] ?? '');
+            $section = csvFromInput($_POST['section'] ?? '');
+            $publication = csvFromInput($_POST['publication'] ?? '');
             $roles = $_POST['roles'] ?? [];
 
             if ($userId <= 0) {
                 throw new Exception('Invalid user ID');
+            }
+
+            // Editorial (TEN news) roles require at least one publication.
+            if (selectionHasEditorialRole($conn, $roles) && $publication === '') {
+                throw new Exception('Editorial roles must be assigned at least one publication');
             }
             
             // Validate required fields
