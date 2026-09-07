@@ -47,6 +47,18 @@ if (!is_readable($logPath)) {
     exit(1);
 }
 
+// Trim the visitor log FIRST — a runaway file would otherwise exhaust memory and
+// fatal the analyzer (which is what broke the tool). Rotation streams the file
+// and rewrites it IN PLACE (owner/permissions preserved), so it is safe to run
+// as root over each site's own log. Keeps the last 3 days (yesterday included).
+echo "Rotating visitor log (keep last 3 days)...\n";
+$rot = rotateVisitorLog($logPath, 3);
+if ($rot['success']) {
+    echo "✓ Kept {$rot['kept']} entries, removed {$rot['removed']}; {$rot['size_before']} → {$rot['size_after']} bytes\n\n";
+} else {
+    echo "⚠ Rotation skipped (log left intact): {$rot['error']}\n\n";
+}
+
 $conn = getDBConnection();
 
 // Calculate yesterday's date range
@@ -156,20 +168,6 @@ try {
         $insertStmt->close();
     }
     
-    // Rotate the visitor log so it never grows unbounded (which used to break the
-    // stats tool). Keep the last few days; uses the CORRECT [date] line format and
-    // refuses to wipe the file if parsing looks wrong.
-    if ($success) {
-        echo "\nRotating visitor log (keep last 3 days)...\n";
-        $rot = rotateVisitorLog($logPath, 3);
-        if ($rot['success']) {
-            echo "✓ Kept {$rot['kept']} entries, removed {$rot['removed']}\n";
-            echo "✓ Size {$rot['size_before']} → {$rot['size_after']} bytes\n";
-        } else {
-            echo "⚠ Rotation skipped (log left intact): {$rot['error']}\n";
-        }
-    }
-    
 } catch (Exception $e) {
     echo "✗ Error processing site: " . $e->getMessage() . "\n";
     $success = false;
@@ -198,44 +196,64 @@ exit($success ? 0 : 1);
  * @param int    $maxLines  final hard cap on retained lines
  * @return array
  */
-function rotateVisitorLog($logPath, $keepDays = 3, $maxLines = 300000) {
+function rotateVisitorLog($logPath, $keepDays = 3, $maxLines = 200000) {
     $result = ['success' => false, 'removed' => 0, 'kept' => 0, 'size_before' => 0, 'size_after' => 0, 'error' => ''];
 
     if (!file_exists($logPath))  { $result['error'] = 'Log file does not exist'; return $result; }
     if (!is_writable($logPath))  { $result['error'] = 'Log file is not writable'; return $result; }
-
     $result['size_before'] = filesize($logPath);
-    $lines = file($logPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    if ($lines === false) { $result['error'] = 'Could not read log file'; return $result; }
 
-    $total  = count($lines);
     $cutoff = strtotime('-' . max(1, (int)$keepDays) . ' days');
-    $kept   = [];
-    foreach ($lines as $line) {
+
+    // Pass 1: stream the original, copy only recent lines to a temp file. Bounded
+    // memory regardless of how large the log has grown.
+    $in = @fopen($logPath, 'r');
+    if (!$in) { $result['error'] = 'Could not open log for reading'; return $result; }
+    $tmp = $logPath . '.rot.' . getmypid();
+    $out = @fopen($tmp, 'w');
+    if (!$out) { fclose($in); $result['error'] = 'Could not open temp file'; return $result; }
+
+    $total = 0; $kept = 0;
+    while (($line = fgets($in)) !== false) {
+        if (trim($line) === '') { continue; }
+        $total++;
+        $t = false;
         if (preg_match('/^\[(.*?)\]/', $line, $m)) {
-            $t = strtotime(trim($m[1]));
-            if ($t !== false && $t >= $cutoff) { $kept[] = $line; }
+            // Same normalisation LogAnalyzer uses: "30/Oct/2025:13:38:41 +0100".
+            $c = str_replace('/', '-', trim($m[1]));
+            $c = preg_replace('/:/', ' ', $c, 1);
+            $t = strtotime($c);
         }
-        // Unparseable or older-than-cutoff lines are dropped.
+        if ($t !== false && $t >= $cutoff) { fwrite($out, rtrim($line, "\r\n") . "\n"); $kept++; }
     }
+    fclose($in); fclose($out);
 
     // SAFETY: never destroy the log on a format mismatch.
-    if ($total > 50 && count($kept) < ($total * 0.02)) {
-        $result['error'] = 'safety abort — parser kept <2% of lines (format mismatch?)';
+    if ($total > 50 && $kept < ($total * 0.02)) {
+        @unlink($tmp);
+        $result['error'] = 'safety abort — kept <2% of lines (format mismatch?)';
         return $result;
     }
 
-    // Final hard cap so the file can never grow without bound.
-    if (count($kept) > $maxLines) { $kept = array_slice($kept, -$maxLines); }
+    // Hard line cap (tail): if still over the cap, drop the oldest lines.
+    $skip = ($kept > $maxLines) ? ($kept - $maxLines) : 0;
 
-    $result['kept']    = count($kept);
-    $result['removed'] = $total - $result['kept'];
+    // Pass 2: rewrite the ORIGINAL file in place (fopen 'w' truncates but keeps
+    // the same inode → owner and permissions are preserved). This is what makes
+    // it safe to run as root over a file owned by each site's user.
+    $rin  = @fopen($tmp, 'r');
+    $orig = @fopen($logPath, 'w');
+    if (!$rin || !$orig) { if ($rin) fclose($rin); if ($orig) fclose($orig); @unlink($tmp); $result['error'] = 'Could not rewrite original log'; return $result; }
+    $idx = 0; $written = 0;
+    while (($line = fgets($rin)) !== false) {
+        if ($idx++ < $skip) { continue; }
+        fwrite($orig, $line); $written++;
+    }
+    fclose($rin); fclose($orig); @unlink($tmp);
 
-    $tempFile = $logPath . '.tmp';
-    $payload  = $kept ? (implode("\n", $kept) . "\n") : '';
-    if (file_put_contents($tempFile, $payload) === false) { $result['error'] = 'Could not write temporary file'; return $result; }
-    if (!rename($tempFile, $logPath)) { @unlink($tempFile); $result['error'] = 'Could not replace log file'; return $result; }
-
+    $result['kept']    = $written;
+    $result['removed'] = $total - $written;
+    clearstatcache();
     $result['size_after'] = filesize($logPath);
     $result['success'] = true;
     return $result;
