@@ -8,6 +8,22 @@ require_once __DIR__ . '/news_sites_db.php';     // ns_publication_language
 require_once __DIR__ . '/ScraperAI.php';         // scraper_ai_translate, scraper_ai_write_article
 require_once __DIR__ . '/ImageSearch.php';       // scraper_image_search (royalty-free suggestions)
 
+/**
+ * The current user's editorial scope for the scraper, from their session.
+ * See-all roles (Admin/Super/Manager) get everything; editorial roles are
+ * limited to their assigned publication(s), and Section Editors additionally to
+ * their assigned section(s).
+ */
+function scraper_user_scope(): array {
+    $position = $_SESSION['ten_position'] ?? '';
+    $isAdminUser = function_exists('isAdmin') ? isAdmin() : false;
+    $seeAllRoles = ['Admin', 'Super Admin', 'Super User', 'Administrator', 'Manager'];
+    $seeAll = $isAdminUser || in_array($position, $seeAllRoles, true);
+    $pubs = array_values(array_filter(array_map('trim', explode(',', (string)($_SESSION['ten_publication'] ?? ''))), fn($x) => $x !== ''));
+    $sections = array_values(array_filter(array_map('trim', explode(',', (string)($_SESSION['ten_section'] ?? ''))), fn($x) => $x !== ''));
+    return ['seeAll' => $seeAll, 'position' => $position, 'pubs' => $pubs, 'sections' => $sections];
+}
+
 /** Resolve effective AI provider/model/prompt for a section (section overrides project). */
 function scraper_effective_ai(array $section): array {
     $project = scraper_get_project((int)$section['project_id']) ?: [];
@@ -309,6 +325,14 @@ function scraper_attach_article_links(array $rows): array {
 /** Publications (with saved per-user tab order) for the Curate screen. */
 function scraper_curate_publications_ordered(int $userId): array {
     $pubs = scraper_curate_publications(); // [{publication_key, section_id (News-preferred), ...}]
+
+    // Scope to the user's assigned publications (editorial roles); admins/managers see all.
+    $scope = scraper_user_scope();
+    if (!$scope['seeAll']) {
+        $allow = array_flip($scope['pubs']);
+        $pubs = array_values(array_filter($pubs, fn($p) => isset($allow[$p['publication_key']])));
+    }
+
     $order = [];
     $saved = scraper_get_pref($userId, 'curate_pub_order');
     if ($saved) { $dec = json_decode($saved, true); if (is_array($dec)) $order = array_map('strval', $dec); }
@@ -331,6 +355,14 @@ function scraper_curate_sections(string $pub): array {
                             ORDER BY (ten_section='News') DESC, ten_section ASC");
     $stmt->bind_param('s', $pub); $stmt->execute();
     $secs = $stmt->get_result()->fetch_all(MYSQLI_ASSOC); $stmt->close();
+
+    // Section Editors only see their assigned section(s) within the publication.
+    $scope = scraper_user_scope();
+    if ($scope['position'] === 'Section Editor' && $scope['sections']) {
+        $allow = array_map('strtolower', $scope['sections']);
+        $secs = array_values(array_filter($secs, fn($s) => in_array(strtolower($s['ten_section']), $allow, true)));
+    }
+
     $out = [];
     foreach ($secs as $s) {
         $sid = (int)$s['id'];

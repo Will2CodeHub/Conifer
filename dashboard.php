@@ -2,9 +2,10 @@
 require_once 'config.php';
 requireLogin();
 
-// Journalists have no dashboard — send them straight to Article Management.
-if (($_SESSION['ten_position'] ?? '') === 'Journalist') {
-    header('Location: module-articles.php');
+// Only users with dashboard access see it; everyone else (editorial and
+// vertical-specialist roles) is sent to their first permitted tool.
+if (!isAdmin() && !hasPermission('dashboard.view')) {
+    header('Location: ' . getLandingUrl());
     exit();
 }
 

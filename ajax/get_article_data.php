@@ -39,97 +39,65 @@ try {
     // Connect to database (now serving as the primary connection for all tables)
     $connArticles = getDBConnection_TENAdmin();
     
-    // Define role hierarchy for article access
-    $highLevelRoles = [
-        'Admin',
-        'Super Admin',
-        'Editor-in-Chief',
-        'Managing Editor',
-        'General Editor',
-        'Edition Editor-in-Chief',
-        // Actual DB role names from ten_roles table:
-        'Administrator',
-        'Manager',
-        'Editor',
-        'Super User'
-    ];
-    
-    $sectionEditorRoles = ['Section Editor'];
-    
-    // Check permissions based on role
-    $canViewAll = $isUserAdmin || in_array($position, $highLevelRoles);
-    $canViewSection = in_array($position, $sectionEditorRoles);
-    $canViewOwn = ($position === 'Journalist');
-    
-    // Allow dropdown data fetching for all logged-in users
-    if ($dropdownDataOnly) {
-        // Allow all logged-in users to fetch dropdown data
-        $canViewAll = true;
-    } elseif (!$canViewAll && !$canViewSection && !$canViewOwn) {
+    // Publication / section scope from the user's assignment (comma-separated).
+    $userPubs = array_values(array_filter(array_map('trim', explode(',', (string)$publication)), fn($x) => $x !== ''));
+    $userSections = array_values(array_filter(array_map('trim', explode(',', (string)$section)), fn($x) => $x !== ''));
+
+    // Role tiers. See-all roles have no pub/section restriction; pub-scoped
+    // editors see all sections within their publication(s); Section Editors are
+    // further limited to their section(s); Journalists see only their own.
+    $seeAllRoles   = ['Admin', 'Super Admin', 'Super User', 'Administrator', 'Manager'];
+    $pubScopedRoles = ['Editor', 'Managing Editor', 'General Editor', 'Editor-in-Chief', 'Edition Editor-in-Chief'];
+
+    $canViewAll       = $isUserAdmin || in_array($position, $seeAllRoles, true);
+    $canViewPubScoped = in_array($position, $pubScopedRoles, true);
+    $canViewSection   = ($position === 'Section Editor');
+    $canViewOwn       = ($position === 'Journalist');
+
+    if (!$dropdownDataOnly && !$canViewAll && !$canViewPubScoped && !$canViewSection && !$canViewOwn) {
         throw new Exception('Unauthorized to view this article.');
     }
-    
+
+    // SQL scope fragments (escaped; values come from the session, not the client).
+    $pubScopeSql = '';
+    if ($userPubs) {
+        $pubScopeSql = '(' . implode(' OR ', array_map(fn($p) => "publications LIKE '%" . $connArticles->real_escape_string($p) . "%'", $userPubs)) . ')';
+    }
+    $sectionScopeSql = '';
+    if ($userSections) {
+        $sectionScopeSql = 'section IN (' . implode(',', array_map(fn($s) => "'" . $connArticles->real_escape_string($s) . "'", $userSections)) . ')';
+    }
+
     // --- 1. Fetch Article Data (MySQLi) ---
     $row = null;
     $results_count = 0;
-    
+
     // Skip article fetch if we only need dropdown data
     if (!$dropdownDataOnly) {
-        if ($canViewAll || $isUserAdmin) {
-            // Admin and high-level editors can view all articles
-            $query = "SELECT * FROM articles WHERE id = ?";
-            
-            $stmt = $connArticles->prepare($query);
-            if (!$stmt) throw new Exception("Prepare failed (articles - all): " . $connArticles->error);
-            
-            $stmt->bind_param('i', $id);
-            $stmt->execute();
-            $result = $stmt->get_result(); 
-            
-            $results_count = $result->num_rows;
-            if ($results_count == 1) {
-                $row = $result->fetch_assoc();
-            }
-            $result->free();
-            $stmt->close();
-            
+        $scope = '';
+        if ($canViewAll) {
+            $scope = '';
+        } elseif ($canViewPubScoped) {
+            $scope = $pubScopeSql ? " AND $pubScopeSql" : " AND 0";
         } elseif ($canViewSection) {
-            // Section Editors can only view articles in their section
-            $query = "SELECT * FROM articles WHERE id = ? AND section = ?";
-            
-            $stmt = $connArticles->prepare($query);
-            if (!$stmt) throw new Exception("Prepare failed (articles - section): " . $connArticles->error);
-            
-            $stmt->bind_param('is', $id, $section);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            
-            $results_count = $result->num_rows;
-            if ($results_count == 1) {
-                $row = $result->fetch_assoc();
-            }
-            $result->free();
-            $stmt->close();
-            
-        } else {
-            // Journalists can only view their own articles
-            $query = "SELECT * FROM articles WHERE id = ? AND journalist_id = ?";
-            
-            $stmt = $connArticles->prepare($query);
-            if (!$stmt) throw new Exception("Prepare failed (articles - own): " . $connArticles->error);
-            
-            $stmt->bind_param('ii', $id, $journalist_id);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            
-            $results_count = $result->num_rows;
-            if ($results_count == 1) {
-                $row = $result->fetch_assoc();
-            }
-            $result->free();
-            $stmt->close();
+            $scope = ($pubScopeSql ? " AND $pubScopeSql" : " AND 0") . ($sectionScopeSql ? " AND $sectionScopeSql" : "");
+        } else { // Journalist
+            $scope = " AND journalist_id = " . intval($journalist_id);
         }
-        
+
+        $query = "SELECT * FROM articles WHERE id = ?" . $scope;
+        $stmt = $connArticles->prepare($query);
+        if (!$stmt) throw new Exception("Prepare failed (articles): " . $connArticles->error);
+        $stmt->bind_param('i', $id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $results_count = $result->num_rows;
+        if ($results_count == 1) {
+            $row = $result->fetch_assoc();
+        }
+        $result->free();
+        $stmt->close();
+
         if ($results_count != 1) {
             throw new Exception('Article not found or unauthorized.');
         }
@@ -197,22 +165,21 @@ try {
     // --- 3. Get Publications (MySQLi) ---
     $all_publications = [];
     
-    // Section Editors and Journalists only see their assigned publication
-    if (($position === 'Section Editor' || $position === 'Journalist') && !empty($publication)) {
-        // Query to get the publication details for their assigned publication
-        $query = "SELECT * FROM publications WHERE pub_live = '1' AND publication = ? ORDER BY publication ASC";
-        
+    // Editorial roles (Journalist, Section Editor, Editor, Managing/General/
+    // Editor-in-Chief) only see the publication(s) they've been assigned.
+    // Admin/Super/Manager see all publications.
+    $editorialPubScoped = $canViewOwn || $canViewSection || $canViewPubScoped;
+    if ($editorialPubScoped && $userPubs) {
+        $ph = implode(',', array_fill(0, count($userPubs), '?'));
+        $query = "SELECT * FROM publications WHERE pub_live = '1' AND publication IN ($ph) ORDER BY publication ASC";
         $stmt = $connArticles->prepare($query);
         if (!$stmt) throw new Exception("Prepare failed (publications): " . $connArticles->error);
-        
-        $stmt->bind_param('s', $publication);
+        $stmt->bind_param(str_repeat('s', count($userPubs)), ...$userPubs);
         $stmt->execute();
         $result = $stmt->get_result();
-        
         while($pubRow = $result->fetch_assoc()) {
             $is_selected = in_array($pubRow['publication'], $article_publications_array, true) || ($pubRow['publication'] == 'ten');
             $is_canonical = ($pubRow['publication'] == $canonical_pub);
-            
             $all_publications[] = [
                 'name' => $pubRow['publication'],
                 'title' => $pubRow['title'],
@@ -221,21 +188,17 @@ try {
                 'canonical' => $is_canonical
             ];
         }
-        
         $result->free();
         $stmt->close();
-        
+
     } elseif ($canViewAll) {
-        // High-level roles see all publications
+        // Admin/Super/Manager see all publications
         $query = "SELECT * FROM publications WHERE pub_live = '1' ORDER BY publication ASC";
-        
         $result = $connArticles->query($query);
         if (!$result) throw new Exception("Query failed (publications): " . $connArticles->error);
-        
         while($pubRow = $result->fetch_assoc()) {
             $is_selected = in_array($pubRow['publication'], $article_publications_array, true) || ($pubRow['publication'] == 'ten');
             $is_canonical = ($pubRow['publication'] == $canonical_pub);
-            
             $all_publications[] = [
                 'name' => $pubRow['publication'],
                 'title' => $pubRow['title'],
@@ -244,27 +207,22 @@ try {
                 'canonical' => $is_canonical
             ];
         }
-        
         $result->free();
     }
 
     // --- 4. Get Sections (MySQLi) ---
     $all_sections = [];
     $all_subcategories = [];
-    
-    // Section Editors — and Journalists who have been ASSIGNED a section — only
-    // see their own section. Collapsing the list to one option makes the Add
-    // Article form auto-select it (module-articles.php), so an assigned
-    // journalist never has to pick a section. A journalist with no assigned
-    // section falls through to the "all sections" branch and chooses.
-    if (($position === 'Section Editor' || $position === 'Journalist') && !empty($section)) {
-        // Only show their assigned section
-        $all_sections[] = [
-            'value' => $section,
-            'label' => $section
-        ];
-    } elseif ($canViewAll || $position === 'Journalist') {
-        // High-level roles and unassigned Journalists see all sections
+
+    // Journalists and Section Editors WITH assigned section(s) only see those
+    // section(s) — collapsing to one makes the Add Article form auto-select it,
+    // so an assigned user never has to pick. Everyone else (Editors and above,
+    // and unassigned Journalists/Section Editors) sees all sections.
+    if (($canViewOwn || $canViewSection) && $userSections) {
+        foreach ($userSections as $s) {
+            $all_sections[] = ['value' => $s, 'label' => $s];
+        }
+    } else {
         $query = "SELECT DISTINCT name, parent_item FROM main_menu WHERE section_item = '1' AND id != 79 ORDER BY name ASC";
         
         $stmt = $connArticles->prepare($query);
@@ -387,7 +345,7 @@ try {
         'all_journalists' => $all_journalists,
         'all_sections' => $all_sections,
         'all_subcategories' => $all_subcategories,
-        'can_publish' => $isUserAdmin || in_array($position, ['Admin', 'Super Admin', 'Editor-in-Chief', 'Managing Editor', 'Section Editor', 'Administrator', 'Manager', 'Editor'])
+        'can_publish' => $isUserAdmin || in_array($position, ['Admin', 'Super Admin', 'Super User', 'Editor-in-Chief', 'Edition Editor-in-Chief', 'Managing Editor', 'General Editor', 'Section Editor', 'Administrator', 'Manager', 'Editor'])
     ];
     
     echo json_encode($response);

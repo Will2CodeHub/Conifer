@@ -124,7 +124,7 @@ try {
     
     // Check if article exists and user has permission
     if ($articleId > 0) {
-        $checkStmt = $conn->prepare("SELECT journalist_id, state, section FROM articles WHERE id = ?");
+        $checkStmt = $conn->prepare("SELECT journalist_id, state, section, publications FROM articles WHERE id = ?");
         $checkStmt->bind_param('i', $articleId);
         $checkStmt->execute();
         $result = $checkStmt->get_result();
@@ -137,12 +137,22 @@ try {
             exit;
         }
         
-        // Permission check — keep role list in sync with get_article_data.php.
+        // Permission check — keep role tiers in sync with get_article_data.php.
         // journalist_id in articles references TEN_Management.ten_users.id, same as $userId.
-        $canEdit = $isUserAdmin ||
-                   in_array($position, ['Admin', 'Super Admin', 'Editor-in-Chief', 'Managing Editor', 'General Editor', 'Edition Editor-in-Chief', 'Administrator', 'Manager', 'Editor', 'Super User']) ||
-                   ($position === 'Section Editor' && $existingArticle['section'] === $_SESSION['ten_section']) ||
-                   ($existingArticle['journalist_id'] == $userId);
+        // Editors are scoped to their publication(s); Section Editors also to their
+        // section(s); a user can always edit their own article.
+        $userPubs = array_values(array_filter(array_map('trim', explode(',', (string)($_SESSION['ten_publication'] ?? '')))));
+        $userSecs = array_values(array_filter(array_map('trim', explode(',', (string)($_SESSION['ten_section'] ?? '')))));
+        $artPubs  = array_values(array_filter(array_map('trim', explode(',', (string)($existingArticle['publications'] ?? '')))));
+        $inUserPub = (bool) array_intersect($userPubs, $artPubs);
+
+        $seeAll = $isUserAdmin || in_array($position, ['Admin', 'Super Admin', 'Super User', 'Administrator', 'Manager'], true);
+        $pubScopedEditor = in_array($position, ['Editor', 'Managing Editor', 'General Editor', 'Editor-in-Chief', 'Edition Editor-in-Chief'], true);
+
+        $canEdit = $seeAll
+                   || ($pubScopedEditor && $inUserPub)
+                   || ($position === 'Section Editor' && $inUserPub && in_array($existingArticle['section'], $userSecs, true))
+                   || ($existingArticle['journalist_id'] == $userId);
         
         if (!$canEdit) {
             echo json_encode(['status' => 'error', 'message' => 'You do not have permission to edit this article']);

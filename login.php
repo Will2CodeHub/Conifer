@@ -67,13 +67,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $conn->close();
 
-                // Journalists only use the Article Management page — land them there,
-                // not on the dashboard (which they cannot access).
-                if (($_SESSION['ten_position'] ?? '') === 'Journalist') {
-                    header('Location: module-articles.php');
-                } else {
-                    header('Location: dashboard.php');
-                }
+                // Land on the dashboard if permitted, otherwise on the first tool
+                // this user can access (editorial/vertical roles have no dashboard).
+                header('Location: ' . getLandingUrl());
                 exit();
             } else {
                 // Failed login

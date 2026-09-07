@@ -63,22 +63,44 @@ while ($row = $res->fetch_assoc()) {
 // otherwise keep the default of hiding deleted articles. The '?' is the FIRST bound param.
 $where = $hasStateFilter ? "state = ?" : "state != 'deleted'";
 
-// Add role-based filtering BEFORE user filters
-if ($position === 'Section Editor' && !empty($section) && !empty($publication)) {
-    // Section Editors can only see articles in their section AND their assigned publication(s)
-    $where .= " AND section = '" . $conn->real_escape_string($section) . "'";
-    $pubs = array_filter(array_map('trim', explode(',', $publication)));
-    if (count($pubs) > 1) {
-        $pubClauses = array_map(fn($p) => "publications LIKE '%" . $conn->real_escape_string($p) . "%'", $pubs);
-        $where .= " AND (" . implode(" OR ", $pubClauses) . ")";
-    } else {
-        $where .= " AND publications LIKE '%" . $conn->real_escape_string($publication) . "%'";
-    }
+// Add role-based filtering BEFORE user filters.
+// Editorial roles are scoped to their assigned publication(s); Section Editors
+// are further scoped to their section(s) and never see drafts; Journalists see
+// only their own articles. Admin/Super/Manager see everything.
+$userPubs = array_values(array_filter(array_map('trim', explode(',', (string)$publication)), fn($x) => $x !== ''));
+$userSections = array_values(array_filter(array_map('trim', explode(',', (string)$section)), fn($x) => $x !== ''));
+
+// SQL fragment: article belongs to at least one of the user's publications.
+$pubScope = '';
+if ($userPubs) {
+    $pubScope = '(' . implode(' OR ', array_map(fn($p) => "publications LIKE '%" . $conn->real_escape_string($p) . "%'", $userPubs)) . ')';
+}
+// SQL fragment: article's section is one of the user's sections.
+$sectionScope = '';
+if ($userSections) {
+    $sectionScope = 'section IN (' . implode(',', array_map(fn($s) => "'" . $conn->real_escape_string($s) . "'", $userSections)) . ')';
+}
+
+$seeAllRoles = ['Admin', 'Super Admin', 'Super User', 'Administrator', 'Manager'];
+$pubScopedEditorRoles = ['Editor', 'Managing Editor', 'General Editor', 'Editor-in-Chief', 'Edition Editor-in-Chief'];
+
+if (isAdmin() || in_array($position, $seeAllRoles, true)) {
+    // No restriction.
 } elseif ($position === 'Journalist') {
-    // Journalists can only see their own articles
+    // Own articles only.
+    $where .= " AND journalist_id = " . intval($userId);
+} elseif ($position === 'Section Editor') {
+    // Their section(s) within their publication(s), non-draft only.
+    if ($pubScope)     { $where .= " AND $pubScope"; } else { $where .= " AND 0"; }
+    if ($sectionScope) { $where .= " AND $sectionScope"; }
+    $where .= " AND state <> 'draft'";
+} elseif (in_array($position, $pubScopedEditorRoles, true)) {
+    // All sections within their publication(s).
+    if ($pubScope) { $where .= " AND $pubScope"; } else { $where .= " AND journalist_id = " . intval($userId); }
+} else {
+    // Unknown/non-editorial position with no explicit access: own articles only.
     $where .= " AND journalist_id = " . intval($userId);
 }
-// Admins, Editor-in-Chief, Managing Editor, General Editor see all articles
 
 $paramTypes = "";
 $paramValues = array();
@@ -326,7 +348,7 @@ while ($row = $result->fetch_assoc()) {
     // Editing allowed based on role. Journalists only ever receive their OWN
     // rows (WHERE journalist_id = them, above), so their rows are editable —
     // ajax/save_article.php independently re-checks ownership on save.
-    $canEdit = isAdmin() || in_array($position, ['Admin', 'Super Admin', 'Editor-in-Chief', 'Managing Editor', 'General Editor', 'Edition Editor-in-Chief', 'Section Editor', 'Journalist']);
+    $canEdit = isAdmin() || in_array($position, ['Admin', 'Super Admin', 'Super User', 'Administrator', 'Manager', 'Editor-in-Chief', 'Managing Editor', 'General Editor', 'Edition Editor-in-Chief', 'Editor', 'Section Editor', 'Journalist']);
     $editable = $canEdit ? 1 : 0;
 
     // Add row
