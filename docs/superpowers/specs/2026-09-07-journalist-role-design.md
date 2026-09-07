@@ -117,4 +117,9 @@ The journalist work was extended (user-approved) to a full role matrix across ev
 ### Open items for review
 - Legacy roles **PKV Broker** and **Viewer** were left as-is (they predate this and Broker is an external user type). Both still hold `dashboard.view`/`system.access`; Viewer also holds `pkv.view`. Decide whether to fold them into the new model.
 - Data Scraper enforcement is at the **visible-list** level (publications/sections shown). Deeper per-item AJAX id checks (e.g. curate items by arbitrary pub_section_id) are a possible follow-up hardening.
-- Test accounts (password `Journo!Test2026`): test_journalist (News/tme), test_journalist_free (none), test_section_editor (News/tme), test_editor (tme). Remove when done.
+- Test accounts (password `Journo!Test2026`): test_journalist (News/tme), test_journalist_free (none), test_section_editor (News/tme), test_editor (tme). Remove when done. (Removed 2026-09-07.)
+
+### Addendum 2 (2026-09-07): user invite email + role tutorials
+- **Create User** has an optional "Email this user a welcome message with a link to set their password" checkbox (all roles). When ticked, password is optional; `ajax/users.php` creates a 7-day `ten_password_resets` token and emails a welcome via `sendEmail()` with a `reset-password.php?token=` link (reuses the existing reset flow). Editorial users also get a link to `tutorial.php`.
+- **tutorial.php** — login-required, role-specific guides (Journalist, Section Editor, Editor = Managing/General Editor); non-editorial roles see a generic message. Linked from Settings/Profile (a "Guide for your role" button, editorial roles only) and from the invite email.
+- Verified via impersonation harness: invite checkbox present; each role's tutorial renders without error. Email delivery itself depends on the server's `mail()` (same path as the existing forgot-password flow) — not exercised in testing to avoid sending to placeholder addresses.
