@@ -327,8 +327,10 @@ try {
                 }
                 $ca->close();
                 $relative = '/journalist-photo/' . $filename;
-                $um = $conn->prepare("UPDATE ten_users SET profile_image = ? WHERE id = ?");
-                $um->bind_param('si', $relative, $userId); $um->execute(); $um->close();
+                // profile_image (path) drives the management UI avatar; photo (filename)
+                // is what the public bio page (get_bio_page.php) reads.
+                $um = $conn->prepare("UPDATE ten_users SET profile_image = ?, photo = ? WHERE id = ?");
+                $um->bind_param('ssi', $relative, $filename, $userId); $um->execute(); $um->close();
                 logActivity('admin_user_photo', 'user', $userId, 'Admin updated user photo');
                 $response['success'] = true;
                 $response['message'] = 'Photo updated';

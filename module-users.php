@@ -22,7 +22,7 @@ try {
         $secRes = $connAdmin->query("SELECT DISTINCT name FROM main_menu WHERE name != '' AND section_item = '1' AND parent_item = 0 AND id != 79 ORDER BY name");
         while ($secRes && ($r = $secRes->fetch_assoc())) { $allSections[] = $r['name']; }
 
-        $pubRes = $connAdmin->query("SELECT publication, title FROM publications WHERE pub_live = '1' ORDER BY title");
+        $pubRes = $connAdmin->query("SELECT publication, title, url FROM publications WHERE pub_live = '1' ORDER BY title");
         while ($pubRes && ($r = $pubRes->fetch_assoc())) { $allPublications[] = $r; }
         $connAdmin->close();
     }
@@ -528,7 +528,7 @@ $currentPage = 'users';
 
                     <div class="form-group" id="adminActionsGroup" style="display:none;gap:10px;flex-wrap:wrap;">
                         <button type="button" class="action-btn btn-edit" onclick="sendResetEmail()"><i class="fas fa-key"></i> Send password reset email</button>
-                        <a id="previewBylineLink" href="#" target="_blank" class="action-btn btn-edit" style="text-decoration:none;"><i class="fas fa-eye"></i> Preview byline &amp; bio</a>
+                        <a id="previewBylineLink" href="#" target="_blank" class="action-btn btn-edit" style="text-decoration:none;"><i class="fas fa-external-link-alt"></i> View public bio page</a>
                     </div>
 
                     <button type="submit" class="btn-primary" style="width: 100%;">
@@ -543,7 +543,14 @@ $currentPage = 'users';
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script>
     // Inline JavaScript for user management
-    
+
+    // Map of publication acronym -> site URL, for building public bio-page links.
+    window._TEN_PUB_URLS = <?php
+        $pubUrlMap = [];
+        foreach ($allPublications as $p) { if (!empty($p['url'])) $pubUrlMap[$p['publication']] = $p['url']; }
+        echo json_encode($pubUrlMap, JSON_UNESCAPED_SLASHES);
+    ?>;
+
     // Form submission handler
     document.getElementById('userForm').addEventListener('submit', async function(e) {
         e.preventDefault();
@@ -630,7 +637,22 @@ $currentPage = 'users';
         else { img.src = ''; img.style.display = 'none'; }
         document.getElementById('photoGroup').style.display = 'block';
         document.getElementById('adminActionsGroup').style.display = 'flex';
-        document.getElementById('previewBylineLink').href = 'preview_byline.php?user_id=' + encodeURIComponent(user.id);
+        // "View public bio page" → the real journalist.php bio page on the user's
+        // assigned publication (falls back to theeyenewspapers.com), using their
+        // public_id. If they have no public_id yet, use the in-tool mock preview.
+        (function(){
+            var link = document.getElementById('previewBylineLink');
+            var pubUrls = window._TEN_PUB_URLS || {};
+            var firstPub = ((user.publication || '').split(',').map(function(s){return s.trim();}).filter(Boolean))[0] || '';
+            var base = (pubUrls[firstPub] || 'https://theeyenewspapers.com').replace(/\/+$/, '');
+            if (user.public_id) {
+                link.href = base + '/backend/journalist.php?journalist=' + encodeURIComponent(user.full_name) + '&id=' + encodeURIComponent(user.public_id);
+                link.innerHTML = '<i class="fas fa-external-link-alt"></i> View public bio page';
+            } else {
+                link.href = 'preview_byline.php?user_id=' + encodeURIComponent(user.id);
+                link.innerHTML = '<i class="fas fa-eye"></i> Preview bio (no public page yet)';
+            }
+        })();
 
         document.getElementById('passwordGroup').style.display = 'none';
         document.getElementById('password').required = false;
