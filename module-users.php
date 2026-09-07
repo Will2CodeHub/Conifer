@@ -445,7 +445,15 @@ $currentPage = 'users';
                             <i class="fas fa-key"></i> <?php echo t('users.generate_password', 'Generate Password'); ?>
                         </button>
                     </div>
-                    
+
+                    <div class="form-group" id="inviteGroup">
+                        <label class="checkbox-item" style="font-weight:500;cursor:pointer;">
+                            <input type="checkbox" name="send_invite" id="send_invite" value="1" style="width:auto;">
+                            <?php echo t('users.send_invite', 'Email this user a welcome message with a link to set their password'); ?>
+                        </label>
+                        <small style="color:#6b7280;">They set their own password via a secure link (valid 7 days). Editorial users also receive a link to their role tutorial. You can leave the password above blank if you tick this.</small>
+                    </div>
+
                     <div class="form-group">
                         <label><?php echo t('users.status', 'Status'); ?></label>
                         <select name="status" id="status">
@@ -591,10 +599,13 @@ $currentPage = 'users';
         document.querySelectorAll('input[name="section[]"]').forEach(function(cb){ cb.checked = userSecs.includes(cb.value); });
         document.getElementById('passwordGroup').style.display = 'none';
         document.getElementById('password').required = false;
-        
+        // Invites are for new users only.
+        document.getElementById('inviteGroup').style.display = 'none';
+        document.getElementById('send_invite').checked = false;
+
         // Uncheck all roles first
         document.querySelectorAll('input[name="roles[]"]').forEach(cb => cb.checked = false);
-        
+
         // Check the roles this user has
         if (user.role_ids) {
             const roleIds = user.role_ids.split(',');
@@ -616,9 +627,18 @@ $currentPage = 'users';
         document.getElementById('formAction').value = 'create_user';
         document.getElementById('passwordGroup').style.display = 'block';
         document.getElementById('password').required = true;
+        document.getElementById('inviteGroup').style.display = 'block';
+        document.getElementById('send_invite').checked = false;
         document.querySelectorAll('input[name="roles[]"]').forEach(cb => cb.checked = false);
         document.getElementById('userModal').classList.add('active');
     }
+
+    // When "email a set-password link" is ticked, the admin need not set a password.
+    document.addEventListener('change', function(e){
+        if (e.target && e.target.id === 'send_invite') {
+            document.getElementById('password').required = !e.target.checked;
+        }
+    });
     
     function closeUserModal() {
         document.getElementById('userModal').classList.remove('active');

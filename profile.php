@@ -350,7 +350,18 @@ $currentPage = 'profile';
             <h1>My Profile</h1>
             <p>Manage your personal information and preferences</p>
         </div>
-        
+
+        <?php
+        $editorialPositions = ['Journalist', 'Section Editor', 'Editor', 'Managing Editor', 'General Editor'];
+        if (in_array($_SESSION['ten_position'] ?? '', $editorialPositions, true)):
+        ?>
+        <div style="margin:0 30px 20px;">
+            <a href="tutorial.php" style="display:inline-flex;align-items:center;gap:8px;background:#3c4f6d;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600;font-size:14px;">
+                <i class="fas fa-graduation-cap"></i> Guide for your role
+            </a>
+        </div>
+        <?php endif; ?>
+
         <div class="profile-container">
             <div class="profile-header">
                 <div class="profile-avatar-container">

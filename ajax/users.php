@@ -68,10 +68,16 @@ try {
             $section = csvFromInput($_POST['section'] ?? '');
             $publication = csvFromInput($_POST['publication'] ?? '');
             $roles = $_POST['roles'] ?? [];
+            $sendInvite = !empty($_POST['send_invite']);
 
-            // Validate required fields
-            if (empty($fullName) || empty($email) || empty($username) || empty($password)) {
+            // Validate required fields. Password is optional when inviting — the
+            // user sets their own via the emailed link.
+            if (empty($fullName) || empty($email) || empty($username) || (empty($password) && !$sendInvite)) {
                 throw new Exception('All required fields must be filled');
+            }
+            if (empty($password)) {
+                // Placeholder hash so the account exists; the invite link replaces it.
+                $password = generatePassword(16);
             }
 
             // Editorial (TEN news) roles require at least one publication.
@@ -124,11 +130,44 @@ try {
                 $roleStmt->close();
             }
             
+            // Optionally email a welcome + set-password link (reuses the reset flow).
+            if ($sendInvite) {
+                $token = bin2hex(random_bytes(32));
+                $expiresAt = date('Y-m-d H:i:s', time() + 7 * 24 * 3600); // 7 days for invites
+                $tk = $conn->prepare("INSERT INTO ten_password_resets (user_id, token, expires_at) VALUES (?, ?, ?)");
+                $tk->bind_param('iss', $userId, $token, $expiresAt);
+                $tk->execute();
+                $tk->close();
+
+                $setLink = SITE_URL . "/reset-password.php?token=" . $token;
+                $tutorialBlock = '';
+                if (selectionHasEditorialRole($conn, $roles)) {
+                    $tutLink = SITE_URL . "/tutorial.php";
+                    $tutorialBlock = "<p>Once you're logged in, here is a guide to your role and how to use the tools available to you:</p>"
+                        . "<p><a href='$tutLink'>View your role tutorial</a></p>";
+                }
+                $safeName = htmlspecialchars($fullName, ENT_QUOTES, 'UTF-8');
+                $safeEmail = htmlspecialchars($email, ENT_QUOTES, 'UTF-8');
+                $body = "<h2>Welcome to TEN Management</h2>"
+                    . "<p>Hi $safeName,</p>"
+                    . "<p>An account has been created for you on the TEN Management System.</p>"
+                    . "<p>Click below to set your password and log in:</p>"
+                    . "<p><a href='$setLink' style='display:inline-block;padding:10px 18px;background:#3c4f6d;color:#fff;text-decoration:none;border-radius:6px;'>Set your password &amp; log in</a></p>"
+                    . "<p>Or paste this link into your browser:<br><a href='$setLink'>$setLink</a></p>"
+                    . "<p>This link is valid for 7 days. Your login email is <strong>$safeEmail</strong>.</p>"
+                    . $tutorialBlock
+                    . "<p>— The Eye Newspapers</p>";
+                $sent = sendEmail($email, 'Your TEN Management account', $body);
+                $response['invite_sent'] = (bool)$sent;
+            }
+
             // Log activity
             logActivity('user_created', 'user', $userId, "Created user: $username");
-            
+
             $response['success'] = true;
-            $response['message'] = 'User created successfully';
+            $response['message'] = $sendInvite
+                ? ('User created. Invitation email ' . (!empty($response['invite_sent']) ? 'sent to ' . $email : 'could NOT be sent (check mail config)') . '.')
+                : 'User created successfully';
             $response['user_id'] = $userId;
             break;
             
