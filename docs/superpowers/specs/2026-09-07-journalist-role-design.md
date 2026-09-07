@@ -92,3 +92,29 @@ Drive the live site in the browser (admin already logged in; log in as the test 
 - Management tool + shared DB → deploy only to theeyenewspapers.com (`/public_html/management/`). No per-pub deploy.
 - Deploys go straight to LIVE (no staging for the management tool). Deploy file-by-file via WinSCP FTPS. The DB step runs via a temporary script that is deleted immediately after.
 - Related memory: [[project_roles_permissions]], [[ten-users-vs-old-users-byline]], [[server-access-deploy]].
+
+---
+
+## Addendum (2026-09-07): expanded to suite-wide RBAC
+
+The journalist work was extended (user-approved) to a full role matrix across every tool.
+
+### Role → tool matrix (implemented)
+- **Super User** — everything. **Administrator** — everything except PKV. **Manager** — Dashboard, all Statistics, Articles, News Sites, Data Scraper, Marketing, Emails, CRM, File Transfers, Project Management, Restaurant Builder, Venues (no Users/Roles/Settings, no PKV/WNE).
+- **Editorial (Articles only, no dashboard):** Managing Editor, General Editor, Editor, Section Editor, Journalist. Section Editor and above also get Data Scraper. Capabilities on the Articles page by position: Journalist = own + submit-only; Section Editor = non-draft in their section(s)∩publication(s); Editor/Managing/General = all sections within their publication(s); can publish.
+- **Vertical specialists (their tool only, no dashboard):** Health Insurance→PKV, WNE Recruiter→WNE, Marketing Manager→Marketing, Restaurant Manager→Restaurant Builder, Venues Manager→Venues, CRM Agent→CRM.
+
+### Assignment model
+- `ten_users.publication` and `ten_users.section` are **comma-separated lists**; assigned via multi-select checkboxes in User Management (admin/super only). Editorial roles must have ≥1 publication (client + server validation).
+- Article list/dropdowns and the Data Scraper (curate publications + sections) respect the user's assigned publications/sections. Scoping is enforced in `get_articles.php`, `get_article_data.php`, `save_article.php`, and `scraper/lib/scraper_review.php`.
+
+### Landing
+- `getLandingUrl()` (config.php): users with `dashboard.view`/admin land on the dashboard; everyone else lands on their first permitted tool. Used by login.php + dashboard.php (replaces the journalist-only redirect).
+
+### Admin control
+- Roles & Permissions editor (module-roles.php) lets Admin/Super grant any of the 69 permissions (17 tool groups) to any role — verified.
+
+### Open items for review
+- Legacy roles **PKV Broker** and **Viewer** were left as-is (they predate this and Broker is an external user type). Both still hold `dashboard.view`/`system.access`; Viewer also holds `pkv.view`. Decide whether to fold them into the new model.
+- Data Scraper enforcement is at the **visible-list** level (publications/sections shown). Deeper per-item AJAX id checks (e.g. curate items by arbitrary pub_section_id) are a possible follow-up hardening.
+- Test accounts (password `Journo!Test2026`): test_journalist (News/tme), test_journalist_free (none), test_section_editor (News/tme), test_editor (tme). Remove when done.
