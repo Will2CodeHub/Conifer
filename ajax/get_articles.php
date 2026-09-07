@@ -9,7 +9,7 @@ $publication = $_SESSION['ten_publication'] ?? '';
 $userId = $_SESSION['ten_user_id'] ?? 0;
 
 // Check basic permission using role-based logic
-$allowedRoles = ['Admin', 'Super Admin', 'Editor-in-Chief', 'Managing Editor', 'General Editor', 'Edition Editor-in-Chief', 'Section Editor', 'Journalist'];
+$allowedRoles = ['Admin', 'Super Admin', 'Super User', 'Administrator', 'Manager', 'Editor-in-Chief', 'Edition Editor-in-Chief', 'Managing Editor', 'General Editor', 'Editor', 'Section Editor', 'Journalist'];
 if (!isAdmin() && !in_array($position, $allowedRoles)) {
     echo json_encode(['error' => 'unauthorized']);
     exit();
