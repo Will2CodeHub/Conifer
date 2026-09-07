@@ -112,6 +112,18 @@ function scraper_breaking_auto_publish(int $perDay = 2): array {
         try {
             $facts = trim((string)$it['facts']);
             if ($facts === '') { $facts = scraper_fetch_facts((string)$it['source_url']); }
+
+            // Need enough source material to write real coverage. Too little and the
+            // model (correctly) refuses to invent detail and returns a stub — never
+            // publish that. Skip and discard so it isn't retried on every run.
+            if (mb_strlen(trim($facts)) < 400) {
+                $log['skipped'][] = 'insufficient facts: ' . $it['title'];
+                $d = getDBConnection();
+                $ds = $d->prepare("UPDATE ten_scraper_items SET status='discarded' WHERE id=?");
+                $ds->bind_param('i', $it['id']); $ds->execute(); $ds->close(); $d->close();
+                continue;
+            }
+
             $article = scraper_ai_write_article($ai['provider'], $ai['model'], $ai['prompt'], [
                 'source_title'    => $it['title'],
                 'source_summary'  => $it['summary'],
@@ -121,6 +133,22 @@ function scraper_breaking_auto_publish(int $perDay = 2): array {
                 'publication'     => 'tme',
                 'target_language' => 'English',
             ]);
+
+            // Guard against placeholder/stub output (thin body or "awaiting details"
+            // language) — never let that reach the live site.
+            $plain = trim(preg_replace('/\s+/', ' ', strip_tags($article['body_html'] ?? '')));
+            $blurbLc = mb_strtolower($article['title'] . ' ' . $plain);
+            $stub = false;
+            foreach (['awaiting', 'no details', 'details are not', 'placeholder', 'insufficient', 'no verified', 'unable to', 'not enough information', 'no further information', 'details remain', 'to be confirmed'] as $mrk) {
+                if (mb_strpos($blurbLc, $mrk) !== false) { $stub = true; break; }
+            }
+            if ($stub || mb_strlen($plain) < 600) {
+                $log['skipped'][] = 'stub/thin output rejected: ' . $it['title'];
+                $d = getDBConnection();
+                $ds = $d->prepare("UPDATE ten_scraper_items SET status='discarded' WHERE id=?");
+                $ds->bind_param('i', $it['id']); $ds->execute(); $ds->close(); $d->close();
+                continue;
+            }
 
             $artId = scraper_insert_breaking_article($article, $it, $journalistId, $inhouseName);
 
