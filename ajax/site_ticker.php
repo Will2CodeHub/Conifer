@@ -125,6 +125,39 @@ try {
             break;
         }
 
+        case 'copy': {
+            // Duplicate one item into one or more OTHER publications, carrying
+            // over its text, date and any publish window unchanged.
+            $id = (int)($_POST['id'] ?? 0);
+            $editions = $_POST['editions'] ?? [];
+            if (!is_array($editions)) $editions = array_filter(array_map('trim', explode(',', (string)$editions)));
+            if ($id <= 0) throw new Exception('Invalid item id');
+
+            $src = null;
+            $s = $conn->prepare("SELECT breaking_news, date, publish_from, publish_to, edition FROM news_ticker WHERE id = ?");
+            $s->bind_param('i', $id);
+            $s->execute();
+            $src = $s->get_result()->fetch_assoc();
+            $s->close();
+            if (!$src) throw new Exception('Source item not found');
+
+            // valid targets = known publications, excluding the source's own edition
+            $editions = array_values(array_unique(array_filter($editions, fn($e) => is_string($e) && isset($pubs[$e]) && $e !== $src['edition'])));
+            if (!$editions) throw new Exception('Select at least one other publication');
+
+            $ins = $conn->prepare("INSERT INTO news_ticker (breaking_news, date, publish_from, publish_to, edition) VALUES (?, ?, ?, ?, ?)");
+            $copied = [];
+            foreach ($editions as $ed) {
+                $bn = $src['breaking_news']; $dt = $src['date']; $pf = $src['publish_from']; $pt = $src['publish_to'];
+                $ins->bind_param('sssss', $bn, $dt, $pf, $pt, $ed);
+                $ins->execute();
+                $copied[] = ['edition' => $ed, 'id' => (int)$conn->insert_id];
+            }
+            $ins->close();
+            $response = ['success' => true, 'copied' => $copied, 'count' => count($copied)];
+            break;
+        }
+
         case 'delete': {
             $id = (int)($_POST['id'] ?? 0);
             if ($id <= 0) throw new Exception('Invalid id');
