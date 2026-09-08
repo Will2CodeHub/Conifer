@@ -2070,20 +2070,36 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                 .then(function(json) {
                     if (!json || json.status !== 'success') return;
 
-                    // Populate sections
-                    var sectionSel = document.getElementById('add_article_section');
-                    sectionSel.innerHTML = '<option value="">Choose section...</option>';
-                    if (json.all_sections && json.all_sections.length > 0) {
-                        json.all_sections.forEach(function(s) {
-                            var opt = document.createElement('option');
-                            opt.value = s.value;
-                            opt.textContent = s.label;
-                            sectionSel.appendChild(opt);
-                        });
-                        if (json.all_sections.length === 1) {
-                            sectionSel.value = json.all_sections[0].value;
+                    // Sections follow the chosen publication(s): keep the per-pub
+                    // map + union, and rebuild the dropdown from whichever pubs
+                    // are ticked (union, deduped). Defined here so the pub
+                    // checkboxes below can call it on change.
+                    var addSectionsByPub = json.sections_by_pub || {};
+                    var addAllSections = json.all_sections || [];
+                    window._rebuildAddSections = function() {
+                        var sel = document.getElementById('add_article_section');
+                        var prev = sel.value;
+                        var checked = [];
+                        document.querySelectorAll('#add_article_publications input.add_pub_cb:checked').forEach(function(cb){ checked.push(cb.value); });
+                        var list = [], seen = {};
+                        if (checked.length && Object.keys(addSectionsByPub).length) {
+                            checked.forEach(function(ed){
+                                (addSectionsByPub[ed] || []).forEach(function(s){
+                                    if (!seen[s.value]) { seen[s.value] = 1; list.push(s); }
+                                });
+                            });
                         }
-                    }
+                        if (!list.length) list = addAllSections;
+                        list.sort(function(a,b){ return a.label.localeCompare(b.label); });
+                        sel.innerHTML = '<option value="">Choose section...</option>';
+                        list.forEach(function(s){
+                            var opt = document.createElement('option');
+                            opt.value = s.value; opt.textContent = s.label; sel.appendChild(opt);
+                        });
+                        if (prev && list.some(function(s){ return s.value === prev; })) sel.value = prev;
+                        else if (list.length === 1) sel.value = list[0].value;
+                    };
+                    window._rebuildAddSections();
 
                     // Populate publications — checkbox + canonical radio, like the edit modal.
                     var pubContainer = document.getElementById('add_article_publications');
@@ -2114,11 +2130,15 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                             cb.addEventListener('change', function(){
                                 radio.disabled = !cb.checked;
                                 if (!cb.checked && radio.checked) radio.checked = false;
+                                if (window._rebuildAddSections) window._rebuildAddSections();
                             });
                             row.appendChild(left); row.appendChild(right);
                             pubContainer.appendChild(row);
                         });
                     }
+                    // now that publication checkboxes exist, scope sections to the
+                    // ticked publication(s).
+                    if (window._rebuildAddSections) window._rebuildAddSections();
 
                     // Populate author dropdown
                     var authorSel = document.getElementById('add_article_author');
@@ -3325,21 +3345,36 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                 return;
             }
 
-            // Populate sections dropdown
-            if (json.all_sections && json.all_sections.length > 0) {
-                console.log('Populating sections. Article section:', json.section);
-                json.all_sections.forEach(function(section) {
+            // Sections follow the article's chosen publication(s). Keep the
+            // per-pub map + union and rebuild from whichever pubs are ticked,
+            // preserving the article's current section selection.
+            const modalSectionsByPub = json.sections_by_pub || {};
+            const modalAllSections = json.all_sections || [];
+            const articleSection = (json.section || '');
+            window._rebuildModalSections = function() {
+                const prev = fld_section.value || articleSection;
+                const checked = [];
+                document.querySelectorAll('#modal_publications_container input[type="checkbox"]:checked').forEach(function(cb){ checked.push(cb.value); });
+                let list = [], seen = {};
+                if (checked.length && Object.keys(modalSectionsByPub).length) {
+                    checked.forEach(function(ed){
+                        (modalSectionsByPub[ed] || []).forEach(function(s){
+                            if (!seen[s.value]) { seen[s.value] = 1; list.push(s); }
+                        });
+                    });
+                }
+                if (!list.length) list = modalAllSections;
+                list.sort(function(a,b){ return a.label.localeCompare(b.label); });
+                fld_section.innerHTML = '<option value="">Choose section</option>';
+                list.forEach(function(section) {
                     const option = document.createElement('option');
                     option.value = section.value;
                     option.textContent = section.label;
-                    console.log('Section option:', section.value, 'matches article?', section.value.toLowerCase() === (json.section || '').toLowerCase());
-                    if (section.value.toLowerCase() === (json.section || '').toLowerCase()) {
-                        option.selected = true;
-                        console.log('Selected section:', section.value);
-                    }
+                    if (prev && section.value.toLowerCase() === prev.toLowerCase()) option.selected = true;
                     fld_section.appendChild(option);
                 });
-            }
+            };
+            window._rebuildModalSections();
             
             // Populate subcategories dropdown
             if (json.all_subcategories && json.all_subcategories.length > 0) {
@@ -3463,15 +3498,18 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                             radio.style.opacity = '0.3';
                             radio.style.cursor = 'not-allowed';
                         }
+                        if (window._rebuildModalSections) window._rebuildModalSections();
                     });
-                    
+
                     rightSide.appendChild(canonicalLabel);
                     rightSide.appendChild(radio);
-                    
+
                     row.appendChild(leftSide);
                     row.appendChild(rightSide);
                     pub_container.appendChild(row);
                 });
+                // publications now exist — scope sections to the ticked pub(s).
+                if (window._rebuildModalSections) window._rebuildModalSections();
             }
 
             // Show/hide publish button based on permissions

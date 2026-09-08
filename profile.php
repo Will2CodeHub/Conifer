@@ -26,12 +26,31 @@ if ($user['email']) {
     $stmtAdmin->close();
 }
 
-// Get sections from main_menu (only top-level section items)
-$sectionsQuery = "SELECT DISTINCT name FROM main_menu WHERE name != '' AND section_item = '1' AND parent_item = 0 AND id != 79 ORDER BY name";
-$sectionsResult = $connAdmin->query($sectionsQuery);
+// Sections from main_menu, scoped to the user's own publication(s) so their
+// section list matches the sites they write for (falls back to all sections if
+// they have no publication assigned).
 $sections = [];
-while ($row = $sectionsResult->fetch_assoc()) {
-    $sections[] = $row['name'];
+$userPubList = array_values(array_filter(array_map('trim', explode(',', (string)($user['publication'] ?? '')))));
+if ($userPubList) {
+    $seenSec = [];
+    $secStmt = $connAdmin->prepare("SELECT name FROM main_menu WHERE edition = ? AND name != '' AND section_item = '1' AND parent_item = 0 ORDER BY position ASC, name ASC");
+    if ($secStmt) {
+        foreach ($userPubList as $ed) {
+            $secStmt->bind_param('s', $ed);
+            $secStmt->execute();
+            $sr = $secStmt->get_result();
+            while ($row = $sr->fetch_assoc()) {
+                if (!isset($seenSec[$row['name']])) { $seenSec[$row['name']] = true; $sections[] = $row['name']; }
+            }
+            $sr->free();
+        }
+        $secStmt->close();
+    }
+    sort($sections);
+}
+if (!$sections) {
+    $sectionsResult = $connAdmin->query("SELECT DISTINCT name FROM main_menu WHERE name != '' AND section_item = '1' AND parent_item = 0 AND id != 79 ORDER BY name");
+    while ($sectionsResult && $row = $sectionsResult->fetch_assoc()) { $sections[] = $row['name']; }
 }
 
 $conn->close();
