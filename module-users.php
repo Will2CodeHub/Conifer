@@ -16,14 +16,36 @@ $conn = getDBConnection();
 // ten_users.publication, which drive a journalist's article behaviour.
 $allSections = [];
 $allPublications = [];
+// Per-publication section map (edition => [section names]) so the Sections
+// checkboxes can follow the publication(s) assigned to the user.
+$sectionsByPub = [];
 try {
     $connAdmin = getDBConnection_TENAdmin();
     if ($connAdmin) {
-        $secRes = $connAdmin->query("SELECT DISTINCT name FROM main_menu WHERE name != '' AND section_item = '1' AND parent_item = 0 AND id != 79 ORDER BY name");
-        while ($secRes && ($r = $secRes->fetch_assoc())) { $allSections[] = $r['name']; }
-
         $pubRes = $connAdmin->query("SELECT publication, title, url FROM publications WHERE pub_live = '1' ORDER BY title");
         while ($pubRes && ($r = $pubRes->fetch_assoc())) { $allPublications[] = $r; }
+
+        // sections per publication + union
+        $seenSec = [];
+        $secStmt = $connAdmin->prepare("SELECT name FROM main_menu WHERE edition = ? AND name != '' AND section_item = '1' AND parent_item = 0 ORDER BY position ASC, name ASC");
+        if ($secStmt) {
+            foreach ($allPublications as $p) {
+                $ed = $p['publication'];
+                if (isset($sectionsByPub[$ed])) continue;
+                $secStmt->bind_param('s', $ed);
+                $secStmt->execute();
+                $sr = $secStmt->get_result();
+                $list = [];
+                while ($row = $sr->fetch_assoc()) {
+                    $list[] = $row['name'];
+                    if (!isset($seenSec[$row['name']])) { $seenSec[$row['name']] = true; $allSections[] = $row['name']; }
+                }
+                $sr->free();
+                $sectionsByPub[$ed] = $list;
+            }
+            $secStmt->close();
+        }
+        sort($allSections);
         $connAdmin->close();
     }
 } catch (Throwable $e) {
@@ -551,6 +573,58 @@ $currentPage = 'users';
         echo json_encode($pubUrlMap, JSON_UNESCAPED_SLASHES);
     ?>;
 
+    // Per-publication section map + union, so the Sections list follows the
+    // publication(s) ticked for the user.
+    window._TEN_SECTIONS_BY_PUB = <?php echo json_encode($sectionsByPub, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
+    window._TEN_ALL_SECTIONS = <?php echo json_encode($allSections, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
+
+    // Rebuild the Sections checkbox group from the union of the ticked
+    // publications (or all sections when none is ticked), preserving any
+    // sections that are (or should be) selected.
+    window.rebuildUserSections = function(preserveSet) {
+        var group = document.getElementById('sectionGroup');
+        if (!group) return;
+        // gather sections to keep checked: explicit preserveSet + currently checked
+        var keep = {};
+        (preserveSet || []).forEach(function(s){ if (s) keep[s] = 1; });
+        group.querySelectorAll('input[name="section[]"]:checked').forEach(function(cb){ keep[cb.value] = 1; });
+
+        var checkedPubs = [];
+        document.querySelectorAll('input[name="publication[]"]:checked').forEach(function(cb){ checkedPubs.push(cb.value); });
+
+        var map = window._TEN_SECTIONS_BY_PUB || {};
+        var list = [], seen = {};
+        if (checkedPubs.length && Object.keys(map).length) {
+            checkedPubs.forEach(function(ed){
+                (map[ed] || []).forEach(function(name){ if (!seen[name]) { seen[name] = 1; list.push(name); } });
+            });
+        }
+        if (!list.length) list = (window._TEN_ALL_SECTIONS || []).slice();
+        // keep any preserved section even if not in the current pub set, so an
+        // existing assignment is never silently dropped on open.
+        Object.keys(keep).forEach(function(name){ if (!seen[name]) { seen[name] = 1; list.push(name); } });
+        list.sort(function(a,b){ return a.localeCompare(b); });
+
+        group.innerHTML = '';
+        list.forEach(function(name){
+            var id = 'sec_' + name.replace(/[^A-Za-z0-9]/g, '_');
+            var item = document.createElement('div');
+            item.className = 'checkbox-item';
+            var cb = document.createElement('input');
+            cb.type = 'checkbox'; cb.name = 'section[]'; cb.value = name; cb.id = id;
+            if (keep[name]) cb.checked = true;
+            var lab = document.createElement('label');
+            lab.htmlFor = id; lab.style.cssText = 'margin:0;font-weight:500;'; lab.textContent = name;
+            item.appendChild(cb); item.appendChild(lab);
+            group.appendChild(item);
+        });
+    };
+
+    // Rebuild sections whenever the publication selection changes.
+    document.addEventListener('change', function(e){
+        if (e.target && e.target.name === 'publication[]') window.rebuildUserSections();
+    });
+
     // Form submission handler
     document.getElementById('userForm').addEventListener('submit', async function(e) {
         e.preventDefault();
@@ -626,7 +700,9 @@ $currentPage = 'users';
         var userPubs = (user.publication || '').split(',').map(function(s){return s.trim();}).filter(Boolean);
         document.querySelectorAll('input[name="publication[]"]').forEach(function(cb){ cb.checked = userPubs.includes(cb.value); });
         var userSecs = (user.section || '').split(',').map(function(s){return s.trim();}).filter(Boolean);
-        document.querySelectorAll('input[name="section[]"]').forEach(function(cb){ cb.checked = userSecs.includes(cb.value); });
+        // rebuild the Sections list from the user's publications, pre-checking
+        // their assigned sections.
+        if (window.rebuildUserSections) window.rebuildUserSections(userSecs);
 
         // Journalist profile: byline, bio, photo + admin actions (edit mode only).
         window._editUserId = user.id;
@@ -692,6 +768,9 @@ $currentPage = 'users';
         document.getElementById('adminActionsGroup').style.display = 'none';
         window._editUserId = null;
         document.querySelectorAll('input[name="roles[]"]').forEach(cb => cb.checked = false);
+        // form.reset() unchecks the publication boxes; rebuild the sections list
+        // to its default (union, nothing checked).
+        if (window.rebuildUserSections) window.rebuildUserSections([]);
         document.getElementById('userModal').classList.add('active');
     }
 

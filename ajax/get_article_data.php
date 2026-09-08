@@ -213,6 +213,34 @@ try {
     // --- 4. Get Sections (MySQLi) ---
     $all_sections = [];
     $all_subcategories = [];
+    // Per-publication section map: { edition: [ {value,label}, ... ] }. Sections
+    // are the section_item rows of admin_ten.main_menu for each publication's
+    // edition, so the section dropdown can follow the chosen publication(s).
+    $sections_by_pub = [];
+
+    // Build sections_by_pub for every publication the user can see (derived from
+    // $all_publications above). This drives per-publication filtering in the UI.
+    if (!empty($all_publications)) {
+        $secStmt = $connArticles->prepare(
+            "SELECT name FROM main_menu WHERE edition = ? AND section_item = '1' AND parent_item = 0 AND name <> '' ORDER BY position ASC, name ASC"
+        );
+        if ($secStmt) {
+            foreach ($all_publications as $pubEntry) {
+                $ed = $pubEntry['name'];
+                if (isset($sections_by_pub[$ed])) continue;
+                $secStmt->bind_param('s', $ed);
+                $secStmt->execute();
+                $secRes = $secStmt->get_result();
+                $list = [];
+                while ($sr = $secRes->fetch_assoc()) {
+                    $list[] = ['value' => $sr['name'], 'label' => $sr['name']];
+                }
+                $secRes->free();
+                $sections_by_pub[$ed] = $list;
+            }
+            $secStmt->close();
+        }
+    }
 
     // Journalists and Section Editors WITH assigned section(s) only see those
     // section(s) — collapsing to one makes the Add Article form auto-select it,
@@ -222,26 +250,38 @@ try {
         foreach ($userSections as $s) {
             $all_sections[] = ['value' => $s, 'label' => $s];
         }
+    } elseif (!empty($sections_by_pub)) {
+        // Union (deduped by name) of the sections across the publications the
+        // user can see — used as the default list and the filter dropdown.
+        $seen = [];
+        foreach ($sections_by_pub as $list) {
+            foreach ($list as $s) {
+                if (isset($seen[$s['value']])) continue;
+                $seen[$s['value']] = true;
+                $all_sections[] = $s;
+            }
+        }
+        usort($all_sections, fn($a, $b) => strcasecmp($a['label'], $b['label']));
+        // sub-categories (parent_item != 0) across visible editions
+        $editionsIn = implode(',', array_map(fn($p) => "'" . $connArticles->real_escape_string($p['name']) . "'", $all_publications));
+        if ($editionsIn !== '') {
+            $subRes = $connArticles->query("SELECT DISTINCT name FROM main_menu WHERE section_item = '1' AND parent_item <> 0 AND edition IN ($editionsIn) AND name <> '' ORDER BY name ASC");
+            while ($subRes && $sr = $subRes->fetch_assoc()) {
+                $all_subcategories[] = ['value' => $sr['name'], 'label' => $sr['name']];
+            }
+        }
     } else {
+        // Fallback (no publications resolved): keep prior global behaviour.
         $query = "SELECT DISTINCT name, parent_item FROM main_menu WHERE section_item = '1' AND id != 79 ORDER BY name ASC";
-        
         $stmt = $connArticles->prepare($query);
         if (!$stmt) throw new Exception("Prepare failed (main_menu): " . $connArticles->error);
-        
         $stmt->execute();
         $result = $stmt->get_result();
-        
         while($menuRow = $result->fetch_assoc()) {
             if ($menuRow['parent_item'] == 0) {
-                $all_sections[] = [
-                    'value' => $menuRow['name'],
-                    'label' => $menuRow['name']
-                ];
+                $all_sections[] = ['value' => $menuRow['name'], 'label' => $menuRow['name']];
             } else {
-                $all_subcategories[] = [
-                    'value' => $menuRow['name'],
-                    'label' => $menuRow['name']
-                ];
+                $all_subcategories[] = ['value' => $menuRow['name'], 'label' => $menuRow['name']];
             }
         }
         $result->free();
@@ -380,6 +420,7 @@ try {
         'all_publications' => $all_publications,
         'all_journalists' => $all_journalists,
         'all_sections' => $all_sections,
+        'sections_by_pub' => $sections_by_pub,
         'all_subcategories' => $all_subcategories,
         'can_publish' => $isUserAdmin || in_array($position, ['Admin', 'Super Admin', 'Super User', 'Editor-in-Chief', 'Edition Editor-in-Chief', 'Managing Editor', 'General Editor', 'Section Editor', 'Administrator', 'Manager', 'Editor'])
     ];
