@@ -6,6 +6,22 @@ require_once '../config_ten_admin.php';
 header('Content-Type: application/json');
 
 /**
+ * URL slug from a title: lowercase, non-alphanumerics to hyphens. Mirrors the
+ * scraper's scraper_slugify() so manually-created and scraped articles build
+ * the same <slug>-<id> site URL (an empty url makes the site link to the front
+ * page instead of the article).
+ */
+function ten_article_slug(string $text): string {
+    $text = preg_replace('/[^\p{L}\p{N}]+/u', '-', trim($text));
+    $text = trim(preg_replace('/-+/', '-', $text), '-');
+    $text = function_exists('mb_strtolower') ? mb_strtolower($text) : strtolower($text);
+    if ($text === '') {
+        return 'article-' . time();
+    }
+    return function_exists('mb_substr') ? mb_substr($text, 0, 190) : substr($text, 0, 190);
+}
+
+/**
  * After an article is published, rebuild the front page (index.php) of
  * each publication it appears on by calling that site's generate_index_page.php.
  * Best-effort: a cache failure must never affect the save.
@@ -245,6 +261,13 @@ try {
         if ($stmt->execute()) {
             $stmt->close();
 
+            // Backfill the site URL for articles created before URLs were set on
+            // save (empty url => the site links to the front page). Never rewrite
+            // an existing url — that would break already-published links/SEO.
+            $slug = substr(ten_article_slug($title) . '-' . $articleId, 0, 200);
+            $su = $conn->prepare("UPDATE articles SET url = ? WHERE id = ? AND (url IS NULL OR url = '')");
+            $su->bind_param('si', $slug, $articleId); $su->execute(); $su->close();
+
             // Auto-populate the featured image (filename only) from the first body
             // image, but only if image_url is not already set.
             if (preg_match('#<img[^>]+src=[\'"]([^\'"]+)[\'"]#i', $articleText, $mm)) {
@@ -308,6 +331,12 @@ try {
         if ($stmt->execute()) {
             $newId = $stmt->insert_id;
             $stmt->close();
+
+            // Build the site URL (<slug>-<id>) now that we have the id — without
+            // this the published article link resolves to the front page.
+            $slug = substr(ten_article_slug($title) . '-' . $newId, 0, 200);
+            $su = $conn->prepare("UPDATE articles SET url = ? WHERE id = ?");
+            $su->bind_param('si', $slug, $newId); $su->execute(); $su->close();
 
             // Featured image (filename only) from the first body image, if any.
             if (preg_match('#<img[^>]+src=[\'"]([^\'"]+)[\'"]#i', $articleText, $mm)) {
