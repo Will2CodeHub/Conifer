@@ -994,6 +994,8 @@ $pageTitle = 'Article Management';
                                 <img id="image-tab2" style="max-width: 100%; display: block;">
                             </div>
 
+                            <div id="tab2ResCtl" style="max-width: 800px;"></div>
+
                             <div id="loading-tab2" style="display:none; text-align: center; margin: 20px 0;">
                                 <img src="loading.gif" style="width: 50px;" />
                                 <p style="color: #667eea; margin-top: 10px;">Processing image...</p>
@@ -2269,6 +2271,14 @@ document.getElementById('modal_publish_now').addEventListener('change', function
             };
             let cropperTab2;
 
+            // Mount the shared resolution + preview control on the current cropper.
+            let tab2CropApi = null;
+            function mountTab2Res() {
+                if (!window.TENCrop || !cropperTab2) return;
+                if (tab2CropApi) { try { tab2CropApi.destroy(); } catch (e) {} }
+                tab2CropApi = TENCrop.mount(document.getElementById('tab2ResCtl'), cropperTab2, { baseW: 490, imageEl: imageTab2 });
+            }
+
             /* ---- Inline free-image search (rendered in the tab, not a modal) ----
              * search text + source checkboxes -> thumbnail grid -> preview -> Select &
              * crop downloads the image (by index, SSRF-safe) and loads it straight into
@@ -2348,6 +2358,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                     document.getElementById('preview-tab2').style.display = 'none';
                     if (cropperTab2) { cropperTab2.destroy(); }
                     cropperTab2 = new Cropper(imageTab2, cropperOptions);
+                    mountTab2Res();
                     imageContainerTab2.scrollIntoView({behavior:'smooth',block:'nearest'});
                 }).catch(function(e){ Swal.close(); Swal.fire('Error',e.message,'error'); });
             }
@@ -2449,6 +2460,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                             cropperTab2.destroy();
                         }
                         cropperTab2 = new Cropper(imageTab2, cropperOptions);
+                    mountTab2Res();
                         
                         Swal.fire({
                             icon: 'success',
@@ -2482,6 +2494,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                             cropperTab2.destroy();
                         }
                         cropperTab2 = new Cropper(imageTab2, cropperOptions);
+                    mountTab2Res();
                     };
                     reader.readAsDataURL(file);
                 }
@@ -2494,15 +2507,11 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                 }
 
                 const attribution = document.getElementById('attribution-tab2').value;
-                const croppedCanvas = cropperTab2.getCroppedCanvas({
-                    width: 490,
-                    height: 310,
-                    fillColor: '#ffffff',
-                    imageSmoothingEnabled: true,
-                    imageSmoothingQuality: 'high'
-                });
-
-                const croppedImage = croppedCanvas.toDataURL('image/jpeg', 0.95);
+                // Use the resolution the user chose in the preview control; fall
+                // back to the fixed 490x310 if the control isn't mounted.
+                const croppedImage = (tab2CropApi)
+                    ? tab2CropApi.currentDataUrl()
+                    : cropperTab2.getCroppedCanvas({ width: 490, height: 310, fillColor: '#ffffff', imageSmoothingEnabled: true, imageSmoothingQuality: 'high' }).toDataURL('image/jpeg', 0.95);
                 
                 $("#loading-tab2").show();
                 
@@ -3948,6 +3957,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
         } catch (e) { /* no-op */ }
     })();
     </script>
+    <script src="js/ten_crop_resolution.js?v=<?php echo @filemtime(__DIR__ . '/js/ten_crop_resolution.js'); ?>"></script>
     <script src="js/scraper_image_suggest.js?v=<?php echo @filemtime(__DIR__ . '/js/scraper_image_suggest.js'); ?>"></script>
     <script src="js/image_search.js?v=<?php echo @filemtime(__DIR__ . '/js/image_search.js'); ?>"></script>
 </body>

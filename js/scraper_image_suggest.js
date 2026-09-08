@@ -15,6 +15,7 @@
     var lastId = null;
     var lastSuggestions = [];
     var cropper = null;
+    var cropApi = null;   // shared resolution + preview control (TENCrop)
 
     function esc(s) {
         return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -101,6 +102,7 @@
     }
 
     function closeCropModal() {
+        if (cropApi) { try { cropApi.destroy(); } catch (e) {} cropApi = null; }
         if (cropper) { cropper.destroy(); cropper = null; }
         var ov = document.getElementById("scCropOverlay");
         if (ov) ov.remove();
@@ -115,6 +117,7 @@
             '<div style="background:#fff;border-radius:12px;padding:16px;width:min(780px,94vw);max-height:92vh;overflow:auto;">' +
                 '<h3 style="margin:0 0 10px;font-size:16px;">Crop image (saved to your library as a WebP)</h3>' +
                 '<div style="max-height:58vh;"><img id="scCropImg" style="max-width:100%;display:block;"></div>' +
+                '<div id="scResCtl"></div>' +
                 '<div style="margin-top:12px;"><label style="font-size:12px;font-weight:600;color:#374151;">Attribution</label>' +
                     '<input id="scCropAttr" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;box-sizing:border-box;" value="' + esc(attribution) + '"></div>' +
                 '<div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">' +
@@ -126,7 +129,15 @@
         var img = document.getElementById("scCropImg");
         img.onload = function () {
             if (typeof Cropper !== "undefined") {
-                cropper = new Cropper(img, { aspectRatio: 490 / 310, viewMode: 1, autoCropArea: 1, background: false });
+                cropper = new Cropper(img, {
+                    aspectRatio: 490 / 310, viewMode: 1, autoCropArea: 1, background: false,
+                    ready: function () {
+                        if (window.TENCrop) {
+                            if (cropApi) { try { cropApi.destroy(); } catch (e) {} }
+                            cropApi = TENCrop.mount(document.getElementById("scResCtl"), cropper, { baseW: 790, imageEl: img });
+                        }
+                    }
+                });
             }
         };
         img.src = dataUrl;
@@ -137,8 +148,11 @@
     function saveCrop() {
         if (!cropper) { alertErr("Cropper not ready"); return; }
         var attribution = document.getElementById("scCropAttr").value;
-        var canvas = cropper.getCroppedCanvas({ width: 790, height: 500, fillColor: "#ffffff", imageSmoothingEnabled: true, imageSmoothingQuality: "high" });
-        var jpeg = canvas.toDataURL("image/jpeg", 0.95);
+        // Save at the resolution the user chose in the preview control; fall back
+        // to the fixed 790x500 if the control isn't mounted.
+        var jpeg = cropApi
+            ? cropApi.currentDataUrl()
+            : cropper.getCroppedCanvas({ width: 790, height: 500, fillColor: "#ffffff", imageSmoothingEnabled: true, imageSmoothingQuality: "high" }).toDataURL("image/jpeg", 0.95);
         var btn = document.getElementById("scCropSave");
         btn.disabled = true;
         btn.textContent = "Saving…";
