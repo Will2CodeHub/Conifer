@@ -165,6 +165,35 @@ $currentPage = 'site_ticker';
         </div>
     </div>
 
+<!-- Copy-to-publications modal -->
+    <div class="tk-modal-overlay" id="tk_copy_modal">
+        <div class="tk-modal" style="max-width:520px;">
+            <div class="tk-modal-head">
+                <h2>Copy ticker item</h2>
+                <button class="close-x" onclick="closeCopyTicker()">&times;</button>
+            </div>
+            <div class="tk-modal-body">
+                <input type="hidden" id="tk_copy_id" value="">
+                <p class="tk-hint" style="margin-top:0;margin-bottom:12px;">Copies this item (text and any date/schedule) into the publications you choose. The original stays where it is.</p>
+                <div id="tk_copy_source" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:16px;font-size:13px;color:#374151;"></div>
+                <div class="tk-form-group" style="margin-bottom:0;">
+                    <label>Copy to publication(s) <span style="color:#dc2626">*</span></label>
+                    <div class="sm-checks" id="tk_copy_checks" style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;max-height:220px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;padding:12px;">
+                        <?php foreach ($allPublications as $p): ?>
+                            <label style="display:flex;align-items:center;gap:8px;font-weight:500;font-size:13px;color:#374151;">
+                                <input type="checkbox" class="tk-copy-cb" value="<?php echo htmlspecialchars($p['publication']); ?>" data-pub="<?php echo htmlspecialchars($p['publication']); ?>"> <?php echo htmlspecialchars($p['title']); ?>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </div>
+            <div class="tk-modal-foot">
+                <button class="btn-light" onclick="closeCopyTicker()">Cancel</button>
+                <button class="btn-primary" onclick="doCopyTicker()"><i class="fas fa-copy"></i> Copy</button>
+            </div>
+        </div>
+    </div>
+
 <script>
 const TK_AJAX = 'ajax/site_ticker.php';
 
@@ -213,6 +242,7 @@ function renderTicker(rows) {
             '<td><div class="tk-text">' + r.breaking_news + '</div>' + badge + '</td>' +
             '<td><div class="tk-date">' + esc(fmtDate(r.date)) + '</div><div class="tk-window">' + win + '</div></td>' +
             '<td><div class="tk-actions">' +
+                '<button class="tk-icon-btn" title="Copy to other publications" onclick="openCopyTicker(' + r.id + ')"><i class="fas fa-copy"></i></button>' +
                 '<button class="tk-icon-btn" title="Edit" onclick="editTicker(' + r.id + ')"><i class="fas fa-pen"></i></button>' +
                 '<button class="tk-icon-btn danger" title="Delete" onclick="deleteTicker(' + r.id + ')"><i class="fas fa-trash"></i></button>' +
             '</div></td></tr>';
@@ -291,6 +321,41 @@ function deleteTicker(id) {
             else tkAlert(res.message || 'Delete failed', 'error');
         }, 'json');
     });
+}
+
+/* ---- copy to other publications ---- */
+function openCopyTicker(id) {
+    const r = (document.getElementById('tk_table_wrap')._rows || {})[id];
+    if (!r) return;
+    const cur = document.getElementById('tk_pub').value;
+    document.getElementById('tk_copy_id').value = id;
+    // show a short preview of what's being copied
+    let win = (!r.publish_from && !r.publish_to) ? 'permanent' :
+        ((r.publish_from ? 'from ' + fmtDate(r.publish_from) : '') + (r.publish_to ? ' until ' + fmtDate(r.publish_to) : '')).trim();
+    document.getElementById('tk_copy_source').innerHTML =
+        '<strong>Copying:</strong> ' + r.breaking_news + '<br><span style="color:#6b7280;">Date ' + esc(fmtDate(r.date)) + ' · ' + esc(win) + '</span>';
+    // reset checkboxes; disable/uncheck the source's own publication
+    document.querySelectorAll('.tk-copy-cb').forEach(function (cb) {
+        cb.checked = false;
+        const isSelf = (cb.value === cur);
+        cb.disabled = isSelf;
+        cb.closest('label').style.opacity = isSelf ? '0.4' : '1';
+        cb.closest('label').title = isSelf ? 'This is the current publication' : '';
+    });
+    document.getElementById('tk_copy_modal').classList.add('open');
+}
+
+function closeCopyTicker() { document.getElementById('tk_copy_modal').classList.remove('open'); }
+
+function doCopyTicker() {
+    const id = document.getElementById('tk_copy_id').value;
+    const editions = [];
+    document.querySelectorAll('.tk-copy-cb:checked').forEach(function (cb) { if (!cb.disabled) editions.push(cb.value); });
+    if (!editions.length) { tkAlert('Choose at least one publication', 'error'); return; }
+    $.post(TK_AJAX, { action: 'copy', id: id, 'editions[]': editions }, function (res) {
+        if (res.success) { closeCopyTicker(); tkAlert('Copied to ' + res.count + ' publication(s)'); }
+        else tkAlert(res.message || 'Copy failed', 'error');
+    }, 'json').fail(function () { tkAlert('Request failed', 'error'); });
 }
 </script>
 </body>
