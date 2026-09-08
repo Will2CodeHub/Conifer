@@ -105,12 +105,12 @@ class LogAnalyzer {
      * @param int $endTime Unix timestamp
      * @return array Statistics array
      */
-    public function analyzeTimePeriod($startTime, $endTime) {
+    public function analyzeTimePeriod($startTime, $endTime, $maxTailBytes = 0) {
         if (!file_exists($this->logPath) || !is_readable($this->logPath)) {
             error_log("LogAnalyzer: Log file not accessible at {$this->logPath}");
             return $this->getEmptyStats();
         }
-        
+
         // Stream the file line-by-line — the visitor log can be very large and
         // loading it all into memory (file_get_contents) exhausts PHP's memory
         // limit and fatals, which is what used to break the stats tool.
@@ -118,6 +118,17 @@ class LogAnalyzer {
         if ($fh === false) {
             error_log("LogAnalyzer: Failed to open log file at {$this->logPath}");
             return $this->getEmptyStats();
+        }
+
+        // For recent/live periods, only scan the TAIL of the file — recent entries
+        // are appended at the end, so reading the last few MB bounds the work even
+        // when the log is huge (otherwise a busy site's log times out the request).
+        if ($maxTailBytes > 0) {
+            $sz = @filesize($this->logPath);
+            if ($sz !== false && $sz > $maxTailBytes) {
+                fseek($fh, -$maxTailBytes, SEEK_END);
+                fgets($fh); // discard the partial first line after the seek
+            }
         }
 
         error_log("LogAnalyzer: Streaming log for period " .
