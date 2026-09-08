@@ -42,6 +42,15 @@ function ticker_datetime(string $v): string {
     return $ts ? date('Y-m-d H:i:s', $ts) : date('Y-m-d H:i:s');
 }
 
+/** Datetime-local value to MySQL datetime, or NULL when blank/unparseable.
+ *  Used for the optional publish-from / publish-to window. */
+function ticker_datetime_or_null($v): ?string {
+    $v = trim((string)$v);
+    if ($v === '') return null;
+    $ts = strtotime(str_replace('T', ' ', $v));
+    return $ts ? date('Y-m-d H:i:s', $ts) : null;
+}
+
 try {
     $pubs = ticker_publications($conn);
 
@@ -49,17 +58,30 @@ try {
         case 'list': {
             $edition = $_POST['edition'] ?? $_GET['edition'] ?? '';
             if (!isset($pubs[$edition])) throw new Exception('Unknown publication: ' . $edition);
-            $stmt = $conn->prepare("SELECT id, breaking_news, date FROM news_ticker WHERE edition = ? ORDER BY date DESC, id DESC");
+            $stmt = $conn->prepare("SELECT id, breaking_news, date, publish_from, publish_to FROM news_ticker WHERE edition = ? ORDER BY date DESC, id DESC");
             $stmt->bind_param('s', $edition);
             $stmt->execute();
             $res = $stmt->get_result();
             $rows = [];
-            $i = 0;
+            $now = time();
+            $liveShown = 0;   // eligible + within the newest-6 the site displays
             while ($row = $res->fetch_assoc()) {
                 $row['id'] = (int)$row['id'];
-                $row['live'] = ($i < 6);   // newest 6 are what the site shows
+                $from = $row['publish_from'] ? strtotime($row['publish_from']) : null;
+                $to   = $row['publish_to'] ? strtotime($row['publish_to']) : null;
+                // status: expired > scheduled > live (eligible & in top 6) > off
+                if ($to !== null && $to < $now) {
+                    $row['status'] = 'expired';
+                } elseif ($from !== null && $from > $now) {
+                    $row['status'] = 'scheduled';
+                } elseif ($liveShown < 6) {
+                    $row['status'] = 'live';
+                    $liveShown++;
+                } else {
+                    $row['status'] = 'off';   // eligible but pushed off by newer items
+                }
+                $row['live'] = ($row['status'] === 'live');
                 $rows[] = $row;
-                $i++;
             }
             $stmt->close();
             $response = ['success' => true, 'edition' => $edition, 'rows' => $rows];
@@ -70,11 +92,14 @@ try {
             $edition = $_POST['edition'] ?? '';
             $text    = trim($_POST['breaking_news'] ?? '');
             $date    = ticker_datetime($_POST['date'] ?? '');
+            $pfrom   = ticker_datetime_or_null($_POST['publish_from'] ?? '');
+            $pto     = ticker_datetime_or_null($_POST['publish_to'] ?? '');
             if (!isset($pubs[$edition])) throw new Exception('Choose a valid publication');
             if ($text === '') throw new Exception('Ticker text is required');
             if (mb_strlen($text) > 500) throw new Exception('Ticker text must be 500 characters or fewer');
-            $stmt = $conn->prepare("INSERT INTO news_ticker (breaking_news, date, edition) VALUES (?, ?, ?)");
-            $stmt->bind_param('sss', $text, $date, $edition);
+            if ($pfrom !== null && $pto !== null && strtotime($pto) < strtotime($pfrom)) throw new Exception('"Show until" must be after "Show from"');
+            $stmt = $conn->prepare("INSERT INTO news_ticker (breaking_news, date, publish_from, publish_to, edition) VALUES (?, ?, ?, ?, ?)");
+            $stmt->bind_param('sssss', $text, $date, $pfrom, $pto, $edition);
             $stmt->execute();
             $id = (int)$conn->insert_id;
             $stmt->close();
@@ -86,11 +111,14 @@ try {
             $id   = (int)($_POST['id'] ?? 0);
             $text = trim($_POST['breaking_news'] ?? '');
             $date = ticker_datetime($_POST['date'] ?? '');
+            $pfrom = ticker_datetime_or_null($_POST['publish_from'] ?? '');
+            $pto   = ticker_datetime_or_null($_POST['publish_to'] ?? '');
             if ($id <= 0) throw new Exception('Invalid id');
             if ($text === '') throw new Exception('Ticker text is required');
             if (mb_strlen($text) > 500) throw new Exception('Ticker text must be 500 characters or fewer');
-            $stmt = $conn->prepare("UPDATE news_ticker SET breaking_news = ?, date = ? WHERE id = ?");
-            $stmt->bind_param('ssi', $text, $date, $id);
+            if ($pfrom !== null && $pto !== null && strtotime($pto) < strtotime($pfrom)) throw new Exception('"Show until" must be after "Show from"');
+            $stmt = $conn->prepare("UPDATE news_ticker SET breaking_news = ?, date = ?, publish_from = ?, publish_to = ? WHERE id = ?");
+            $stmt->bind_param('ssssi', $text, $date, $pfrom, $pto, $id);
             $stmt->execute();
             $stmt->close();
             $response = ['success' => true, 'id' => $id];

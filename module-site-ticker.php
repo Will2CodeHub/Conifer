@@ -55,8 +55,12 @@ $currentPage = 'site_ticker';
         .tk-text { color: #111827; }
         .tk-text a { color: #4f46e5; }
         .tk-date { color: #6b7280; font-size: 12.5px; white-space: nowrap; }
-        .tk-live { display: inline-block; font-size: 10.5px; font-weight: 700; color: #065f46; background: #d1fae5; padding: 1px 8px; border-radius: 999px; margin-top: 6px; }
-        .tk-off { display: inline-block; font-size: 10.5px; font-weight: 600; color: #6b7280; background: #f3f4f6; padding: 1px 8px; border-radius: 999px; margin-top: 6px; }
+        .tk-badge { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; margin-top: 6px; }
+        .tk-live { color: #065f46; background: #d1fae5; }
+        .tk-off { color: #6b7280; background: #f3f4f6; font-weight: 600; }
+        .tk-sched { color: #1e40af; background: #dbeafe; }
+        .tk-exp { color: #991b1b; background: #fee2e2; }
+        .tk-window { color: #6b7280; font-size: 11.5px; margin-top: 4px; }
         .tk-actions { display: flex; gap: 6px; justify-content: flex-end; }
         .tk-icon-btn { border: 1px solid #e5e7eb; background: #fff; border-radius: 7px; width: 32px; height: 32px; cursor: pointer; color: #6b7280; }
         .tk-icon-btn:hover { background: #f9fafb; color: #111827; }
@@ -140,6 +144,19 @@ $currentPage = 'site_ticker';
                     <label>Date / time <span class="tk-hint">(controls ordering; defaults to now)</span></label>
                     <input type="datetime-local" id="tk_date">
                 </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+                    <div class="tk-form-group" style="margin-bottom:0;">
+                        <label>Show from <span class="tk-hint">(optional)</span></label>
+                        <input type="datetime-local" id="tk_from">
+                        <div style="margin-top:4px;"><a href="#" onclick="clearDT('tk_from');return false;" style="font-size:12px;color:#6b7280;">Clear — show immediately</a></div>
+                    </div>
+                    <div class="tk-form-group" style="margin-bottom:0;">
+                        <label>Show until <span class="tk-hint">(optional)</span></label>
+                        <input type="datetime-local" id="tk_to">
+                        <div style="margin-top:4px;"><a href="#" onclick="clearDT('tk_to');return false;" style="font-size:12px;color:#6b7280;">Clear — never expire</a></div>
+                    </div>
+                </div>
+                <p class="tk-hint" style="margin-top:10px;">Leave both blank for a permanent item. Set only <em>Show from</em> to schedule a start; set only <em>Show until</em> to auto-expire.</p>
             </div>
             <div class="tk-modal-foot">
                 <button class="btn-light" onclick="closeTicker()">Cancel</button>
@@ -180,12 +197,21 @@ function fmtDate(d) {
 function renderTicker(rows) {
     const wrap = document.getElementById('tk_table_wrap');
     if (!rows.length) { wrap.innerHTML = '<div class="tk-empty">No ticker items yet for this publication. Use “Add ticker item”.</div>'; return; }
-    let html = '<table class="tk-table"><thead><tr><th>Ticker text</th><th style="width:160px">Date</th><th style="width:90px;text-align:right">Actions</th></tr></thead><tbody>';
+    let html = '<table class="tk-table"><thead><tr><th>Ticker text</th><th style="width:210px">Date &amp; schedule</th><th style="width:90px;text-align:right">Actions</th></tr></thead><tbody>';
     rows.forEach(function (r) {
+        const badge = {
+            live:  '<span class="tk-badge tk-live">LIVE</span>',
+            off:   '<span class="tk-badge tk-off">off — pushed down</span>',
+            scheduled: '<span class="tk-badge tk-sched">scheduled</span>',
+            expired:   '<span class="tk-badge tk-exp">expired</span>'
+        }[r.status] || '<span class="tk-badge tk-off">off</span>';
+        let win = '';
+        if (r.publish_from) win += 'From ' + esc(fmtDate(r.publish_from)) + '<br>';
+        if (r.publish_to)   win += 'Until ' + esc(fmtDate(r.publish_to));
+        if (!r.publish_from && !r.publish_to) win = '<span style="color:#9ca3af;">permanent</span>';
         html += '<tr data-id="' + r.id + '">' +
-            '<td><div class="tk-text">' + r.breaking_news + '</div>' +
-                (r.live ? '<span class="tk-live">LIVE</span>' : '<span class="tk-off">off</span>') + '</td>' +
-            '<td><div class="tk-date">' + esc(fmtDate(r.date)) + '</div></td>' +
+            '<td><div class="tk-text">' + r.breaking_news + '</div>' + badge + '</td>' +
+            '<td><div class="tk-date">' + esc(fmtDate(r.date)) + '</div><div class="tk-window">' + win + '</div></td>' +
             '<td><div class="tk-actions">' +
                 '<button class="tk-icon-btn" title="Edit" onclick="editTicker(' + r.id + ')"><i class="fas fa-pen"></i></button>' +
                 '<button class="tk-icon-btn danger" title="Delete" onclick="deleteTicker(' + r.id + ')"><i class="fas fa-trash"></i></button>' +
@@ -209,12 +235,16 @@ function toLocalInput(mysql) {
     return dt.toISOString().slice(0, 16);
 }
 
+function clearDT(id) { document.getElementById(id).value = ''; }
+
 function openCreateTicker() {
     if (!document.getElementById('tk_pub').value) { tkAlert('Choose a publication first', 'info'); return; }
     document.getElementById('tk_modal_title').textContent = 'Add ticker item';
     document.getElementById('tk_edit_id').value = '';
     document.getElementById('tk_text').value = '';
     document.getElementById('tk_date').value = nowLocal();
+    document.getElementById('tk_from').value = '';
+    document.getElementById('tk_to').value = '';
     tkCount();
     document.getElementById('tk_modal').classList.add('open');
 }
@@ -226,6 +256,8 @@ function editTicker(id) {
     document.getElementById('tk_edit_id').value = id;
     document.getElementById('tk_text').value = r.breaking_news || '';
     document.getElementById('tk_date').value = toLocalInput(r.date);
+    document.getElementById('tk_from').value = r.publish_from ? toLocalInput(r.publish_from) : '';
+    document.getElementById('tk_to').value = r.publish_to ? toLocalInput(r.publish_to) : '';
     tkCount();
     document.getElementById('tk_modal').classList.add('open');
 }
@@ -236,11 +268,14 @@ function saveTicker() {
     const id = document.getElementById('tk_edit_id').value;
     const text = document.getElementById('tk_text').value.trim();
     const date = document.getElementById('tk_date').value;
+    const pfrom = document.getElementById('tk_from').value;
+    const pto = document.getElementById('tk_to').value;
     const edition = document.getElementById('tk_pub').value;
     if (!text) { tkAlert('Ticker text is required', 'error'); return; }
+    if (pfrom && pto && pto < pfrom) { tkAlert('"Show until" must be after "Show from"', 'error'); return; }
     const data = id
-        ? { action: 'update', id: id, breaking_news: text, date: date }
-        : { action: 'create', edition: edition, breaking_news: text, date: date };
+        ? { action: 'update', id: id, breaking_news: text, date: date, publish_from: pfrom, publish_to: pto }
+        : { action: 'create', edition: edition, breaking_news: text, date: date, publish_from: pfrom, publish_to: pto };
     $.post(TK_AJAX, data, function (res) {
         if (res.success) { closeTicker(); loadTicker(edition); tkAlert('Saved'); }
         else tkAlert(res.message || 'Save failed', 'error');
