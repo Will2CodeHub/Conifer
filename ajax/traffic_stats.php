@@ -105,6 +105,7 @@ function getTrafficStats() {
         'truse' => ['name' => 'The Russia Eye',     'log_path' => '/home/treuser/private/unique_visitors_count.txt'],
         'tte'   => ['name' => 'The Tokyo Eye',      'log_path' => '/home/tteuser/private/unique_visitors_count.txt'],
         'tpe'   => ['name' => 'The Paris Eye',      'log_path' => '/home/tpeuser/private/unique_visitors_count.txt'],
+        'tberuser' => ['name' => 'The Berlin Eye',  'log_path' => '/home/tberuser/private/unique_visitors_count.txt'],
     ];
     
     if (!isset($sites[$siteKey])) {
