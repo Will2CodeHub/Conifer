@@ -65,6 +65,15 @@ Out of scope (separate later projects): the Broker scraper and the Restaurants/C
 - **Root tasks (William):** (a) DNS **SPF** (include the server), **DKIM** (generate key, publish TXT, sign in the MTA), **DMARC** (`p=none` to start, monitor); ideally a **dedicated sending subdomain** (e.g. `mail.theeyenewspapers.com`) to isolate reputation; (b) a sending mailbox + a reply mailbox + a VERP/bounce mailbox with IMAP access; (c) cron entries for `ec_send.php` (*/1) and `ec_imap_poll.php` (*/5) via `/usr/local/bin/php`.
 - PHPMailer (vendored) for SMTP; PHP `imap` extension for polling (confirm it's enabled).
 
+## 8a. Sending IP / VPN policy (decided 2026-09-08)
+**Mail delivery must NOT go through a consumer VPN (NordVPN etc.).** Doing so wrecks deliverability: SPF authorises the *connecting* IP, so a VPN exit IP not in the domain's SPF → SPF fail → spam; VPN exit IPs are shared and frequently blocklisted; no rDNS/PTR can be set to match the domain; VPN/residential ranges are distrusted for port‑25 sending. DKIM (domain‑signed) survives but SPF/alignment fails.
+
+Correct options for the delivery hop:
+- **Default:** the server's own static IP with SPF + DKIM + DMARC + rDNS + warm‑up.
+- **Optional dedicated relay:** point the Settings SMTP host/port/user/pass at an **external static‑IP SMTP relay** (e.g. a small German VPS the operator controls) to send from a separate/German IP and isolate the news sites' reputation. This is a relay, not a VPN. No code change needed — the SMTP config already accepts any host.
+
+**VPN/proxy egress belongs to the *scraper* layer** (Broker / Restaurants‑Cafés scrapers hitting Google Maps), matching the existing news scraper's VPN egress — not the mail sender. Recorded here so the scraper projects factor it in.
+
 ## 9. Build order (phases within this one project)
 1. DB schema + module/permission + Contacts (CSV/paste import) + suppression.
 2. Templates + test‑send + SMTP settings/PHPMailer.
