@@ -148,7 +148,9 @@ function getTrafficStats() {
         if (file_exists($logPath) && is_readable($logPath)) {
             try {
                 $analyzer = new LogAnalyzer($logPath, $siteKey);
-                $stats = $analyzer->analyzeTimePeriod($startTime, $endTime);
+                // Live periods are recent, so only scan the last 40 MB of the log —
+                // bounds the work so a large/busy site's log can't time out.
+                $stats = $analyzer->analyzeTimePeriod($startTime, $endTime, 40 * 1024 * 1024);
                 $dataSource = 'Live Log File';
             } catch (Throwable $e) {
                 error_log("Live log analysis failed, falling back to DB: " . $e->getMessage());

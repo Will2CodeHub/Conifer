@@ -392,7 +392,7 @@ $currentPage = 'statistics';
                     <label><i class="fas fa-globe"></i> Select Website</label>
                     <select id="siteSelector" onchange="loadTrafficStats()">
                         <?php foreach ($sites as $key => $site): ?>
-                            <option value="<?php echo $key; ?>" <?php echo $key === 'tme' ? 'selected' : ''; ?>>
+                            <option value="<?php echo $key; ?>" <?php echo $key === 'ten' ? 'selected' : ''; ?>>
                                 <?php echo htmlspecialchars($site['name']); ?>
                             </option>
                         <?php endforeach; ?>
