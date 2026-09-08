@@ -7,6 +7,8 @@
 require_once '../config.php';
 require_once '../includes/LogAnalyzer.php';
 
+@set_time_limit(0); // large live logs can take a while to stream
+
 header('Content-Type: application/json');
 
 // Require authentication
@@ -139,23 +141,23 @@ function getTrafficStats() {
         $stats = getStatsFromDatabase($siteKey, $startTime, $endTime);
         $dataSource = 'Database (Historical)';
     } else {
-        // Get stats from log file for recent data
-        if (!file_exists($logPath)) {
-            error_log("ERROR: Log file not found at $logPath");
-            echo json_encode(['success' => false, 'message' => 'Log file not found: ' . $logPath]);
-            return;
-        }
-        
-        error_log("Reading log file");
-        try {
-            $analyzer = new LogAnalyzer($logPath, $siteKey);
-            $stats = $analyzer->analyzeTimePeriod($startTime, $endTime);
-            $dataSource = 'Live Log File';
-            error_log("Stats collected: " . json_encode($stats));
-        } catch (Exception $e) {
-            error_log("ERROR analyzing log: " . $e->getMessage());
-            echo json_encode(['success' => false, 'message' => 'Error analyzing log: ' . $e->getMessage()]);
-            return;
+        // Live period. The web process (tenuser) can only read its OWN visitor log;
+        // other sites' logs live in their user's private dir and aren't readable
+        // here. If the live log is missing/unreadable/errors, fall back to the
+        // database day-rows so the page still works instead of failing.
+        if (file_exists($logPath) && is_readable($logPath)) {
+            try {
+                $analyzer = new LogAnalyzer($logPath, $siteKey);
+                $stats = $analyzer->analyzeTimePeriod($startTime, $endTime);
+                $dataSource = 'Live Log File';
+            } catch (Throwable $e) {
+                error_log("Live log analysis failed, falling back to DB: " . $e->getMessage());
+                $stats = getStatsFromDatabase($siteKey, $startTime, $endTime);
+                $dataSource = 'Database (live log unavailable)';
+            }
+        } else {
+            $stats = getStatsFromDatabase($siteKey, $startTime, $endTime);
+            $dataSource = 'Database (live log not accessible for this site)';
         }
     }
     
