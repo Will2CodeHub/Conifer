@@ -189,100 +189,90 @@ function getMonthlySummary() {
     $lastMonthPageViews = 0;
     foreach (($lastMonthStats['page_views'] ?? []) as $c) { $lastMonthPageViews += (int)$c; }
 
-    // Month-level UNIQUE VISITORS via true dedup (union of per-day visitor
-    // fingerprints), falling back to the summed daily uniques for any month whose
-    // days predate fingerprint collection. See getUniqueVisitorsDedup().
-    $lastMonthUnique = getUniqueVisitorsDedup(
+    // REAL-VISITOR figures exclude bots & spam. "Unique visitors" uses the human
+    // fingerprint dedup where available, else summed daily human uniques. Page views
+    // are already human-only (the collector records them only for non-bot,
+    // non-spam requests).
+    $lastMonthHumanUnique = getUniqueVisitorsDedup(
         $conn, $siteKey, date('Y-m-d', $lastMonthStart), date('Y-m-d', $lastMonthEnd),
-        (int)$lastMonthStats['unique_visitors']
+        (int)$lastMonthStats['human_unique'], 'human_unique_hashes', 'human_unique'
     );
+    $lastMonthBots = (int)$lastMonthStats['bot_visits'] + (int)$lastMonthStats['spam_visits'];
 
     // Get current month stats - need to count days with actual data
     $currentMonthStart = strtotime('first day of this month 00:00:00');
     $currentMonthEnd = time();
     $currentMonthName = date('F Y', $currentMonthStart);
-
-    // Count how many days have data in current month
     $startDate = date('Y-m-d', $currentMonthStart);
     $endDate = date('Y-m-d', $currentMonthEnd);
 
-    // Total page views for the current month so far (sum of per-URL breakdown).
+    // Page views for the current month so far (human-only breakdown).
     $currentMonthPageViews = getPageViewsTotal($conn, $siteKey, $startDate, $endDate);
 
     $stmt = $conn->prepare("
         SELECT COUNT(DISTINCT stat_date) as days_with_data,
                SUM(total_visits) as total_visits,
-               SUM(unique_visitors) as unique_visitors,
                SUM(human_visits) as human_visits,
-               SUM(human_unique) as human_unique
-        FROM ten_traffic_stats 
-        WHERE site_key = ? 
+               SUM(human_unique) as human_unique,
+               SUM(bot_visits) as bot_visits,
+               SUM(spam_visits) as spam_visits
+        FROM ten_traffic_stats
+        WHERE site_key = ?
         AND stat_date BETWEEN ? AND ?
     ");
-    
     $stmt->bind_param("sss", $siteKey, $startDate, $endDate);
     $stmt->execute();
-    $result = $stmt->get_result();
-    $currentMonthData = $result->fetch_assoc();
+    $currentMonthData = $stmt->get_result()->fetch_assoc();
     $stmt->close();
-    
-    $currentMonthStats = [
-        'total_visits' => (int)($currentMonthData['total_visits'] ?? 0),
-        'unique_visitors' => (int)($currentMonthData['unique_visitors'] ?? 0),
-        'human_visits' => (int)($currentMonthData['human_visits'] ?? 0),
-        'human_unique' => (int)($currentMonthData['human_unique'] ?? 0)
-    ];
 
-    // Month-level unique visitors (dedup by union of per-day fingerprints; falls
-    // back to the summed daily uniques until every data-day in the range has them).
-    $currentMonthUnique = getUniqueVisitorsDedup(
+    $curHumanVisits = (int)($currentMonthData['human_visits'] ?? 0);
+    $curBots        = (int)($currentMonthData['bot_visits'] ?? 0) + (int)($currentMonthData['spam_visits'] ?? 0);
+    $curTotal       = (int)($currentMonthData['total_visits'] ?? 0);
+
+    $currentHumanUnique = getUniqueVisitorsDedup(
         $conn, $siteKey, $startDate, $endDate,
-        $currentMonthStats['unique_visitors']
+        (int)($currentMonthData['human_unique'] ?? 0), 'human_unique_hashes', 'human_unique'
     );
-    
-    // Calculate projection based on days with actual data
+
     $daysInMonth = date('t');
     $daysWithData = (int)($currentMonthData['days_with_data'] ?? 0);
-    $projectionAvailable = $daysWithData >= 1; // Need at least 1 day with data
-    
-    // Project each metric to the full month = (metric so far / days with data) * days in month.
-    $projectedTotal = 0; $projectedUnique = 0; $projectedPageViews = 0;
+    // A projection needs a few real days to be meaningful — extrapolating a full
+    // month from 1-2 days gives nonsense, so require at least 3 days of data.
+    $projectionAvailable = $daysWithData >= 3;
+
+    // Full-month projection = (metric so far / days measured) * days in month.
+    $projHumanVisits = $projHumanUnique = $projPageViews = 0;
     if ($projectionAvailable && $daysWithData > 0) {
-        $projectedTotal      = ($currentMonthStats['total_visits'] / $daysWithData) * $daysInMonth;
-        $projectedUnique     = ($currentMonthUnique               / $daysWithData) * $daysInMonth;
-        $projectedPageViews  = ($currentMonthPageViews            / $daysWithData) * $daysInMonth;
+        $projHumanVisits = ($curHumanVisits        / $daysWithData) * $daysInMonth;
+        $projHumanUnique = ($currentHumanUnique    / $daysWithData) * $daysInMonth;
+        $projPageViews   = ($currentMonthPageViews / $daysWithData) * $daysInMonth;
     }
 
     $conn->close();
-    
+
     echo ts_json([
         'success' => true,
-        'debug' => [
-            'days_with_data' => $daysWithData,
-            'current_total' => $currentMonthStats['total_visits'],
-            'daily_average' => $daysWithData > 0 ? ($currentMonthStats['total_visits'] / $daysWithData) : 0,
-            'days_in_month' => $daysInMonth
-        ],
         'last_month' => [
             'month_name' => $lastMonthName,
-            'total_visits' => $lastMonthStats['total_visits'],
-            'unique_visitors' => $lastMonthUnique,
+            'human_visits' => (int)$lastMonthStats['human_visits'],
+            'unique_visitors' => $lastMonthHumanUnique,   // human, bot/spam excluded
             'page_views' => $lastMonthPageViews,
-            'human_visits' => $lastMonthStats['human_visits'],
-            'human_unique' => $lastMonthStats['human_unique']
+            'total_visits' => (int)$lastMonthStats['total_visits'],
+            'bots_filtered' => $lastMonthBots,
         ],
         'current_month' => [
             'month_name' => $currentMonthName,
             'days_in_month' => $daysInMonth,
             'days_elapsed' => $daysWithData,
-            'total_visits' => $currentMonthStats['total_visits'],
-            'unique_visitors' => $currentMonthUnique,
+            'human_visits' => $curHumanVisits,
+            'unique_visitors' => $currentHumanUnique,     // human, bot/spam excluded
             'page_views' => $currentMonthPageViews,
-            'human_visits' => $currentMonthStats['human_visits'],
+            'total_visits' => $curTotal,
+            'bots_filtered' => $curBots,
             'projection_available' => $projectionAvailable,
-            'projected_total' => $projectedTotal,
-            'projected_unique' => $projectedUnique,
-            'projected_page_views' => $projectedPageViews
+            'projected_human_visits' => $projHumanVisits,
+            'projected_unique' => $projHumanUnique,
+            'projected_page_views' => $projPageViews,
         ]
     ]);
 }
@@ -300,17 +290,20 @@ function getMonthlySummary() {
  * missing its fingerprints (i.e. predates fingerprint collection). This keeps a
  * transition month from silently under-reporting.
  */
-function getUniqueVisitorsDedup($conn, $siteKey, $startDate, $endDate, $fallbackSum) {
-    static $hasCol = null;
-    if ($hasCol === null) {
-        $hasCol = false;
-        $r = @$conn->query("SHOW COLUMNS FROM ten_traffic_stats LIKE 'visitor_hashes'");
-        if ($r) { $hasCol = $r->num_rows > 0; $r->free(); }
+function getUniqueVisitorsDedup($conn, $siteKey, $startDate, $endDate, $fallbackSum, $hashCol = 'visitor_hashes', $countCol = 'unique_visitors') {
+    static $colOk = [];
+    if (!isset($colOk[$hashCol])) {
+        $colOk[$hashCol] = false;
+        $r = @$conn->query("SHOW COLUMNS FROM ten_traffic_stats LIKE '" . $conn->real_escape_string($hashCol) . "'");
+        if ($r) { $colOk[$hashCol] = $r->num_rows > 0; $r->free(); }
     }
-    if (!$hasCol) return (int)$fallbackSum;
+    if (!$colOk[$hashCol]) return (int)$fallbackSum;
 
+    // $hashCol/$countCol are internal constants (not user input) but escape anyway.
+    $hc = '`' . str_replace('`', '', $hashCol) . '`';
+    $cc = '`' . str_replace('`', '', $countCol) . '`';
     $stmt = $conn->prepare("
-        SELECT unique_visitors, visitor_hashes
+        SELECT $cc AS cnt, $hc AS hashes
         FROM ten_traffic_stats
         WHERE site_key = ?
         AND stat_date BETWEEN ? AND ?
@@ -324,9 +317,9 @@ function getUniqueVisitorsDedup($conn, $siteKey, $startDate, $endDate, $fallback
     $daysWithTraffic = 0;
     $daysFingerprinted = 0;
     while ($row = $result->fetch_assoc()) {
-        $uv = (int)$row['unique_visitors'];
-        $arr = ($row['visitor_hashes'] !== null && $row['visitor_hashes'] !== '')
-            ? json_decode($row['visitor_hashes'], true)
+        $uv = (int)$row['cnt'];
+        $arr = ($row['hashes'] !== null && $row['hashes'] !== '')
+            ? json_decode($row['hashes'], true)
             : null;
         if ($uv > 0) {
             $daysWithTraffic++;

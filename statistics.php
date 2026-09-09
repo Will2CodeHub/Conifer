@@ -697,11 +697,14 @@ $currentPage = 'statistics';
         // Both month boxes share this layout so they show identical content.
         // `foot` is the breakdown block: projected figures for the current month,
         // final figures for last month.
+        // Both month boxes share this layout. Figures are REAL visitors — bots and
+        // spam are excluded. `foot` is the breakdown block.
         function monthCard(heading, m, subLabel, foot) {
+            const bots = m.bots_filtered || 0;
             return `
                 <div class="summary-card">
                     <div class="summary-title">${heading}</div>
-                    <div class="summary-value">${formatNumber(m.total_visits || 0)}</div>
+                    <div class="summary-value">${formatNumber(m.human_visits || 0)}</div>
                     <div class="summary-label">${subLabel}</div>
                     <div class="summary-metrics">
                         <div class="summary-metric">
@@ -713,6 +716,7 @@ $currentPage = 'statistics';
                             <span class="metric-lbl"><i class="fas fa-file-lines"></i> Page Views</span>
                         </div>
                     </div>
+                    ${bots ? `<div style="font-size:12px;color:#9ca3af;margin-top:10px;"><i class="fas fa-robot"></i> ${formatNumber(bots)} bot/spam hits excluded</div>` : ''}
                     ${foot}
                 </div>`;
         }
@@ -722,42 +726,42 @@ $currentPage = 'statistics';
             const currentMonth = data.current_month;
             const lastMonth = data.last_month;
 
-            // Last month is complete → its "full-month total" IS its actuals.
+            // Last month is complete → its "full-month total" IS its actuals (real visitors).
             const lastFoot = `
                 <div class="summary-projection">
                     <strong>Full month total (${lastMonth.month_name})</strong>
-                    ${projRow('fa-eye', 'Visits', lastMonth.total_visits)}
+                    ${projRow('fa-eye', 'Visits', lastMonth.human_visits)}
                     ${projRow('fa-user', 'Unique visitors', lastMonth.unique_visitors)}
                     ${projRow('fa-file-lines', 'Page views', lastMonth.page_views)}
                 </div>`;
 
-            // Current month → projected to the end of the month for all three metrics.
+            // Current month → projected to month end (real visitors), once enough days exist.
             let curFoot;
-            if (currentMonth.projection_available && currentMonth.projected_total > 0) {
-                const projVisits = Math.round(currentMonth.projected_total);
-                const change = lastMonth.total_visits > 0
-                    ? ((projVisits - lastMonth.total_visits) / lastMonth.total_visits * 100).toFixed(1)
+            if (currentMonth.projection_available && currentMonth.projected_human_visits > 0) {
+                const projVisits = Math.round(currentMonth.projected_human_visits);
+                const change = lastMonth.human_visits > 0
+                    ? ((projVisits - lastMonth.human_visits) / lastMonth.human_visits * 100).toFixed(1)
                     : 0;
                 const changeClass = change >= 0 ? 'color:#059669;' : 'color:#dc2626;';
                 const changeIcon = change >= 0 ? '↑' : '↓';
                 curFoot = `
                     <div class="summary-projection">
                         <strong>Projected for the full month (${currentMonth.month_name})</strong>
-                        ${projRow('fa-eye', 'Visits', currentMonth.projected_total)}
+                        ${projRow('fa-eye', 'Visits', currentMonth.projected_human_visits)}
                         ${projRow('fa-user', 'Unique visitors', currentMonth.projected_unique)}
                         ${projRow('fa-file-lines', 'Page views', currentMonth.projected_page_views)}
-                        <div class="proj-delta" style="${changeClass}">${changeIcon} ${Math.abs(change)}% projected visits vs last month</div>
+                        ${lastMonth.human_visits > 0 ? `<div class="proj-delta" style="${changeClass}">${changeIcon} ${Math.abs(change)}% projected visits vs last month</div>` : ''}
                     </div>`;
             } else {
                 curFoot = `
                     <div class="summary-projection" style="color:#9ca3af;font-style:italic;">
-                        ${currentMonth.days_elapsed > 0 ? 'Projection will appear once more days of data are collected.' : 'No data available yet for this month.'}
+                        Not enough data yet to project — ${currentMonth.days_elapsed || 0} of ${currentMonth.days_in_month || 30} days collected this month. A projection needs at least 3 days.
                     </div>`;
             }
 
             container.innerHTML =
-                monthCard(`Last Month (${lastMonth.month_name})`, lastMonth, 'Total Visits', lastFoot) +
-                monthCard(`This Month (${currentMonth.month_name})`, currentMonth, `Visits so far (${currentMonth.days_elapsed || 0} days with data)`, curFoot);
+                monthCard(`Last Month (${lastMonth.month_name})`, lastMonth, 'Real visitors', lastFoot) +
+                monthCard(`This Month (${currentMonth.month_name})`, currentMonth, `Real visitors so far (${currentMonth.days_elapsed || 0} days measured)`, curFoot);
             container.style.display = 'grid';
         }
         
