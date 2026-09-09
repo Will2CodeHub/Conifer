@@ -6,6 +6,7 @@
 
 require_once '../config.php';
 require_once '../includes/LogAnalyzer.php';
+require_once '../lib/stats_sites.php';
 
 @set_time_limit(0); // large live logs can take a while to stream
 
@@ -91,23 +92,9 @@ function getTrafficStats() {
     
     error_log("getTrafficStats - Site: $siteKey, Period: $period");
     
-    // Site configuration — canonical publication acronyms; MUST match statistics.php
-    // and the site_key stored by cron_collect_stats.php.
-    $sites = [
-        'ten'   => ['name' => 'The Eye Newspapers', 'log_path' => '/home/tenuser/private/unique_visitors_count.txt'],
-        'tme'   => ['name' => 'The Munich Eye',     'log_path' => '/home/tmeuser/private/unique_visitors_count.txt'],
-        'tge'   => ['name' => 'The Germany Eye',    'log_path' => '/home/tgeuser/private/unique_visitors_count.txt'],
-        'bae'   => ['name' => 'Buenos Aires Eye',   'log_path' => '/home/baeuser/private/unique_visitors_count.txt'],
-        'tbare' => ['name' => 'The Barcelona Eye',  'log_path' => '/home/tbareuse/private/unique_visitors_count.txt'],
-        'tbrae' => ['name' => 'The Brazil Eye',     'log_path' => '/home/tbeuser/private/unique_visitors_count.txt'],
-        'tce'   => ['name' => 'The Canary Eye',     'log_path' => '/home/tceuser/private/unique_visitors_count.txt'],
-        'tmae'  => ['name' => 'The Madrid Eye',     'log_path' => '/home/tmaeuser/private/unique_visitors_count.txt'],
-        'truse' => ['name' => 'The Russia Eye',     'log_path' => '/home/treuser/private/unique_visitors_count.txt'],
-        'tte'   => ['name' => 'The Tokyo Eye',      'log_path' => '/home/tteuser/private/unique_visitors_count.txt'],
-        'tpe'   => ['name' => 'The Paris Eye',      'log_path' => '/home/tpeuser/private/unique_visitors_count.txt'],
-        'tbere' => ['name' => 'The Berlin Eye',     'log_path' => '/home/tberuser/private/unique_visitors_count.txt'],
-    ];
-    
+    // Canonical publication list (single source of truth in lib/stats_sites.php).
+    $sites = ten_stats_sites();
+
     if (!isset($sites[$siteKey])) {
         error_log("Invalid site key: $siteKey");
         echo json_encode(['success' => false, 'message' => 'Invalid site key']);

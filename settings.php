@@ -1,6 +1,15 @@
 <?php
 require_once 'config.php';
 requireAdmin(); // Only admins can access settings
+require_once __DIR__ . '/lib/stats_sites.php';
+require_once __DIR__ . '/lib/app_settings.php';
+
+$statsSites   = ten_stats_sites();
+$statsPeriods = ten_stats_periods();
+$statsDefPub  = ten_get_setting('stats_default_publication', 'tme');
+if (!isset($statsSites[$statsDefPub])) $statsDefPub = 'tme';
+$statsDefPer  = ten_get_setting('stats_default_period', 'today');
+if (!isset($statsPeriods[$statsDefPer])) $statsDefPer = 'today';
 
 $conn = getDBConnection();
 
@@ -385,8 +394,33 @@ $currentPage = 'settings';
             <!-- General Tab -->
             <div id="general-tab" class="tab-content">
                 <div class="settings-card">
-                    <h2 style="margin-bottom: 20px;"><?php echo t('settings.general.title', 'General Settings'); ?></h2>
-                    <p style="color: #6b7280;"><?php echo t('settings.general.coming_soon', 'Additional system settings coming soon...'); ?></p>
+                    <h2 style="margin-bottom: 6px;"><i class="fas fa-chart-line" style="color:#667eea"></i> Statistics defaults</h2>
+                    <p style="color:#6b7280; margin-bottom:20px;">Which publication and time period the General Statistics page shows when it first opens. The page then remembers each admin's last choice on their own device.</p>
+                    <div style="display:flex; gap:20px; flex-wrap:wrap; max-width:640px;">
+                        <div class="form-group" style="flex:1; min-width:220px;">
+                            <label for="statsDefaultPublication">Default publication</label>
+                            <select id="statsDefaultPublication">
+                                <?php foreach ($statsSites as $key => $site): ?>
+                                    <option value="<?php echo htmlspecialchars($key); ?>" <?php echo $key === $statsDefPub ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($site['name']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="form-group" style="flex:1; min-width:220px;">
+                            <label for="statsDefaultPeriod">Default time period</label>
+                            <select id="statsDefaultPeriod">
+                                <?php foreach ($statsPeriods as $key => $label): ?>
+                                    <option value="<?php echo htmlspecialchars($key); ?>" <?php echo $key === $statsDefPer ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($label); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
+                    <button class="btn-primary" onclick="saveStatsDefaults()">
+                        <i class="fas fa-save"></i> Save statistics defaults
+                    </button>
                 </div>
             </div>
         </div>
@@ -506,5 +540,16 @@ $currentPage = 'settings';
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <script src="ajax/settings.js"></script>
+    <script>
+    function saveStatsDefaults(){
+        const pub=document.getElementById('statsDefaultPublication').value;
+        const per=document.getElementById('statsDefaultPeriod').value;
+        const fd=new FormData(); fd.append('action','save_stats_defaults'); fd.append('publication',pub); fd.append('period',per);
+        fetch('ajax/app_settings.php',{method:'POST',body:fd}).then(r=>r.json()).then(d=>{
+            if(d.success){ Swal.fire({toast:true,position:'top-end',timer:2400,showConfirmButton:false,icon:'success',title:'Statistics defaults saved'}); }
+            else { Swal.fire('Error', d.message||'Could not save', 'error'); }
+        }).catch(()=>Swal.fire('Error','Request failed','error'));
+    }
+    </script>
 </body>
 </html>
