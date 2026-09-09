@@ -12,10 +12,21 @@ require_once '../lib/stats_sites.php';
 
 header('Content-Type: application/json');
 
+/**
+ * Safe JSON output. The LIVE visitor logs contain page-view URLs / user-agents
+ * with non-UTF-8 bytes (e.g. %-mangled or latin1), which make a plain
+ * json_encode() return FALSE → an empty 200 body → the page shows
+ * "Failed to load statistics". JSON_INVALID_UTF8_SUBSTITUTE swaps bad bytes for
+ * U+FFFD instead of failing; PARTIAL_OUTPUT_ON_ERROR is a further backstop.
+ */
+function ts_json($data) {
+    return json_encode($data, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+}
+
 // Require authentication
 if (!isLoggedIn()) {
     http_response_code(401);
-    echo json_encode(['success' => false, 'message' => 'Not authenticated']);
+    echo ts_json(['success' => false, 'message' => 'Not authenticated']);
     exit;
 }
 
@@ -40,7 +51,7 @@ switch ($action) {
         break;
     
     default:
-        echo json_encode(['success' => false, 'message' => 'Invalid action']);
+        echo ts_json(['success' => false, 'message' => 'Invalid action']);
 }
 
 /**
@@ -76,7 +87,7 @@ function getSystemInfo() {
     
     $conn->close();
     
-    echo json_encode([
+    echo ts_json([
         'success' => true,
         'bot_list_files' => $botListFiles,
         'db_last_update' => $dbLastUpdate
@@ -97,7 +108,7 @@ function getTrafficStats() {
 
     if (!isset($sites[$siteKey])) {
         error_log("Invalid site key: $siteKey");
-        echo json_encode(['success' => false, 'message' => 'Invalid site key']);
+        echo ts_json(['success' => false, 'message' => 'Invalid site key']);
         return;
     }
     
@@ -109,7 +120,7 @@ function getTrafficStats() {
     $timeRange = calculateTimeRange($period);
     if (!$timeRange) {
         error_log("Invalid period: $period");
-        echo json_encode(['success' => false, 'message' => 'Invalid period']);
+        echo ts_json(['success' => false, 'message' => 'Invalid period']);
         return;
     }
     
@@ -152,7 +163,7 @@ function getTrafficStats() {
         }
     }
     
-    echo json_encode([
+    echo ts_json([
         'success' => true,
         'site_key' => $siteKey,
         'period' => $period,
@@ -242,7 +253,7 @@ function getMonthlySummary() {
     
     $conn->close();
     
-    echo json_encode([
+    echo ts_json([
         'success' => true,
         'debug' => [
             'days_with_data' => $daysWithData,
