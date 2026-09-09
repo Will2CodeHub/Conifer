@@ -67,10 +67,16 @@ $usersResult = $conn->query($usersQuery);
 $usersArray = $usersResult->fetch_all(MYSQLI_ASSOC);
 $usersResult->data_seek(0); // Reset pointer for table display
 
-// "Old accounts" = inactive users; hidden from the main list and shown on their
-// own tab where they can be reactivated.
+// "Old accounts" = users who have NEVER logged in (and aren't pinned to the
+// active list). Hidden from the main list, shown on their own tab, and can be
+// moved into the active list at any time.
+$isOldAccount = function(array $u): bool {
+    $neverLoggedIn = empty($u['last_login']);
+    $kept = (int)($u['kept_active'] ?? 0) === 1;
+    return $neverLoggedIn && !$kept;
+};
 $oldCount = 0;
-foreach ($usersArray as $uu) { if (($uu['status'] ?? '') === 'inactive') $oldCount++; }
+foreach ($usersArray as $uu) { if ($isOldAccount($uu)) $oldCount++; }
 $activeCount = count($usersArray) - $oldCount;
 
 // Get all roles for assignment
@@ -386,8 +392,8 @@ $currentPage = 'users';
                 <button type="button" class="user-tab active" data-tab="active" onclick="switchUserTab('active')">
                     <i class="fas fa-users"></i> Active <span class="user-tab-count" id="activeTabCount"><?php echo (int)$activeCount; ?></span>
                 </button>
-                <button type="button" class="user-tab" data-tab="old" onclick="switchUserTab('old')">
-                    <i class="fas fa-box-archive"></i> Old accounts <span class="user-tab-count" id="oldTabCount"><?php echo (int)$oldCount; ?></span>
+                <button type="button" class="user-tab" data-tab="old" onclick="switchUserTab('old')" title="Accounts that have never logged in">
+                    <i class="fas fa-box-archive"></i> Old accounts (never logged in) <span class="user-tab-count" id="oldTabCount"><?php echo (int)$oldCount; ?></span>
                 </button>
             </div>
 
@@ -403,7 +409,7 @@ $currentPage = 'users';
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($usersArray as $user): $isOld = (($user['status'] ?? '') === 'inactive'); ?>
+                        <?php foreach ($usersArray as $user): $isOld = $isOldAccount($user); $neverLoggedIn = empty($user['last_login']); ?>
                             <tr class="user-row" data-group="<?php echo $isOld ? 'old' : 'active'; ?>"<?php echo $isOld ? ' style="display:none;"' : ''; ?>>
                                 <td>
                                     <div class="user-cell">
@@ -447,12 +453,12 @@ $currentPage = 'users';
                                     <?php endif; ?>
                                     <?php if ($isOld): ?>
                                         <?php if (hasPermission('users.edit') || isAdmin()): ?>
-                                            <button class="action-btn btn-reactivate" onclick="reactivateUser(<?php echo $user['id']; ?>)" title="Reactivate account">
+                                            <button class="action-btn btn-reactivate" onclick="reactivateUser(<?php echo $user['id']; ?>)" title="Move to the active list">
                                                 <i class="fas fa-rotate-left"></i>
                                             </button>
                                         <?php endif; ?>
-                                    <?php else: ?>
-                                        <?php if ((hasPermission('users.edit') || isAdmin()) && $user['id'] != $_SESSION['ten_user_id']): ?>
+                                    <?php elseif ($neverLoggedIn): // pinned to active but never logged in ?>
+                                        <?php if (hasPermission('users.edit') || isAdmin()): ?>
                                             <button class="action-btn btn-archive" onclick="deactivateUser(<?php echo $user['id']; ?>)" title="Move to old accounts">
                                                 <i class="fas fa-box-archive"></i>
                                             </button>
@@ -950,12 +956,12 @@ $currentPage = 'users';
     }
 
     function reactivateUser(userId) {
-        Swal.fire({ title: 'Reactivate account?', text: 'This user will move back to the active list.', icon: 'question', showCancelButton: true, confirmButtonColor: '#059669', confirmButtonText: 'Reactivate' })
-            .then(function (r) { if (r.isConfirmed) setUserStatus(userId, 'reactivate_user', { title: 'Reactivated' }); });
+        Swal.fire({ title: 'Move to the active list?', text: 'This account has never logged in. It will be shown in the Active tab.', icon: 'question', showCancelButton: true, confirmButtonColor: '#059669', confirmButtonText: 'Move to active' })
+            .then(function (r) { if (r.isConfirmed) setUserStatus(userId, 'reactivate_user', { title: 'Moved to active list' }); });
     }
 
     function deactivateUser(userId) {
-        Swal.fire({ title: 'Move to old accounts?', text: 'The account is kept and can be reactivated later. It will be hidden from the active list.', icon: 'warning', showCancelButton: true, confirmButtonColor: '#4f46e5', confirmButtonText: 'Move to old accounts' })
+        Swal.fire({ title: 'Move to old accounts?', text: 'It will be hidden from the Active list. You can move it back at any time.', icon: 'warning', showCancelButton: true, confirmButtonColor: '#4f46e5', confirmButtonText: 'Move to old accounts' })
             .then(function (r) { if (r.isConfirmed) setUserStatus(userId, 'deactivate_user', { title: 'Moved to old accounts' }); });
     }
 

@@ -261,19 +261,18 @@ try {
             
         case 'reactivate_user':
         case 'deactivate_user':
+            // "Old accounts" = users who have never logged in. kept_active=1 pins a
+            // never-logged-in account into the Active list; =0 returns it to Old.
             $userId = intval($_POST['user_id'] ?? 0);
             if ($userId <= 0) throw new Exception('Invalid user ID');
-            $newStatus = ($action === 'reactivate_user') ? 'active' : 'inactive';
-            if ($action === 'deactivate_user' && $userId == $_SESSION['ten_user_id']) {
-                throw new Exception('You cannot deactivate your own account');
-            }
-            $stmt = $conn->prepare("UPDATE ten_users SET status = ?, updated_at = NOW() WHERE id = ?");
-            $stmt->bind_param("si", $newStatus, $userId);
-            if (!$stmt->execute()) throw new Exception('Failed to update user status: ' . $stmt->error);
+            $keep = ($action === 'reactivate_user') ? 1 : 0;
+            $stmt = $conn->prepare("UPDATE ten_users SET kept_active = ?, updated_at = NOW() WHERE id = ?");
+            $stmt->bind_param("ii", $keep, $userId);
+            if (!$stmt->execute()) throw new Exception('Failed to update account: ' . $stmt->error);
             $stmt->close();
-            logActivity($action, 'user', $userId, ($action === 'reactivate_user' ? 'Reactivated' : 'Deactivated') . " user #$userId");
+            logActivity($action, 'user', $userId, ($keep ? 'Moved to active list' : 'Moved to old accounts') . " user #$userId");
             $response['success'] = true;
-            $response['message'] = ($action === 'reactivate_user') ? 'User reactivated' : 'User moved to old accounts';
+            $response['message'] = $keep ? 'Moved to the active list' : 'Moved to old accounts';
             break;
 
         case 'delete_user':
