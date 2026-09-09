@@ -57,6 +57,22 @@ $currentPage = 'email_campaigns';
         .ec-guide{max-width:820px;line-height:1.7;color:#374151}.ec-guide h3{margin:22px 0 8px;color:#111827;font-size:17px}.ec-guide ol,.ec-guide ul{padding-left:22px}.ec-guide li{margin:6px 0}.ec-guide code{background:#f3f4f6;padding:1px 6px;border-radius:5px;font-size:13px}
         .ec-step{display:flex;gap:14px;margin:14px 0}.ec-stepn{flex:0 0 30px;height:30px;border-radius:50%;background:#4f46e5;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:14px}.ec-step div b{color:#111827}
         .ec-hint{font-size:12px;color:#9ca3af}
+        /* Hover/tap glossary term with a plain-English tooltip */
+        .ec-guide .ec-term{position:relative;border-bottom:1px dotted #6366f1;color:#4338ca;font-weight:600;cursor:help;outline:none}
+        .ec-guide .ec-term .ec-q{font-size:9px;vertical-align:super;color:#6366f1;margin-left:1px;font-weight:700}
+        .ec-guide .ec-term:focus-visible{outline:2px solid #a5b4fc;border-radius:3px}
+        .ec-guide .ec-term::after{content:attr(data-tip);position:absolute;left:0;bottom:calc(100% + 9px);width:min(300px,78vw);background:#111827;color:#f9fafb;font-weight:400;font-size:12.5px;line-height:1.5;padding:9px 11px;border-radius:8px;box-shadow:0 10px 28px rgba(0,0,0,.25);opacity:0;visibility:hidden;transform:translateY(4px);transition:opacity .15s,transform .15s;z-index:60;white-space:normal;pointer-events:none}
+        .ec-guide .ec-term::before{content:"";position:absolute;left:16px;bottom:calc(100% + 3px);border:6px solid transparent;border-top-color:#111827;opacity:0;visibility:hidden;transition:opacity .15s;z-index:61}
+        .ec-guide .ec-term:hover::after,.ec-guide .ec-term:focus::after,.ec-guide .ec-term:hover::before,.ec-guide .ec-term:focus::before{opacity:1;visibility:visible;transform:translateY(0)}
+        .ec-guide .ec-lead{font-size:14.5px;color:#374151;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:14px 16px;margin:0 0 14px}
+        .ec-guide .ec-callout{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;margin:14px 0;font-size:13.5px}
+        .ec-guide .ec-callout.info{background:#eff6ff;border-color:#bfdbfe}
+        .ec-guide details.ec-adv{margin:14px 0;border:1px solid #e5e7eb;border-radius:10px;padding:2px 14px;background:#fafafa}
+        .ec-guide details.ec-adv>summary{cursor:pointer;font-weight:700;color:#111827;padding:11px 0;list-style:none}
+        .ec-guide details.ec-adv>summary::-webkit-details-marker{display:none}
+        .ec-guide details.ec-adv>summary::before{content:"\25B8";display:inline-block;margin-right:8px;color:#6366f1;transition:transform .15s}
+        .ec-guide details.ec-adv[open]>summary::before{transform:rotate(90deg)}
+        .ec-guide .ec-tip-legend{font-size:12.5px;color:#6b7280;margin:2px 0 18px}
         .ec-overlay{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:flex-start;justify-content:center;z-index:2000;overflow-y:auto;padding:34px 14px}
         .ec-overlay.open{display:flex}.ec-modal{background:#fff;border-radius:12px;width:100%;max-width:720px;box-shadow:0 20px 50px rgba(0,0,0,.25)}
         .ec-modal h2{font-size:17px;margin:0}.ec-mh{padding:16px 20px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center}
@@ -148,101 +164,116 @@ $currentPage = 'email_campaigns';
             <div class="ec-pane" data-pane="guide">
                 <div class="ec-card ec-guide">
                     <h3 style="margin-top:0">What this tool does</h3>
-                    <p>The Email Campaign Manager takes lists of contacts (typed in, imported from a spreadsheet, or fed in automatically by the broker / restaurant &amp; café scrapers), lets you write reusable email templates, and sends them out in <b>controlled, throttled batches</b> from a sending identity you choose — while tracking who <b>opened, clicked, visited the site, replied, bounced or unsubscribed</b>. It guarantees nobody is ever emailed twice and never contacts anyone who has opted out, bounced or already replied.</p>
-                    <p>Read the two setup sections first if you're an administrator; if the mail server is already set up, skip to <b>Using it: step by step</b>.</p>
+                    <p class="ec-lead">It emails a list of people for you — one message, personalised for each person — and then shows you who opened it, clicked, replied or asked to stop. It sends gradually so you stay out of spam, and it will never email the same person twice or contact anyone who has opted out.</p>
+                    <p class="ec-tip-legend"><i class="fas fa-lightbulb" style="color:#f59e0b"></i> Tip: any word with a dotted underline is jargon — <b>hover over it (or tap on a phone)</b> to see a plain-English explanation.</p>
 
-                    <h3>Part A — One‑time server &amp; DNS setup (administrator)</h3>
-                    <p>Nothing sends until these are done once. They are done on the mail server / DNS, outside this tool.</p>
+                    <h3>The idea in one minute</h3>
+                    <ol>
+                        <li>You have <b>contacts</b> (people, with their email and details).</li>
+                        <li>You group some of them into an <span class="ec-term" tabindex="0" data-tip="The list of people a campaign will email — usually built by filtering your contacts (e.g. all brokers in Germany).">audience<span class="ec-q">?</span></span>.</li>
+                        <li>You write a <span class="ec-term" tabindex="0" data-tip="An email you write once and reuse: a subject plus the message. It can contain blanks that get filled in for each person.">template<span class="ec-q">?</span></span> (the email itself).</li>
+                        <li>You put them together as a <b>campaign</b> and launch. The tool does the sending and the tracking.</li>
+                    </ol>
+
+                    <h3>Send a campaign — step by step</h3>
+                    <div class="ec-step"><div class="ec-stepn">1</div><div><b>Add your contacts</b> (Contacts tab). Import a spreadsheet (CSV) or paste rows. The only required column is <code>email</code>; you can also include <code>first_name, last_name, company, phone, city, country, contact_type</code>. Give people a <span class="ec-term" tabindex="0" data-tip="A label on each contact, e.g. Insurance Brokers, so you can pick that group out later.">contact type<span class="ec-q">?</span></span> so you can find them later. Duplicates are merged, and anyone on the <span class="ec-term" tabindex="0" data-tip="A do-not-email list. Anyone who unsubscribes, permanently bounces or replies is added automatically and is never emailed again.">do-not-email list<span class="ec-q">?</span></span> is skipped. The scrapers also drop contacts in here automatically.</div></div>
+                    <div class="ec-step"><div class="ec-stepn">2</div><div><b>Check who you have</b> (Contacts tab). Filter by type or country, and tick <i>Hide already-emailed</i> / <i>Hide suppressed</i>. The <b>Emailed</b> column shows how many times each person has been contacted.</div></div>
+                    <div class="ec-step"><div class="ec-stepn">3</div><div><b>Make an audience</b> (Audiences → <i>Build from filter</i>). Choose e.g. type = Insurance Brokers, country = Germany, and tick <i>exclude already-emailed</i>. People who unsubscribed, bounced or replied are <b>always</b> left out. A live count shows exactly how many will receive it before you save the list.</div></div>
+                    <div class="ec-step"><div class="ec-stepn">4</div><div><b>Write the email</b> (Templates tab). Personalise it with <span class="ec-term" tabindex="0" data-tip="A blank in double curly braces, like {{first_name}}, that is swapped for each person's own details when the email is sent.">merge fields<span class="ec-q">?</span></span> — they work in <b>both the subject line and the body</b>. Example subject: <code>{{company}} - The Munich Eye</code> becomes <i>Muster Versicherung - The Munich Eye</i>. Fields you can use: <code>{{first_name}}</code>, <code>{{last_name}}</code>, <code>{{company}}</code>, <code>{{email}}</code>, <code>{{city}}</code>. Type the exact name in double braces — there is no <code>{{company name}}</code>, it is <code>{{company}}</code>; an unknown or misspelt field is left blank. The message must contain an unsubscribe link, <code>{{unsubscribe_url}}</code>. Use <i>Preview</i> and <i>Send test to me</i> before you rely on it.</div></div>
+                    <div class="ec-step"><div class="ec-stepn">5</div><div><b>Set up the campaign</b> (Campaigns tab). Choose the <b>audience</b>, the <span class="ec-term" tabindex="0" data-tip="A saved 'who it is from' identity: the from-address plus the mailbox login used to send. You set these up on the Sending tab.">sending profile<span class="ec-q">?</span></span> (who it is from), and your email template. Optionally add a second template to <span class="ec-term" tabindex="0" data-tip="Send two versions and see which does better; the tool splits the audience between them and reports each one.">A/B test<span class="ec-q">?</span></span>. Control the pace with <span class="ec-term" tabindex="0" data-tip="How many emails are sent in each burst.">batch size<span class="ec-q">?</span></span>, the gap between batches, a <span class="ec-term" tabindex="0" data-tip="The most emails sent to one provider (like gmail.com) in a single run.">per-domain limit<span class="ec-q">?</span></span>, a <span class="ec-term" tabindex="0" data-tip="The most emails the tool will send in a whole day.">daily cap<span class="ec-q">?</span></span> and <span class="ec-term" tabindex="0" data-tip="Slowly increasing how much you send from a new address over the first days, to build a good reputation with mail providers.">warm-up<span class="ec-q">?</span></span> — or just leave the defaults. Pick a start time if you do not want to send right now.</div></div>
+                    <div class="ec-step"><div class="ec-stepn">6</div><div><b>Review &amp; launch.</b> The tool turns the audience into a final list (leaving out anyone on the do-not-email list, or already in this campaign) and shows the exact number. Launch, and it sends steadily on your schedule instead of all at once.</div></div>
+                    <div class="ec-step"><div class="ec-stepn">7</div><div><b>Watch it go</b> (Dashboard). Live tiles show sent, queued, failed, bounced, opened, clicked, replied and unsubscribed, with <b>Pause</b> / <b>Resume</b> / <b>Cancel</b>.</div></div>
+                    <div class="ec-step"><div class="ec-stepn">8</div><div><b>See your results</b> (Reports tab — explained below).</div></div>
+
+                    <h3>Add more people later (re-run)</h3>
+                    <p>You can top a campaign up at any time — while it runs or after it finishes — with <b>Add new &amp; re-run</b> (on the Campaigns list, and offered on the Dashboard when a campaign completes). It <b>never re-emails anyone already contacted in that campaign</b> — only people who are not yet in it.</p>
                     <ul>
-                        <li><b>Create three mailboxes</b> on the sending (sub)domain, in your hosting control panel:
-                            <ul>
-                                <li><b>Sending mailbox</b> — the account the tool logs into to send (e.g. <code>news@mail.brokers.example.com</code>).</li>
-                                <li><b>Reply mailbox</b> — where recipients' replies land (can be the same account's INBOX, or a dedicated one).</li>
-                                <li><b>Bounce mailbox</b> — receives delivery failures. The tool sends with a VERP return‑path <code>bounce+&lt;code&gt;@yourdomain</code>, so route <code>bounce+*@</code> (a catch‑all or plus‑addressing) into this mailbox/folder.</li>
-                            </ul>
-                        </li>
-                        <li><b>DNS authentication</b> on the sending domain — essential or mail lands in spam:
-                            <ul>
-                                <li><b>SPF</b> — a TXT record authorising the server's IP to send for the domain.</li>
-                                <li><b>DKIM</b> — generate a key, publish the TXT record, and enable signing in the mail server.</li>
-                                <li><b>DMARC</b> — a TXT record (start with <code>p=none</code> to monitor, then tighten).</li>
-                                <li><b>Recommended:</b> use a <b>dedicated subdomain</b> (e.g. <code>mail.brokers.example.com</code>) so cold outreach can't damage the reputation of the main news sites. <b>Never</b> send through a consumer VPN — it breaks SPF and lands you on blocklists.</li>
-                            </ul>
-                        </li>
-                        <li><b>Enable the PHP <code>imap</code> extension</b> on the server (needed to read replies &amp; bounces). The Settings tab shows whether it's active.</li>
-                        <li><b>Add the two cron jobs</b> (as root, into the tenuser crontab):
-                            <ul>
-                                <li><code>* * * * * /usr/local/bin/php -q /home/tenuser/public_html/management/cron/ec_send.php</code> — sends due batches every minute.</li>
-                                <li><code>*/5 * * * * /usr/local/bin/php -q /home/tenuser/public_html/management/cron/ec_imap_poll.php</code> — pulls in replies &amp; bounces every 5 minutes.</li>
-                            </ul>
-                        </li>
+                        <li><b>Widened who you want?</b> e.g. you ran one broker type, then decide you want them all. Broaden the audience and hit <b>Add new &amp; re-run</b> — only the newly-matching people get emailed.</li>
+                        <li><b>Scraper found more?</b> If the audience was made with <i>Build from filter</i>, that filter is remembered. Tick <b>pull new contacts from the audience's saved filter</b> and re-run to grab everyone added since, then email just those.</li>
+                        <li><b>Adding people yourself?</b> Import them (Contacts) or add them to the audience (Audiences), then <b>Add new &amp; re-run</b>.</li>
                     </ul>
 
-                    <h3>Part B — Global settings (Settings tab)</h3>
+                    <h3>Reading your results (Reports tab)</h3>
+                    <p>Pick a campaign to see how it performed. Each number means:</p>
                     <ul>
-                        <li><b>Global fallback identity</b> — default from‑name / from‑email / reply‑to used only if a campaign has no sending profile.</li>
-                        <li><b>Global daily cap</b> — a hard ceiling on total emails per day across everything (0 = no cap).</li>
-                        <li><b>Warm‑up ramp</b> — JSON list of daily caps that grows a new sending domain's volume gradually, e.g. <code>[50,100,200,400,800]</code> (day 1 max 50, day 2 max 100…). Protects reputation.</li>
-                        <li><b>Tracking base URL</b> — where the open/click/unsubscribe endpoints live (normally <code>https://theeyenewspapers.com/management</code>).</li>
+                        <li><b>Sent</b> — accepted by the mail server for delivery.</li>
+                        <li><b>Opened</b> — the person's email app loaded a <span class="ec-term" tabindex="0" data-tip="A tiny invisible image in the email. If the app loads it, we count an open. Many apps block it, so treat opens as a rough guide, not an exact figure.">tracking pixel<span class="ec-q">?</span></span>. A rough guide only.</li>
+                        <li><b>Clicked</b> — clicked a link. Links are swapped for <span class="ec-term" tabindex="0" data-tip="Links in the email are replaced with tracked links so we can count clicks; the person still arrives at the real page.">tracked links<span class="ec-q">?</span></span> so we can count them.</li>
+                        <li><b>Visits</b> — later browsed one of our sites, still <span class="ec-term" tabindex="0" data-tip="If someone from your email visits one of our sites later, we can still tell the visit came from that email.">traced back<span class="ec-q">?</span></span> to this email.</li>
+                        <li><b>Replied</b> — answered. The tool <span class="ec-term" tabindex="0" data-tip="The tool checks the reply mailbox automatically and marks anyone who wrote back.">spots replies<span class="ec-q">?</span></span> and <b>stops</b> emailing that person.</li>
+                        <li><b>Bounced</b> — delivery failed. A <span class="ec-term" tabindex="0" data-tip="A permanent failure — the address does not exist. It is added to the do-not-email list automatically.">hard bounce<span class="ec-q">?</span></span> is added to the do-not-email list automatically.</li>
+                        <li><b>Unsub</b> — asked to stop; added to the do-not-email list immediately.</li>
+                    </ul>
+                    <p>If you A/B tested, the <b>variants</b> table compares them side by side so you can see which subject or email won. <b>Show recipients</b> gives a person-by-person breakdown you can export.</p>
+
+                    <h3>Staying out of spam &amp; staying legal</h3>
+                    <ul>
+                        <li><b>Never twice:</b> every send is recorded, so no one is emailed twice in a campaign, and <i>exclude already-emailed</i> keeps them out of new ones.</li>
+                        <li><b>Do-not-email list:</b> unsubscribes, hard bounces, replies and manual do-not-contact all feed one list that is checked before every single send.</li>
+                        <li><b>Good habits built in:</b> a one-click unsubscribe (plus a <span class="ec-term" tabindex="0" data-tip="A standard unsubscribe button some email apps show at the very top of a message. The tool adds it for you.">List-Unsubscribe<span class="ec-q">?</span></span> button), both plain-text and HTML versions, one email per person, gentle pacing and warm-up.</li>
+                        <li><b>Your responsibility:</b> make sure you are allowed to email the list. In Germany, business cold email is regulated (GDPR / UWG). The tool records a consent/source note per contact.</li>
                     </ul>
 
-                    <h3>Part C — Sending profiles (Sending tab)</h3>
-                    <p>A sending profile is a reusable sending identity — create one per subdomain and pick it per campaign. Fields:</p>
-                    <ul>
-                        <li><b>From name / From email</b> — the sender shown to recipients; the email's domain is the sending subdomain.</li>
-                        <li><b>Reply‑to</b> — where replies should go (usually your reply mailbox).</li>
-                        <li><b>Bounce address (VERP)</b> — e.g. <code>bounce@mail.brokers.example.com</code>; the tool inserts a per‑recipient code so bounces can be matched.</li>
-                        <li><b>SMTP</b> — <b>host</b>, <b>port</b> and <b>security</b>: use <b>STARTTLS on port 587</b> (most common) or <b>SSL/TLS on port 465</b>; <b>username</b> + <b>password</b> of the sending mailbox (the password is stored encrypted and never shown again).</li>
-                        <li><b>IMAP</b> — host, port (usually 993 SSL), username + password, and the <b>reply</b> and <b>bounce</b> mailbox folder names, so the poller knows where to look.</li>
-                    </ul>
+                    <details class="ec-adv">
+                        <summary>Advanced: one-time server setup (admins only)</summary>
 
-                    <h3>Using it: step by step</h3>
-                    <div class="ec-step"><div class="ec-stepn">1</div><div><b>Get contacts in</b> (Contacts tab). Import a CSV or paste rows — a header line with <code>email</code> (required) plus optional <code>first_name, last_name, company, phone, city, country, contact_type</code>. Set a <b>Contact type</b> (e.g. "Insurance Brokers") so you can target them later. Duplicates merge; anyone suppressed is skipped. The scrapers drop contacts here automatically with their type set.</div></div>
-                    <div class="ec-step"><div class="ec-stepn">2</div><div><b>Find &amp; check contacts</b> (Contacts tab). Filter by type/country, and tick <i>Hide already‑emailed</i> / <i>Hide suppressed</i>. The <b>Emailed</b> column shows how many times each person was sent to, so you can see who's been contacted before.</div></div>
-                    <div class="ec-step"><div class="ec-stepn">3</div><div><b>Build an audience</b> (Audiences → <i>Build from filter</i>). e.g. type = Insurance Brokers, country = Germany, tick <i>exclude already‑emailed</i>. Suppressed / unsubscribed / bounced / replied contacts are <b>always</b> excluded. A live count shows exactly how many will receive it before you create the list.</div></div>
-                    <div class="ec-step"><div class="ec-stepn">4</div><div><b>Write a template</b> (Templates tab). Merge fields work in <b>both the subject line and the body</b> — e.g. a subject of <code>{{company}} - The Munich Eye</code> becomes <i>Muster Versicherung - The Munich Eye</i>. Available fields: <code>{{first_name}}</code>, <code>{{last_name}}</code>, <code>{{company}}</code>, <code>{{email}}</code>, <code>{{city}}</code>. Use the exact name in double braces — there is no <code>{{company name}}</code>, it's <code>{{company}}</code>; an unknown or misspelt field is left blank. The HTML body <b>must</b> include <code>{{unsubscribe_url}}</code>. Preview it with sample data and <i>Send test to me</i> before using it.</div></div>
-                    <div class="ec-step"><div class="ec-stepn">5</div><div><b>Create the campaign</b> (Campaigns tab). Pick the <b>audience</b>, the <b>sending profile</b>, and one or more <b>template variants</b> (add a second variant to A/B test). Set <b>batch size</b>, <b>interval between batches</b> (minutes), <b>per‑domain limit</b> per run, <b>daily cap</b>, optional <b>warm‑up</b>, and an optional <b>scheduled start</b>.</div></div>
-                    <div class="ec-step"><div class="ec-stepn">6</div><div><b>Review &amp; launch.</b> This expands the audience into recipients (excluding suppressed and anyone already in this campaign) and shows the true number that will send. Launch — the sender trickles them out on your batch schedule.</div></div>
-                    <div class="ec-step"><div class="ec-stepn">7</div><div><b>Monitor</b> (Dashboard). Live tiles show sent / queued / failed / bounced / opened / clicked / replied / unsubscribed with a progress bar, and Pause / Resume / Cancel buttons.</div></div>
-                    <div class="ec-step"><div class="ec-stepn">8</div><div><b>Review results</b> (Reports — see below).</div></div>
+                        <p>None of this is needed day to day — it is done <b>once</b> by an administrator, on the mail server and DNS, before the first campaign can send. If your mail is already set up, you can ignore this section.</p>
 
-                    <h3>Re-running a campaign / adding new contacts</h3>
-                    <p>Campaigns can be topped up at any time — while running, or after they complete — using <b>Add new &amp; re-run</b> (on the Campaigns list, and offered on the Dashboard when a campaign completes). It <b>never re‑emails anyone already contacted in that campaign</b>; it only sends to people who aren't yet recipients of it.</p>
-                    <ul>
-                        <li><b>Broadened the criteria?</b> e.g. you ran "French brokers, type X", then decide you want <i>all</i> broker types. Widen the audience (or its saved filter), hit <b>Add new &amp; re-run</b> — only the newly‑matching brokers get emailed, not the ones already contacted.</li>
-                        <li><b>Scraper found more?</b> If the audience was built with <i>Build from filter</i>, its filter is saved. Tick <b>"pull new contacts from the audience's saved filter"</b> and re‑run — it re‑applies e.g. "all brokers in Germany" to grab everyone the scraper added since, then sends to just those.</li>
-                        <li><b>Manual top‑up:</b> import contacts (Contacts) or add them to the audience (Audiences), then <b>Add new &amp; re-run</b>.</li>
-                    </ul>
+                        <h3>1. Create three mailboxes</h3>
+                        <p>On the sending (sub)domain, in your hosting control panel:</p>
+                        <ul>
+                            <li><b>Sending mailbox</b> — the account the tool logs into to send, e.g. <code>news@mail.brokers.example.com</code>.</li>
+                            <li><b>Reply mailbox</b> — where people's replies land (can be the same account's inbox).</li>
+                            <li><b>Bounce mailbox</b> — receives delivery failures. The tool uses a <span class="ec-term" tabindex="0" data-tip="A return address with a hidden per-person code (bounce+CODE@...), so a failed delivery can be matched to exactly who it failed for.">coded return address<span class="ec-q">?</span></span> <code>bounce+&lt;code&gt;@yourdomain</code>, so route <code>bounce+*@</code> (catch-all or plus-addressing) into this mailbox.</li>
+                        </ul>
 
-                    <h3>Reports tab — reading the results</h3>
-                    <p>Pick a campaign to see its funnel. Each metric:</p>
-                    <ul>
-                        <li><b>Sent</b> — messages accepted by the mail server for delivery.</li>
-                        <li><b>Opened</b> — the recipient loaded the tracking pixel (approximate — some clients block images).</li>
-                        <li><b>Clicked</b> — clicked any link (links are rewritten through a click tracker).</li>
-                        <li><b>Visits</b> — landed on one of our sites carrying their tracking code (attribution beyond the first click).</li>
-                        <li><b>Replied</b> — sent a reply (auto‑detected by the IMAP poller); this <b>stops</b> any further emails to them.</li>
-                        <li><b>Bounced</b> — delivery failed; <b>hard</b> bounces are suppressed automatically.</li>
-                        <li><b>Unsub</b> — clicked unsubscribe; suppressed immediately.</li>
-                    </ul>
-                    <p>The <b>A/B variants</b> table compares recipients / sent / opened / clicked / replied per variant so you can see which subject or template won. <b>Show recipients</b> gives a per‑person breakdown (status + which events fired), and you can export.</p>
+                        <h3>2. Prove you are allowed to send (DNS)</h3>
+                        <p>Without these, your mail goes straight to spam:</p>
+                        <ul>
+                            <li><span class="ec-term" tabindex="0" data-tip="A DNS record that lists which servers are allowed to send email for your domain.">SPF<span class="ec-q">?</span></span> — a TXT record authorising the server's IP.</li>
+                            <li><span class="ec-term" tabindex="0" data-tip="A DNS record plus a signature on each email, so receivers can verify it really came from you and was not tampered with.">DKIM<span class="ec-q">?</span></span> — generate a key, publish the TXT record, enable signing.</li>
+                            <li><span class="ec-term" tabindex="0" data-tip="A DNS record that tells receivers what to do with mail that fails the SPF or DKIM checks. Start permissive, then tighten.">DMARC<span class="ec-q">?</span></span> — a TXT record; start with <code>p=none</code>, then tighten.</li>
+                            <li><b>Use a dedicated subdomain</b> (e.g. <code>mail.brokers.example.com</code>) so outreach can't harm the main news sites' reputation. <b>Never</b> send through a consumer VPN — it breaks SPF and gets you blocklisted.</li>
+                        </ul>
 
-                    <h3>Deliverability &amp; compliance built in</h3>
-                    <ul>
-                        <li><b>Never twice:</b> every send is recorded; a contact can't be queued into the same campaign twice, and "exclude already‑emailed" keeps them out of new campaigns.</li>
-                        <li><b>Suppression:</b> unsubscribes, hard bounces, replies and manual do‑not‑contact feed one global list checked before every single send.</li>
-                        <li><b>Good hygiene by default:</b> one‑click unsubscribe + <code>List‑Unsubscribe</code> headers, plain‑text + HTML parts, per‑recipient sending, per‑domain throttling and warm‑up.</li>
-                        <li><b>Your responsibility:</b> confirm you have a lawful basis to email the list — in Germany B2B cold email is regulated (GDPR / UWG). The tool records a consent/source note per contact.</li>
-                    </ul>
+                        <h3>3. Turn on reply/bounce reading &amp; the schedulers</h3>
+                        <ul>
+                            <li>Enable the PHP <code>imap</code> extension (needed to read replies &amp; bounces). The Settings tab shows whether it is on.</li>
+                            <li>Add two <span class="ec-term" tabindex="0" data-tip="A task the server runs automatically on a schedule. Here one sends queued emails, the other checks for replies and bounces.">scheduled tasks<span class="ec-q">?</span></span> (as root, in the tenuser crontab):
+                                <ul>
+                                    <li><code>* * * * * /usr/local/bin/php -q /home/tenuser/public_html/management/cron/ec_send.php</code> — sends due batches every minute.</li>
+                                    <li><code>*/5 * * * * /usr/local/bin/php -q /home/tenuser/public_html/management/cron/ec_imap_poll.php</code> — pulls in replies &amp; bounces every 5 minutes.</li>
+                                </ul>
+                            </li>
+                        </ul>
 
-                    <h3>Troubleshooting</h3>
-                    <ul>
-                        <li><b>Everything stuck in "queued":</b> the <code>ec_send.php</code> cron isn't running, or the sending profile's SMTP login is wrong. Check the crons and the profile's SMTP host/port/security/password.</li>
-                        <li><b>Test send fails:</b> wrong SMTP host/port/security or password; try 587/STARTTLS then 465/SSL.</li>
-                        <li><b>Landing in spam / SPF fails:</b> DNS SPF/DKIM/DMARC not set for the sending domain, or sending from the wrong IP.</li>
-                        <li><b>No replies/bounces recorded:</b> PHP <code>imap</code> extension off, IMAP details wrong, or the bounce mailbox isn't catching <code>bounce+*@</code>.</li>
-                        <li><b>Opens look low:</b> normal — many mail clients block the tracking pixel; clicks are the more reliable signal.</li>
-                    </ul>
+                        <h3>4. Global settings (Settings tab)</h3>
+                        <ul>
+                            <li><b>Global fallback identity</b> — default from-name / from-email / reply-to, used only when a campaign has no sending profile.</li>
+                            <li><b>Global daily cap</b> — a hard ceiling on total emails per day across everything (0 = no cap).</li>
+                            <li><b>Warm-up ramp</b> — a list of daily limits that grows a new address's volume gradually, e.g. <code>[50,100,200,400,800]</code> (day 1 max 50, day 2 max 100…).</li>
+                            <li><b>Tracking base URL</b> — where the open/click/unsubscribe links live (normally <code>https://theeyenewspapers.com/management</code>).</li>
+                        </ul>
+
+                        <h3>5. Sending profiles (Sending tab)</h3>
+                        <p>A sending profile is a reusable "who it is from" identity — make one per subdomain and pick it per campaign.</p>
+                        <ul>
+                            <li><b>From name / From email</b> — the sender people see; the email's domain is your sending subdomain.</li>
+                            <li><b>Reply-to</b> — where replies should go (usually your reply mailbox).</li>
+                            <li><b>Bounce address</b> — e.g. <code>bounce@mail.brokers.example.com</code>; the tool adds a per-person code so bounces can be matched.</li>
+                            <li><span class="ec-term" tabindex="0" data-tip="The outgoing-mail service the tool logs into to send email.">SMTP<span class="ec-q">?</span></span> — host, port and security. Use <span class="ec-term" tabindex="0" data-tip="Two ways to encrypt the connection to the mail server. Try port 587 (STARTTLS) first; if that fails, try port 465 (SSL/TLS).">STARTTLS on 587 or SSL on 465<span class="ec-q">?</span></span>, plus the mailbox username &amp; password (stored encrypted, never shown again).</li>
+                            <li><span class="ec-term" tabindex="0" data-tip="The incoming-mail service the tool reads to find replies and bounces.">IMAP<span class="ec-q">?</span></span> — host, port (usually 993), username &amp; password, and which folders hold replies and bounces.</li>
+                        </ul>
+
+                        <h3>Troubleshooting</h3>
+                        <ul>
+                            <li><b>Everything stuck on "queued":</b> the <code>ec_send.php</code> scheduled task isn't running, or the sending profile's SMTP login is wrong.</li>
+                            <li><b>Test send fails:</b> wrong SMTP host/port/security or password; try 587/STARTTLS, then 465/SSL.</li>
+                            <li><b>Landing in spam:</b> SPF/DKIM/DMARC not set for the sending domain, or sending from the wrong IP.</li>
+                            <li><b>No replies/bounces recorded:</b> the PHP <code>imap</code> extension is off, IMAP details are wrong, or <code>bounce+*@</code> isn't routed to the bounce mailbox.</li>
+                            <li><b>Opens look low:</b> normal — many apps block the tracking pixel. Clicks are the more reliable signal.</li>
+                        </ul>
+                    </details>
                 </div>
             </div>
 
