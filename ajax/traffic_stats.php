@@ -245,12 +245,14 @@ function getMonthlySummary() {
     $daysWithData = (int)($currentMonthData['days_with_data'] ?? 0);
     $projectionAvailable = $daysWithData >= 1; // Need at least 1 day with data
     
-    $projectedTotal = 0;
-    if ($projectionAvailable && $currentMonthStats['total_visits'] > 0 && $daysWithData > 0) {
-        $dailyAverage = $currentMonthStats['total_visits'] / $daysWithData;
-        $projectedTotal = $dailyAverage * $daysInMonth;
+    // Project each metric to the full month = (metric so far / days with data) * days in month.
+    $projectedTotal = 0; $projectedUnique = 0; $projectedPageViews = 0;
+    if ($projectionAvailable && $daysWithData > 0) {
+        $projectedTotal      = ($currentMonthStats['total_visits'] / $daysWithData) * $daysInMonth;
+        $projectedUnique     = ($currentMonthUnique               / $daysWithData) * $daysInMonth;
+        $projectedPageViews  = ($currentMonthPageViews            / $daysWithData) * $daysInMonth;
     }
-    
+
     $conn->close();
     
     echo ts_json([
@@ -278,7 +280,9 @@ function getMonthlySummary() {
             'page_views' => $currentMonthPageViews,
             'human_visits' => $currentMonthStats['human_visits'],
             'projection_available' => $projectionAvailable,
-            'projected_total' => $projectedTotal
+            'projected_total' => $projectedTotal,
+            'projected_unique' => $projectedUnique,
+            'projected_page_views' => $projectedPageViews
         ]
     ]);
 }
