@@ -22,19 +22,22 @@ $currentPage = 'email_campaigns';
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <link rel="stylesheet" href="css/backend-style.css">
     <style>
-        .ec-head{margin-bottom:18px}.ec-head h1{font-size:28px;font-weight:700;color:#111827;margin:0 0 4px}.ec-head p{color:#6b7280;font-size:14px;margin:0}
-        .ec-tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid #e5e7eb;margin-bottom:20px}
+        .content-area{line-height:1.5}
+        .ec-head{margin:6px 0 28px}.ec-head h1{font-size:28px;font-weight:700;color:#111827;margin:0 0 10px;line-height:1.25}.ec-head p{color:#6b7280;font-size:14px;margin:0;line-height:1.6}
+        .ec-tabs{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid #e5e7eb;margin:0 0 26px;padding-bottom:2px}
         .ec-tab{padding:10px 16px;font-size:14px;font-weight:600;color:#6b7280;cursor:pointer;border:1px solid transparent;border-bottom:none;border-radius:8px 8px 0 0}
         .ec-tab.active{color:#4f46e5;background:#fff;border-color:#e5e7eb}
         .ec-pane{display:none}.ec-pane.active{display:block}
-        .ec-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px;margin-bottom:16px}
+        .ec-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:24px;margin-bottom:20px;line-height:1.5}
+        .ec-card > p{margin:0 0 16px;line-height:1.6}
         .ec-btn{background:#4f46e5;color:#fff;border:none;padding:9px 15px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:7px}
         .ec-btn:hover{background:#4338ca}.ec-btn.light{background:#fff;color:#374151;border:1px solid #d1d5db}.ec-btn.danger{background:#fff;color:#dc2626;border:1px solid #fecaca}
         .ec-btn.sm{padding:5px 10px;font-size:12.5px}
         .ec-in,.ec-sel,.ec-ta{width:100%;padding:9px 11px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;font-family:inherit;box-sizing:border-box}
         .ec-ta{min-height:120px;resize:vertical}
-        .ec-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-        .ec-fg{margin-bottom:12px}.ec-fg label{display:block;font-size:12.5px;font-weight:600;color:#374151;margin-bottom:5px}
+        .ec-row{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+        .ec-fg{margin-bottom:18px}.ec-fg label{display:block;font-size:12.5px;font-weight:600;color:#374151;margin-bottom:7px;line-height:1.4}
+        .ec-fg .ec-hint{font-weight:400}
         table.ec-tbl{width:100%;border-collapse:collapse}
         table.ec-tbl th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.3px;color:#6b7280;padding:8px 10px;border-bottom:1px solid #e5e7eb;background:#fafafa}
         table.ec-tbl td{padding:8px 10px;border-bottom:1px solid #f1f5f9;font-size:13.5px}
@@ -57,7 +60,9 @@ $currentPage = 'email_campaigns';
         .ec-overlay{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:flex-start;justify-content:center;z-index:2000;overflow-y:auto;padding:34px 14px}
         .ec-overlay.open{display:flex}.ec-modal{background:#fff;border-radius:12px;width:100%;max-width:720px;box-shadow:0 20px 50px rgba(0,0,0,.25)}
         .ec-modal h2{font-size:17px;margin:0}.ec-mh{padding:16px 20px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center}
-        .ec-mb{padding:18px 20px}.ec-mf{padding:14px 20px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;gap:8px}
+        .ec-mb{padding:22px 22px 8px;line-height:1.5}
+        .ec-mb h4{margin:22px 0 12px;font-size:14px;color:#374151;border-top:1px solid #f1f5f9;padding-top:18px}
+        .ec-mb > p{margin:0 0 16px;line-height:1.6}.ec-mf{padding:14px 20px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;gap:8px}
         .closex{background:none;border:none;font-size:22px;color:#9ca3af;cursor:pointer}
     </style>
 </head>
@@ -142,47 +147,109 @@ $currentPage = 'email_campaigns';
 
             <div class="ec-pane" data-pane="guide">
                 <div class="ec-card ec-guide">
-                    <h3 style="margin-top:0">How the Email Campaign Manager works</h3>
-                    <p>This tool takes lists of contacts (typed in, imported, or fed in by the scrapers), lets you write reusable templates, and sends them out in controlled batches from a chosen sending identity — while tracking who opened, clicked, replied, bounced or unsubscribed, and making sure nobody is ever emailed twice or contacted after opting out.</p>
+                    <h3 style="margin-top:0">What this tool does</h3>
+                    <p>The Email Campaign Manager takes lists of contacts (typed in, imported from a spreadsheet, or fed in automatically by the broker / restaurant &amp; café scrapers), lets you write reusable email templates, and sends them out in <b>controlled, throttled batches</b> from a sending identity you choose — while tracking who <b>opened, clicked, visited the site, replied, bounced or unsubscribed</b>. It guarantees nobody is ever emailed twice and never contacts anyone who has opted out, bounced or already replied.</p>
+                    <p>Read the two setup sections first if you're an administrator; if the mail server is already set up, skip to <b>Using it: step by step</b>.</p>
 
-                    <h3>Create a campaign, start to finish</h3>
-                    <div class="ec-step"><div class="ec-stepn">1</div><div><b>Set up a Sending profile</b> (Sending tab). Create the identity you'll send from — its subdomain/from‑address, SMTP login, and reply/bounce mailboxes (you create those mailboxes on the mail server yourself). You can keep several profiles and pick one per campaign.</div></div>
-                    <div class="ec-step"><div class="ec-stepn">2</div><div><b>Get contacts in</b> (Contacts tab). Import a CSV/paste (set a <i>Contact type</i> like "Insurance Brokers"), or let the broker/café scrapers fill them in. Duplicates merge and anyone already suppressed is skipped automatically.</div></div>
-                    <div class="ec-step"><div class="ec-stepn">3</div><div><b>Build an audience</b> (Audiences → <i>Build from filter</i>). Choose e.g. type = Insurance Brokers, country = Germany, tick <i>exclude already‑emailed</i>. Suppressed/unsubscribed/replied contacts are always excluded. The live count shows exactly how many will receive it.</div></div>
-                    <div class="ec-step"><div class="ec-stepn">4</div><div><b>Write a template</b> (Templates tab). Use merge fields like <code>{{first_name}}</code> and <code>{{company}}</code>, and include the required <code>{{unsubscribe_url}}</code>. Preview it and send a test to yourself.</div></div>
-                    <div class="ec-step"><div class="ec-stepn">5</div><div><b>Create the campaign</b> (Campaigns tab). Pick the audience, the sending profile and one or more template variants (add a second for an A/B test). Set the batch size, the interval between batches, per‑domain limit, daily cap, optional warm‑up ramp, and an optional scheduled start.</div></div>
-                    <div class="ec-step"><div class="ec-stepn">6</div><div><b>Review &amp; launch.</b> "Review &amp; launch" expands the audience into recipients (excluding suppressed and anyone already in this campaign) and shows the true send count. Launch — the sender then trickles the emails out in batches on the schedule you set.</div></div>
-                    <div class="ec-step"><div class="ec-stepn">7</div><div><b>Watch it run</b> (Dashboard). Live counters show sent / queued / failed / opened / clicked / replied / unsubscribed, with pause/resume/cancel.</div></div>
-                    <div class="ec-step"><div class="ec-stepn">8</div><div><b>See the results</b> (Reports). Per‑campaign funnel and A/B comparison, plus a per‑recipient breakdown. Replies auto‑stop further emails to that person; hard bounces and unsubscribes go onto the global suppression list so they're never contacted again.</div></div>
-
-                    <h3>How it protects deliverability &amp; compliance</h3>
+                    <h3>Part A — One‑time server &amp; DNS setup (administrator)</h3>
+                    <p>Nothing sends until these are done once. They are done on the mail server / DNS, outside this tool.</p>
                     <ul>
-                        <li><b>Never twice:</b> every send is recorded; a contact can't be added to the same campaign twice, and "exclude already‑emailed" keeps them out of new ones.</li>
-                        <li><b>Suppression:</b> unsubscribes, hard bounces, replies and manual do‑not‑contact all feed one global list that's checked before every single send.</li>
-                        <li><b>One‑click unsubscribe</b> + <code>List‑Unsubscribe</code> headers, plain‑text + HTML parts, per‑domain throttling and warm‑up — all on by default.</li>
-                        <li><b>Your responsibility:</b> confirm you have a lawful basis to email the list (in Germany, B2B cold email is regulated). The tool records a consent/source note per contact.</li>
+                        <li><b>Create three mailboxes</b> on the sending (sub)domain, in your hosting control panel:
+                            <ul>
+                                <li><b>Sending mailbox</b> — the account the tool logs into to send (e.g. <code>news@mail.brokers.example.com</code>).</li>
+                                <li><b>Reply mailbox</b> — where recipients' replies land (can be the same account's INBOX, or a dedicated one).</li>
+                                <li><b>Bounce mailbox</b> — receives delivery failures. The tool sends with a VERP return‑path <code>bounce+&lt;code&gt;@yourdomain</code>, so route <code>bounce+*@</code> (a catch‑all or plus‑addressing) into this mailbox/folder.</li>
+                            </ul>
+                        </li>
+                        <li><b>DNS authentication</b> on the sending domain — essential or mail lands in spam:
+                            <ul>
+                                <li><b>SPF</b> — a TXT record authorising the server's IP to send for the domain.</li>
+                                <li><b>DKIM</b> — generate a key, publish the TXT record, and enable signing in the mail server.</li>
+                                <li><b>DMARC</b> — a TXT record (start with <code>p=none</code> to monitor, then tighten).</li>
+                                <li><b>Recommended:</b> use a <b>dedicated subdomain</b> (e.g. <code>mail.brokers.example.com</code>) so cold outreach can't damage the reputation of the main news sites. <b>Never</b> send through a consumer VPN — it breaks SPF and lands you on blocklists.</li>
+                            </ul>
+                        </li>
+                        <li><b>Enable the PHP <code>imap</code> extension</b> on the server (needed to read replies &amp; bounces). The Settings tab shows whether it's active.</li>
+                        <li><b>Add the two cron jobs</b> (as root, into the tenuser crontab):
+                            <ul>
+                                <li><code>* * * * * /usr/local/bin/php -q /home/tenuser/public_html/management/cron/ec_send.php</code> — sends due batches every minute.</li>
+                                <li><code>*/5 * * * * /usr/local/bin/php -q /home/tenuser/public_html/management/cron/ec_imap_poll.php</code> — pulls in replies &amp; bounces every 5 minutes.</li>
+                            </ul>
+                        </li>
                     </ul>
-                    <p class="ec-hint">Sending needs the mail server set up (SMTP/IMAP mailboxes + SPF/DKIM/DMARC) and the two cron jobs running. Ask your admin if the Dashboard shows sends stuck in "queued".</p>
+
+                    <h3>Part B — Global settings (Settings tab)</h3>
+                    <ul>
+                        <li><b>Global fallback identity</b> — default from‑name / from‑email / reply‑to used only if a campaign has no sending profile.</li>
+                        <li><b>Global daily cap</b> — a hard ceiling on total emails per day across everything (0 = no cap).</li>
+                        <li><b>Warm‑up ramp</b> — JSON list of daily caps that grows a new sending domain's volume gradually, e.g. <code>[50,100,200,400,800]</code> (day 1 max 50, day 2 max 100…). Protects reputation.</li>
+                        <li><b>Tracking base URL</b> — where the open/click/unsubscribe endpoints live (normally <code>https://theeyenewspapers.com/management</code>).</li>
+                    </ul>
+
+                    <h3>Part C — Sending profiles (Sending tab)</h3>
+                    <p>A sending profile is a reusable sending identity — create one per subdomain and pick it per campaign. Fields:</p>
+                    <ul>
+                        <li><b>From name / From email</b> — the sender shown to recipients; the email's domain is the sending subdomain.</li>
+                        <li><b>Reply‑to</b> — where replies should go (usually your reply mailbox).</li>
+                        <li><b>Bounce address (VERP)</b> — e.g. <code>bounce@mail.brokers.example.com</code>; the tool inserts a per‑recipient code so bounces can be matched.</li>
+                        <li><b>SMTP</b> — <b>host</b>, <b>port</b> and <b>security</b>: use <b>STARTTLS on port 587</b> (most common) or <b>SSL/TLS on port 465</b>; <b>username</b> + <b>password</b> of the sending mailbox (the password is stored encrypted and never shown again).</li>
+                        <li><b>IMAP</b> — host, port (usually 993 SSL), username + password, and the <b>reply</b> and <b>bounce</b> mailbox folder names, so the poller knows where to look.</li>
+                    </ul>
+
+                    <h3>Using it: step by step</h3>
+                    <div class="ec-step"><div class="ec-stepn">1</div><div><b>Get contacts in</b> (Contacts tab). Import a CSV or paste rows — a header line with <code>email</code> (required) plus optional <code>first_name, last_name, company, phone, city, country, contact_type</code>. Set a <b>Contact type</b> (e.g. "Insurance Brokers") so you can target them later. Duplicates merge; anyone suppressed is skipped. The scrapers drop contacts here automatically with their type set.</div></div>
+                    <div class="ec-step"><div class="ec-stepn">2</div><div><b>Find &amp; check contacts</b> (Contacts tab). Filter by type/country, and tick <i>Hide already‑emailed</i> / <i>Hide suppressed</i>. The <b>Emailed</b> column shows how many times each person was sent to, so you can see who's been contacted before.</div></div>
+                    <div class="ec-step"><div class="ec-stepn">3</div><div><b>Build an audience</b> (Audiences → <i>Build from filter</i>). e.g. type = Insurance Brokers, country = Germany, tick <i>exclude already‑emailed</i>. Suppressed / unsubscribed / bounced / replied contacts are <b>always</b> excluded. A live count shows exactly how many will receive it before you create the list.</div></div>
+                    <div class="ec-step"><div class="ec-stepn">4</div><div><b>Write a template</b> (Templates tab). Use merge fields <code>{{first_name}}</code>, <code>{{company}}</code>, <code>{{city}}</code>, and you <b>must</b> include <code>{{unsubscribe_url}}</code>. Preview it with sample data and <i>Send test to me</i> before using it.</div></div>
+                    <div class="ec-step"><div class="ec-stepn">5</div><div><b>Create the campaign</b> (Campaigns tab). Pick the <b>audience</b>, the <b>sending profile</b>, and one or more <b>template variants</b> (add a second variant to A/B test). Set <b>batch size</b>, <b>interval between batches</b> (minutes), <b>per‑domain limit</b> per run, <b>daily cap</b>, optional <b>warm‑up</b>, and an optional <b>scheduled start</b>.</div></div>
+                    <div class="ec-step"><div class="ec-stepn">6</div><div><b>Review &amp; launch.</b> This expands the audience into recipients (excluding suppressed and anyone already in this campaign) and shows the true number that will send. Launch — the sender trickles them out on your batch schedule.</div></div>
+                    <div class="ec-step"><div class="ec-stepn">7</div><div><b>Monitor</b> (Dashboard). Live tiles show sent / queued / failed / bounced / opened / clicked / replied / unsubscribed with a progress bar, and Pause / Resume / Cancel buttons.</div></div>
+                    <div class="ec-step"><div class="ec-stepn">8</div><div><b>Review results</b> (Reports — see below).</div></div>
+
+                    <h3>Reports tab — reading the results</h3>
+                    <p>Pick a campaign to see its funnel. Each metric:</p>
+                    <ul>
+                        <li><b>Sent</b> — messages accepted by the mail server for delivery.</li>
+                        <li><b>Opened</b> — the recipient loaded the tracking pixel (approximate — some clients block images).</li>
+                        <li><b>Clicked</b> — clicked any link (links are rewritten through a click tracker).</li>
+                        <li><b>Visits</b> — landed on one of our sites carrying their tracking code (attribution beyond the first click).</li>
+                        <li><b>Replied</b> — sent a reply (auto‑detected by the IMAP poller); this <b>stops</b> any further emails to them.</li>
+                        <li><b>Bounced</b> — delivery failed; <b>hard</b> bounces are suppressed automatically.</li>
+                        <li><b>Unsub</b> — clicked unsubscribe; suppressed immediately.</li>
+                    </ul>
+                    <p>The <b>A/B variants</b> table compares recipients / sent / opened / clicked / replied per variant so you can see which subject or template won. <b>Show recipients</b> gives a per‑person breakdown (status + which events fired), and you can export.</p>
+
+                    <h3>Deliverability &amp; compliance built in</h3>
+                    <ul>
+                        <li><b>Never twice:</b> every send is recorded; a contact can't be queued into the same campaign twice, and "exclude already‑emailed" keeps them out of new campaigns.</li>
+                        <li><b>Suppression:</b> unsubscribes, hard bounces, replies and manual do‑not‑contact feed one global list checked before every single send.</li>
+                        <li><b>Good hygiene by default:</b> one‑click unsubscribe + <code>List‑Unsubscribe</code> headers, plain‑text + HTML parts, per‑recipient sending, per‑domain throttling and warm‑up.</li>
+                        <li><b>Your responsibility:</b> confirm you have a lawful basis to email the list — in Germany B2B cold email is regulated (GDPR / UWG). The tool records a consent/source note per contact.</li>
+                    </ul>
+
+                    <h3>Troubleshooting</h3>
+                    <ul>
+                        <li><b>Everything stuck in "queued":</b> the <code>ec_send.php</code> cron isn't running, or the sending profile's SMTP login is wrong. Check the crons and the profile's SMTP host/port/security/password.</li>
+                        <li><b>Test send fails:</b> wrong SMTP host/port/security or password; try 587/STARTTLS then 465/SSL.</li>
+                        <li><b>Landing in spam / SPF fails:</b> DNS SPF/DKIM/DMARC not set for the sending domain, or sending from the wrong IP.</li>
+                        <li><b>No replies/bounces recorded:</b> PHP <code>imap</code> extension off, IMAP details wrong, or the bounce mailbox isn't catching <code>bounce+*@</code>.</li>
+                        <li><b>Opens look low:</b> normal — many mail clients block the tracking pixel; clicks are the more reliable signal.</li>
+                    </ul>
                 </div>
             </div>
 
             <?php if ($canSettings): ?>
             <div class="ec-pane" data-pane="settings">
                 <div class="ec-card" style="max-width:760px">
-                    <h3 style="margin-top:0">Sending (SMTP)</h3>
-                    <div class="ec-row"><div class="ec-fg"><label>SMTP host</label><input class="ec-in" id="s_smtp_host"></div><div class="ec-fg"><label>Port</label><input class="ec-in" id="s_smtp_port" value="587"></div></div>
-                    <div class="ec-row"><div class="ec-fg"><label>Security</label><select class="ec-sel" id="s_smtp_security"><option value="tls">STARTTLS (587)</option><option value="ssl">SSL (465)</option><option value="none">None</option></select></div><div class="ec-fg"><label>SMTP username</label><input class="ec-in" id="s_smtp_user"></div></div>
-                    <div class="ec-fg"><label>SMTP password <span class="ec-hint">(leave blank to keep existing — <span id="s_smtp_pass_set"></span>)</span></label><input class="ec-in" id="s_smtp_pass" type="password" autocomplete="new-password"></div>
+                    <p class="ec-hint">Mail servers (SMTP for sending, IMAP for replies/bounces) are configured per sending identity on the <b>Sending</b> tab. The settings here are global defaults and limits that apply across every campaign.</p>
+                    <h3 style="margin-top:0">Global fallback identity <span class="ec-hint" style="font-weight:400">(used only when a campaign has no sending profile)</span></h3>
                     <div class="ec-row"><div class="ec-fg"><label>Default from name</label><input class="ec-in" id="s_default_from_name"></div><div class="ec-fg"><label>Default from email</label><input class="ec-in" id="s_default_from_email"></div></div>
                     <div class="ec-fg"><label>Default reply-to</label><input class="ec-in" id="s_default_reply_to"></div>
-                    <h3>Replies &amp; bounces (IMAP)</h3>
-                    <div class="ec-row"><div class="ec-fg"><label>IMAP host</label><input class="ec-in" id="s_imap_host"></div><div class="ec-fg"><label>Port</label><input class="ec-in" id="s_imap_port" value="993"></div></div>
-                    <div class="ec-row"><div class="ec-fg"><label>IMAP username</label><input class="ec-in" id="s_imap_user"></div><div class="ec-fg"><label>IMAP password <span class="ec-hint">(<span id="s_imap_pass_set"></span>)</span></label><input class="ec-in" id="s_imap_pass" type="password" autocomplete="new-password"></div></div>
-                    <div class="ec-fg"><label>Bounce mailbox <span class="ec-hint">(folder receiving VERP bounce+*@ mail; blank = INBOX)</span></label><input class="ec-in" id="s_imap_bounce_mailbox"></div>
                     <h3>Throttle &amp; warm-up</h3>
-                    <div class="ec-row"><div class="ec-fg"><label>Global daily cap <span class="ec-hint">(0 = none)</span></label><input class="ec-in" id="s_daily_cap" value="0"></div><div class="ec-fg"><label>Warm-up ramp (JSON daily caps)</label><input class="ec-in" id="s_warmup_json" placeholder="[50,100,200,400,800]"></div></div>
-                    <div class="ec-fg"><label>Tracking base URL</label><input class="ec-in" id="s_track_base" value="https://theeyenewspapers.com/management"></div>
-                    <div style="display:flex;gap:10px;align-items:center"><button class="ec-btn" onclick="sSave()"><i class="fas fa-save"></i> Save settings</button><span class="ec-hint" id="s_imap_status"></span></div>
+                    <div class="ec-row"><div class="ec-fg"><label>Global daily cap <span class="ec-hint">(0 = none)</span></label><input class="ec-in" id="s_daily_cap" value="0"></div><div class="ec-fg"><label>Warm-up ramp <span class="ec-hint">(JSON daily caps)</span></label><input class="ec-in" id="s_warmup_json" placeholder="[50,100,200,400,800]"></div></div>
+                    <h3>Tracking</h3>
+                    <div class="ec-fg"><label>Tracking base URL <span class="ec-hint">(where the open/click/unsubscribe endpoints live)</span></label><input class="ec-in" id="s_track_base" value="https://theeyenewspapers.com/management"></div>
+                    <div style="display:flex;gap:12px;align-items:center;margin-top:6px"><button class="ec-btn" onclick="sSave()"><i class="fas fa-save"></i> Save settings</button><span class="ec-hint" id="s_imap_status"></span></div>
                 </div>
             </div>
             <?php endif; ?>
@@ -364,8 +431,9 @@ function rLoad(){ const id=document.getElementById('rCampaign').value; if(!id){d
 function rRecips(id){ post(EC.campaigns,{action:'recipients',id:id}).done(function(r){ let h='<table class="ec-tbl"><thead><tr><th>Email</th><th>Status</th><th>Sent</th><th>Opened</th><th>Clicked</th><th>Replied</th></tr></thead><tbody>'; (r.rows||[]).forEach(x=>h+='<tr><td>'+esc(x.email)+'</td><td>'+esc(x.status)+'</td><td>'+esc(x.sent_at||'')+'</td><td>'+(x.opened_at?'✓':'')+'</td><td>'+(x.first_click_at?'✓':'')+'</td><td>'+(x.replied_at?'✓':'')+'</td></tr>'); h+='</tbody></table>'; document.getElementById('rRecips').innerHTML=h; }); }
 
 /* ---------- Settings ---------- */
-function sLoad(){ post(EC.settings,{action:'get'}).done(function(r){ if(!r.success){toast(r.message||'no access','error');return;} const s=r.settings||{}; ['smtp_host','smtp_port','smtp_security','smtp_user','default_from_name','default_from_email','default_reply_to','imap_host','imap_port','imap_user','imap_bounce_mailbox','warmup_json','daily_cap','track_base'].forEach(k=>{ const el=document.getElementById('s_'+k); if(el&&s[k]!=null) el.value=s[k]; }); document.getElementById('s_smtp_pass_set').textContent=s.smtp_pass_set?'set':'not set'; document.getElementById('s_imap_pass_set').textContent=s.imap_pass_set?'set':'not set'; post(EC.settings,{action:'imap_check'}).done(x=>{ document.getElementById('s_imap_status').textContent='IMAP ext: '+x.imap_ext; }); }); }
-function sSave(){ const d={action:'save'}; ['smtp_host','smtp_port','smtp_security','smtp_user','smtp_pass','default_from_name','default_from_email','default_reply_to','imap_host','imap_port','imap_user','imap_pass','imap_bounce_mailbox','warmup_json','daily_cap','track_base'].forEach(k=>{ const el=document.getElementById('s_'+k); if(el) d[k]=el.value; }); post(EC.settings,d).done(function(r){ toast(r.success?'Saved':(r.message||'Failed'), r.success?'success':'error'); if(r.success){document.getElementById('s_smtp_pass').value='';document.getElementById('s_imap_pass').value='';sLoad();} }); }
+const S_FIELDS=['default_from_name','default_from_email','default_reply_to','daily_cap','warmup_json','track_base'];
+function sLoad(){ post(EC.settings,{action:'get'}).done(function(r){ if(!r.success){toast(r.message||'no access','error');return;} const s=r.settings||{}; S_FIELDS.forEach(k=>{ const el=document.getElementById('s_'+k); if(el&&s[k]!=null) el.value=s[k]; }); post(EC.settings,{action:'imap_check'}).done(x=>{ document.getElementById('s_imap_status').textContent='PHP IMAP extension: '+x.imap_ext; }); }); }
+function sSave(){ const d={action:'save'}; S_FIELDS.forEach(k=>{ const el=document.getElementById('s_'+k); if(el) d[k]=el.value; }); post(EC.settings,d).done(function(r){ toast(r.success?'Saved':(r.message||'Failed'), r.success?'success':'error'); if(r.success) sLoad(); }); }
 
 dashLoad();
 </script>
