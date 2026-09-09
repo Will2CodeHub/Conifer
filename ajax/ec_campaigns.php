@@ -10,6 +10,36 @@ $action = $_POST['action'] ?? $_GET['action'] ?? '';
 $c = ec_db();
 $resp = ['success'=>false,'message'=>''];
 
+/** Expand the campaign's audience into recipients, skipping suppressed and
+ *  anyone already a recipient of THIS campaign (so re-runs only add new people).
+ *  Returns the number of new recipients created. */
+function ec_materialise(mysqli $c, int $id): int {
+    $camp=$c->query("SELECT * FROM ten_ec_campaigns WHERE id=$id")->fetch_assoc();
+    if(!$camp) throw new Exception('Campaign not found');
+    $aid=(int)$camp['audience_id'];
+    $vars=[]; $vr=$c->query("SELECT id,weight FROM ten_ec_campaign_variants WHERE campaign_id=$id ORDER BY id");
+    while($vr && $x=$vr->fetch_assoc()) $vars[]=$x;
+    if(!$vars) throw new Exception('No variants/templates configured');
+    $pool=[]; foreach($vars as $v){ for($i=0;$i<max(1,(int)$v['weight']);$i++) $pool[]=(int)$v['id']; }
+    $batch=max(1,(int)$camp['batch_size']); $interval=max(0,(int)$camp['batch_interval_min']);
+    $start = !empty($camp['scheduled_at']) && strtotime($camp['scheduled_at'])>time() ? strtotime($camp['scheduled_at']) : time();
+    $res=$c->query("SELECT ct.id FROM ten_ec_audience_members m
+        JOIN ten_ec_contacts ct ON ct.id=m.contact_id
+        LEFT JOIN ten_ec_suppression s ON s.email=ct.email
+        LEFT JOIN ten_ec_recipients r ON r.campaign_id=$id AND r.contact_id=ct.id
+        WHERE m.audience_id=$aid AND s.id IS NULL AND r.id IS NULL");
+    $ins=$c->prepare("INSERT IGNORE INTO ten_ec_recipients (campaign_id,contact_id,variant_id,token,status,send_after) VALUES (?,?,?,?, 'queued', ?)");
+    $n=0;
+    while($x=$res->fetch_assoc()){
+        $cid=(int)$x['id']; $vid=$pool[$n % count($pool)]; $tok=ec_token(24);
+        $sendAfter=date('Y-m-d H:i:s', $start + intdiv($n,$batch)*$interval*60);
+        $ins->bind_param('iiiss',$id,$cid,$vid,$tok,$sendAfter); $ins->execute();
+        if($c->affected_rows===1) $n++;
+    }
+    $ins->close();
+    return $n;
+}
+
 /** Save variants for a campaign from a JSON array [{label,template_id,subject_override,weight}]. */
 function ec_save_variants(mysqli $c, int $campaignId, array $variants): void {
     $c->query("DELETE FROM ten_ec_campaign_variants WHERE campaign_id=$campaignId");
@@ -90,36 +120,35 @@ try {
         }
         case 'materialise': {
             $id=(int)($_POST['id']??0);
+            $n=ec_materialise($c,$id);
+            $resp=['success'=>true,'materialised'=>$n];
+            break;
+        }
+        case 'rerun': {
+            // Add newly-found contacts to a finished/live campaign WITHOUT re-emailing
+            // anyone already contacted in it. Optionally refresh the audience from its
+            // saved build filter first (to pull in contacts the scraper added since).
+            $id=(int)($_POST['id']??0);
             $camp=$c->query("SELECT * FROM ten_ec_campaigns WHERE id=$id")->fetch_assoc();
             if(!$camp) throw new Exception('Campaign not found');
             $aid=(int)$camp['audience_id'];
-            $vars=[]; $vr=$c->query("SELECT id,weight FROM ten_ec_campaign_variants WHERE campaign_id=$id ORDER BY id");
-            while($vr && $x=$vr->fetch_assoc()) $vars[]=$x;
-            if(!$vars) throw new Exception('No variants/templates configured');
-            // weighted assignment pool
-            $pool=[]; foreach($vars as $v){ for($i=0;$i<max(1,(int)$v['weight']);$i++) $pool[]=(int)$v['id']; }
-            $batch=max(1,(int)$camp['batch_size']); $interval=max(0,(int)$camp['batch_interval_min']);
-            $start = !empty($camp['scheduled_at']) ? strtotime($camp['scheduled_at']) : time();
-
-            // eligible contacts: in audience, not suppressed, not already a recipient
-            $res=$c->query("SELECT ct.id FROM ten_ec_audience_members m
-                JOIN ten_ec_contacts ct ON ct.id=m.contact_id
-                LEFT JOIN ten_ec_suppression s ON s.email=ct.email
-                LEFT JOIN ten_ec_recipients r ON r.campaign_id=$id AND r.contact_id=ct.id
-                WHERE m.audience_id=$aid AND s.id IS NULL AND r.id IS NULL");
-            $ins=$c->prepare("INSERT IGNORE INTO ten_ec_recipients (campaign_id,contact_id,variant_id,token,status,send_after) VALUES (?,?,?,?, 'queued', ?)");
-            $n=0;
-            while($x=$res->fetch_assoc()){
-                $cid=(int)$x['id'];
-                $vid=$pool[$n % count($pool)];
-                $tok=ec_token(24);
-                $sendAfter=date('Y-m-d H:i:s', $start + intdiv($n,$batch)*$interval*60);
-                $ins->bind_param('iiiss',$id,$cid,$vid,$tok,$sendAfter);
-                $ins->execute();
-                if($c->affected_rows===1) $n++;
+            $refreshed=0;
+            if (!empty($_POST['refresh_from_filter']) && $aid>0) {
+                $arow=$c->query("SELECT filter_json FROM ten_ec_audiences WHERE id=$aid")->fetch_assoc();
+                if($arow && !empty($arow['filter_json'])){
+                    $flt=json_decode($arow['filter_json'],true) ?: [];
+                    $where = ec_filter_where($c,$flt);
+                    $ins=$c->prepare("INSERT IGNORE INTO ten_ec_audience_members (audience_id,contact_id) VALUES (?,?)");
+                    $res=$c->query("SELECT ct.id FROM ten_ec_contacts ct $where");
+                    while($res && $x=$res->fetch_assoc()){ $cid=(int)$x['id']; $ins->bind_param('ii',$aid,$cid); $ins->execute(); $refreshed+=$c->affected_rows; }
+                    $ins->close();
+                }
             }
-            $ins->close();
-            $resp=['success'=>true,'materialised'=>$n];
+            $n=ec_materialise($c,$id);
+            // resume/keep sending if there is anything queued
+            $queued=(int)$c->query("SELECT COUNT(*) n FROM ten_ec_recipients WHERE campaign_id=$id AND status='queued'")->fetch_assoc()['n'];
+            if ($queued>0) $c->query("UPDATE ten_ec_campaigns SET status='sending', started_at=COALESCE(started_at,NOW()), completed_at=NULL WHERE id=$id");
+            $resp=['success'=>true,'audience_added'=>$refreshed,'materialised'=>$n,'now_queued'=>$queued];
             break;
         }
         case 'launch': {

@@ -206,6 +206,14 @@ $currentPage = 'email_campaigns';
                     <div class="ec-step"><div class="ec-stepn">7</div><div><b>Monitor</b> (Dashboard). Live tiles show sent / queued / failed / bounced / opened / clicked / replied / unsubscribed with a progress bar, and Pause / Resume / Cancel buttons.</div></div>
                     <div class="ec-step"><div class="ec-stepn">8</div><div><b>Review results</b> (Reports — see below).</div></div>
 
+                    <h3>Re-running a campaign / adding new contacts</h3>
+                    <p>Campaigns can be topped up at any time — while running, or after they complete — using <b>Add new &amp; re-run</b> (on the Campaigns list, and offered on the Dashboard when a campaign completes). It <b>never re‑emails anyone already contacted in that campaign</b>; it only sends to people who aren't yet recipients of it.</p>
+                    <ul>
+                        <li><b>Broadened the criteria?</b> e.g. you ran "French brokers, type X", then decide you want <i>all</i> broker types. Widen the audience (or its saved filter), hit <b>Add new &amp; re-run</b> — only the newly‑matching brokers get emailed, not the ones already contacted.</li>
+                        <li><b>Scraper found more?</b> If the audience was built with <i>Build from filter</i>, its filter is saved. Tick <b>"pull new contacts from the audience's saved filter"</b> and re‑run — it re‑applies e.g. "all brokers in Germany" to grab everyone the scraper added since, then sends to just those.</li>
+                        <li><b>Manual top‑up:</b> import contacts (Contacts) or add them to the audience (Audiences), then <b>Add new &amp; re-run</b>.</li>
+                    </ul>
+
                     <h3>Reports tab — reading the results</h3>
                     <p>Pick a campaign to see its funnel. Each metric:</p>
                     <ul>
@@ -285,6 +293,9 @@ function dashLoad(){ post(EC.campaigns,{action:'list'}).done(function(r){
     let h='<h3 style="margin-top:0">Active campaigns</h3>';
     if(!active.length) h+='<p class="ec-hint">No active campaigns. Create one under the Campaigns tab.</p>';
     active.forEach(function(c){ h+='<div id="dash'+c.id+'" class="ec-dashblock"><h4>'+esc(c.name)+' &nbsp;<span class="ec-badge b-'+c.status+'">'+c.status+'</span></h4><div class="ec-hint" style="margin-bottom:4px">Audience: '+esc(c.audience_name||'—')+'</div><div class="dashprog"></div></div>'; });
+    const completed=r.rows.filter(c=>c.status==='completed');
+    if(completed.length){ h+='<h3 style="margin-top:24px">Recently completed — add newly‑found contacts?</h3>';
+        completed.slice(0,8).forEach(function(c){ h+='<div class="ec-dashblock"><h4>'+esc(c.name)+' &nbsp;<span class="ec-badge b-completed">completed</span></h4><div class="ec-hint" style="margin:4px 0 10px">'+c.sent+' sent. The scraper may have added new '+esc(c.audience_name||'')+' contacts since — you can send to just the new ones without re‑emailing anyone already contacted in this campaign.</div><button class="ec-btn sm" onclick="kRerun('+c.id+')"><i class="fas fa-user-plus"></i> Add new &amp; re-run</button></div>'; }); }
     h+='<h3 style="margin-top:22px">All campaigns</h3><table class="ec-tbl"><thead><tr><th>Name</th><th>Status</th><th>Sent</th><th>Total</th></tr></thead><tbody>';
     r.rows.forEach(c=>h+='<tr><td>'+esc(c.name)+'</td><td><span class="ec-badge b-'+c.status+'">'+c.status+'</span></td><td>'+c.sent+'</td><td>'+c.total+'</td></tr>');
     h+='</tbody></table>';
@@ -348,7 +359,7 @@ function aBuild(){ cTypes(function(){
 function aBuildFilter(){ return {q:document.getElementById('abQ').value,type:document.getElementById('abType').value,country:document.getElementById('abCountry').value,exclude_contacted:document.getElementById('abExclContacted').checked?1:0}; }
 function aBuildCount(){ post(EC.audiences,Object.assign({action:'count_filter'},aBuildFilter())).done(function(r){ if(r.success) document.getElementById('abCount').textContent=r.count; }); }
 function aBuildDo(){ const name=document.getElementById('abName').value.trim(); if(!name){toast('Name required','error');return;}
-    post(EC.audiences,{action:'create',name:name}).done(function(r){ if(!r.success){toast(r.message,'error');return;} post(EC.audiences,Object.assign({action:'add_members',audience_id:r.id},aBuildFilter())).done(function(x){ ecClose(); toast('Audience created with '+(x.added||0)+' contacts'); aLoad(); }); }); }
+    post(EC.audiences,Object.assign({action:'create',name:name,save_filter:1},aBuildFilter())).done(function(r){ if(!r.success){toast(r.message,'error');return;} post(EC.audiences,Object.assign({action:'add_members',audience_id:r.id},aBuildFilter())).done(function(x){ ecClose(); toast('Audience created with '+(x.added||0)+' contacts (filter saved for refresh)'); aLoad(); }); }); }
 function aDoCreate(){ post(EC.audiences,{action:'create',name:document.getElementById('auName').value,description:document.getElementById('auDesc').value}).done(function(r){ if(r.success){ecClose();toast('Created');aLoad();}else toast(r.message,'error'); }); }
 function aDel(id){ Swal.fire({title:'Delete audience?',icon:'warning',showCancelButton:true,confirmButtonColor:'#dc2626'}).then(x=>{ if(x.isConfirmed) post(EC.audiences,{action:'delete',id:id}).done(()=>{toast('Deleted');aLoad();}); }); }
 function aOpen(id,name){ aCurrent=id; document.getElementById('aMembersCard').style.display='block'; document.getElementById('aMembersTitle').textContent='Members of "'+name+'"'; aMembers(); }
@@ -373,7 +384,7 @@ function tPreview(){ post(EC.templates,Object.assign({action:'preview'},tPayload
 function tTest(){ post(EC.templates,Object.assign({action:'test_send'},tPayload())).done(function(r){ toast(r.message, r.success?'success':'error'); }); }
 
 /* ---------- Campaigns ---------- */
-function kLoad(){ post(EC.campaigns,{action:'list'}).done(function(r){ if(!r.success){toast(r.message,'error');return;} let h='<table class="ec-tbl"><thead><tr><th>Name</th><th>Audience</th><th>Status</th><th>Sent/Total</th><th></th></tr></thead><tbody>'; r.rows.forEach(c=>h+='<tr><td>'+esc(c.name)+'</td><td>'+esc(c.audience_name||'')+'</td><td><span class="ec-badge b-'+c.status+'">'+c.status+'</span></td><td>'+c.sent+'/'+c.total+'</td><td><button class="ec-btn light sm" onclick="kEdit('+c.id+')">Edit</button> <button class="ec-btn light sm" onclick="kReview('+c.id+')">Review &amp; launch</button></td></tr>'); h+='</tbody></table>'; document.getElementById('kTable').innerHTML=h; }); }
+function kLoad(){ post(EC.campaigns,{action:'list'}).done(function(r){ if(!r.success){toast(r.message,'error');return;} let h='<table class="ec-tbl"><thead><tr><th>Name</th><th>Audience</th><th>Status</th><th>Sent/Total</th><th></th></tr></thead><tbody>'; r.rows.forEach(c=>h+='<tr><td>'+esc(c.name)+'</td><td>'+esc(c.audience_name||'')+'</td><td><span class="ec-badge b-'+c.status+'">'+c.status+'</span></td><td>'+c.sent+'/'+c.total+'</td><td style="white-space:nowrap"><button class="ec-btn light sm" onclick="kEdit('+c.id+')">Edit</button> <button class="ec-btn light sm" onclick="kReview('+c.id+')">Review &amp; launch</button> <button class="ec-btn light sm" onclick="kRerun('+c.id+')">Add new &amp; re-run</button></td></tr>'); h+='</tbody></table>'; document.getElementById('kTable').innerHTML=h; }); }
 let _tpls=[],_auds=[],_profs=[];
 function kNew(){ Promise.all([post(EC.audiences,{action:'list'}),post(EC.templates,{action:'list'}),post(EC.profiles,{action:'list'})]).then(function(a){ _auds=a[0].rows||[]; _tpls=a[1].rows||[]; _profs=a[2].rows||[]; kForm({}); }); }
 function kEdit(id){ Promise.all([post(EC.audiences,{action:'list'}),post(EC.templates,{action:'list'}),post(EC.profiles,{action:'list'}),post(EC.campaigns,{action:'get',id:id})]).then(function(a){ _auds=a[0].rows||[]; _tpls=a[1].rows||[]; _profs=a[2].rows||[]; kForm(a[3].campaign, a[3].variants); }); }
@@ -401,6 +412,12 @@ function kReview(id){ post(EC.campaigns,{action:'materialise',id:id}).done(funct
     '<button class="ec-btn light" onclick="ecClose()">Close</button><button class="ec-btn" onclick="kLaunch('+id+')">Launch now</button>'); }); }); }
 function kLaunch(id){ post(EC.campaigns,{action:'launch',id:id}).done(function(r){ if(r.success){ecClose();toast('Campaign '+r.status);kLoad();dashLoad();}else toast(r.message,'error'); }); }
 function kCtl(id,act){ post(EC.campaigns,{action:act,id:id}).done(()=>{toast(act+'d');dashLoad();kLoad();}); }
+function kRerun(id){ ecModal('Add new contacts &amp; re-run',
+    '<p>This adds <b>newly-found</b> contacts to this campaign and resumes sending. Anyone already contacted in <b>this</b> campaign is skipped, and suppressed/unsubscribed/replied contacts are always excluded.</p>'+
+    '<label class="ec-chk" style="padding:4px 0"><input type="checkbox" id="rrFilter" checked> Also pull new contacts from the audience\'s saved filter <span class="ec-hint">(re-applies e.g. "all brokers in Germany" to catch ones the scraper added since)</span></label>'+
+    '<p class="ec-hint">Tip: to add contacts manually instead, import them (Contacts) or add them to the audience (Audiences), then run this.</p>',
+    '<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn" onclick="kRerunDo('+id+')">Add &amp; continue</button>'); }
+function kRerunDo(id){ post(EC.campaigns,{action:'rerun',id:id,refresh_from_filter:document.getElementById('rrFilter').checked?1:0}).done(function(r){ if(r.success){ ecClose(); toast('Added '+(r.audience_added||0)+' to audience, '+r.materialised+' new recipients queued'); kLoad(); dashLoad(); } else toast(r.message,'error'); }); }
 
 /* ---------- Sending profiles ---------- */
 function pLoad(){ post(EC.profiles,{action:'list'}).done(function(r){ if(!r.success){toast(r.message,'error');return;} let h='<table class="ec-tbl"><thead><tr><th>Name</th><th>From</th><th>SMTP</th><th>IMAP</th><th>Active</th><th></th></tr></thead><tbody>'; (r.rows||[]).forEach(p=>h+='<tr><td>'+esc(p.name)+'</td><td>'+esc(p.from_email)+'</td><td>'+esc(p.smtp_host||'')+(p.smtp_pass_set==1?' 🔑':'')+'</td><td>'+esc(p.imap_host||'')+(p.imap_pass_set==1?' 🔑':'')+'</td><td>'+(p.active==1?'yes':'no')+'</td><td><button class="ec-btn light sm" onclick="pEdit('+p.id+')">Edit</button> <button class="ec-btn danger sm" onclick="pDel('+p.id+')">Delete</button></td></tr>'); h+='</tbody></table>'; document.getElementById('pTable').innerHTML=h; }); }
