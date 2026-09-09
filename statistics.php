@@ -1,25 +1,19 @@
 <?php
 require_once 'config.php';
 requireLogin();
+require_once __DIR__ . '/lib/stats_sites.php';
+require_once __DIR__ . '/lib/app_settings.php';
 
-// Site configuration. KEYS ARE THE CANONICAL PUBLICATION ACRONYMS (same as
-// admin_ten.publications / articles.publications / the scraper), so the site_key
-// stored by cron_collect_stats matches what this page queries. Keep this list
-// and ajax/traffic_stats.php's $sites identical.
-$sites = [
-    'ten'   => ['name' => 'The Eye Newspapers', 'log_path' => '/home/tenuser/private/unique_visitors_count.txt'],
-    'tme'   => ['name' => 'The Munich Eye',     'log_path' => '/home/tmeuser/private/unique_visitors_count.txt'],
-    'tge'   => ['name' => 'The Germany Eye',    'log_path' => '/home/tgeuser/private/unique_visitors_count.txt'],
-    'bae'   => ['name' => 'Buenos Aires Eye',   'log_path' => '/home/baeuser/private/unique_visitors_count.txt'],
-    'tbare' => ['name' => 'The Barcelona Eye',  'log_path' => '/home/tbareuse/private/unique_visitors_count.txt'],
-    'tbrae' => ['name' => 'The Brazil Eye',     'log_path' => '/home/tbeuser/private/unique_visitors_count.txt'],
-    'tce'   => ['name' => 'The Canary Eye',     'log_path' => '/home/tceuser/private/unique_visitors_count.txt'],
-    'tmae'  => ['name' => 'The Madrid Eye',     'log_path' => '/home/tmaeuser/private/unique_visitors_count.txt'],
-    'truse' => ['name' => 'The Russia Eye',     'log_path' => '/home/treuser/private/unique_visitors_count.txt'],
-    'tte'   => ['name' => 'The Tokyo Eye',      'log_path' => '/home/tteuser/private/unique_visitors_count.txt'],
-    'tpe'   => ['name' => 'The Paris Eye',      'log_path' => '/home/tpeuser/private/unique_visitors_count.txt'],
-    'tbere' => ['name' => 'The Berlin Eye',     'log_path' => '/home/tberuser/private/unique_visitors_count.txt'],
-];
+// Canonical publication list (single source of truth in lib/stats_sites.php).
+$sites   = ten_stats_sites();
+$periods = ten_stats_periods();
+
+// Admin-configurable defaults (Settings → General). The page then remembers each
+// admin's last choice on their own device (localStorage), which takes precedence.
+$defaultPublication = ten_get_setting('stats_default_publication', 'tme');
+if (!isset($sites[$defaultPublication])) $defaultPublication = 'tme';
+$defaultPeriod = ten_get_setting('stats_default_period', 'today');
+if (!isset($periods[$defaultPeriod])) $defaultPeriod = 'today';
 
 $currentPage = 'statistics';
 ?>
@@ -407,7 +401,7 @@ $currentPage = 'statistics';
                     <label><i class="fas fa-globe"></i> Select Website</label>
                     <select id="siteSelector" onchange="loadTrafficStats()">
                         <?php foreach ($sites as $key => $site): ?>
-                            <option value="<?php echo $key; ?>" <?php echo $key === 'tme' ? 'selected' : ''; ?>>
+                            <option value="<?php echo $key; ?>" <?php echo $key === $defaultPublication ? 'selected' : ''; ?>>
                                 <?php echo htmlspecialchars($site['name']); ?>
                             </option>
                         <?php endforeach; ?>
@@ -417,17 +411,11 @@ $currentPage = 'statistics';
                 <div class="control-group">
                     <label><i class="fas fa-clock"></i> Time Period</label>
                     <select id="periodSelector" onchange="loadTrafficStats()">
-                        <option value="last_hour">Last Hour</option>
-                        <option value="last_2_hours">Last 2 Hours</option>
-                        <option value="last_4_hours">Last 4 Hours</option>
-                        <option value="last_12_hours">Last 12 Hours</option>
-                        <option value="last_24_hours">Last 24 Hours</option>
-                        <option value="today">Today</option>
-                        <option value="yesterday">Yesterday</option>
-                        <option value="last_7_days" selected>Last 7 Days</option>
-                        <option value="last_30_days">Last 30 Days</option>
-                        <option value="this_month">This Month</option>
-                        <option value="last_month">Last Month</option>
+                        <?php foreach ($periods as $pkey => $plabel): ?>
+                            <option value="<?php echo $pkey; ?>" <?php echo $pkey === $defaultPeriod ? 'selected' : ''; ?>>
+                                <?php echo htmlspecialchars($plabel); ?>
+                            </option>
+                        <?php endforeach; ?>
                     </select>
                 </div>
 
@@ -593,8 +581,21 @@ $currentPage = 'statistics';
         // Load statistics on page load
         document.addEventListener('DOMContentLoaded', function() {
             loadSystemInfo();
+
+            // Restore this admin's last chosen filters (remembered per device).
+            // Falls back to the server-configured defaults (Settings → General),
+            // which are already pre-selected in the dropdowns.
+            try {
+                const savedSite = localStorage.getItem('ten_stats_site');
+                const savedPeriod = localStorage.getItem('ten_stats_period');
+                const siteSel = document.getElementById('siteSelector');
+                const perSel = document.getElementById('periodSelector');
+                if (savedSite && [...siteSel.options].some(o => o.value === savedSite)) siteSel.value = savedSite;
+                if (savedPeriod && [...perSel.options].some(o => o.value === savedPeriod)) perSel.value = savedPeriod;
+            } catch (e) {}
+
             loadTrafficStats();
-            
+
             // Search functionality
             document.getElementById('pageSearch').addEventListener('input', function() {
                 currentPage = 1;
@@ -627,6 +628,12 @@ $currentPage = 'statistics';
         function loadTrafficStats() {
             const siteKey = document.getElementById('siteSelector').value;
             const period = document.getElementById('periodSelector').value;
+
+            // Remember this admin's current filters for next time (per device).
+            try {
+                localStorage.setItem('ten_stats_site', siteKey);
+                localStorage.setItem('ten_stats_period', period);
+            } catch (e) {}
 
             const refreshBtn = document.getElementById('refreshBtn');
             if (refreshBtn) refreshBtn.classList.add('spinning');
