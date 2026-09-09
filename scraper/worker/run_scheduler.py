@@ -12,7 +12,7 @@ from datetime import datetime
 
 from tenscraper.adapters import PyMySQLRepo, mysql_connect_from_env
 from tenscraper.schedule import is_due
-from tenscraper.service import ingest_section
+from tenscraper.service import drain_run_requests, ingest_section
 
 
 def main() -> int:
@@ -22,6 +22,11 @@ def main() -> int:
     now = datetime.now()
     ran, errors = [], []
     try:
+        # First honour any manual "run now" requests from the management UI.
+        drained = drain_run_requests(repo)
+        if drained["ran"] or drained["errors"]:
+            print(f"run-requests: ran={drained['ran']} errors={drained['errors']}")
+
         for section in repo.list_active_sections():
             last = repo.last_run_time(section["id"])
             if is_due(section["cron_schedule"], last, now):

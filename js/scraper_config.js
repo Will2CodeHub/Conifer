@@ -115,6 +115,7 @@
                         " · sources: " + esc(s.source_count) + "</div>" +
                 "</div>" +
                 "<div>" +
+                    (active ? '<button class="sc-btn small" data-act="run" title="Scrape this section now"><i class="fas fa-bolt"></i> Run now</button> ' : "") +
                     '<button class="sc-btn small ' + (active ? "" : "secondary") + '" data-act="toggle">' +
                         (active ? '<i class="fas fa-pause"></i> Disable' : '<i class="fas fa-play"></i> Enable') + "</button> " +
                     '<button class="sc-btn small" data-act="sources">Sources</button> ' +
@@ -125,6 +126,17 @@
             '<div class="sc-card-body"></div>';
 
         var body = card.querySelector(".sc-card-body");
+        var runBtn = card.querySelector('[data-act="run"]');
+        if (runBtn) runBtn.addEventListener("click", function () {
+            var old = runBtn.innerHTML; runBtn.disabled = true;
+            runBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Requesting…';
+            api("section", "run_now", { id: s.id }).then(function (j) {
+                runBtn.innerHTML = j.spawned
+                    ? '<i class="fas fa-check"></i> Started'
+                    : (j.already ? '<i class="fas fa-check"></i> Already queued' : '<i class="fas fa-check"></i> Queued');
+                setTimeout(function () { runBtn.disabled = false; runBtn.innerHTML = old; }, 5000);
+            }).catch(function (e) { runBtn.disabled = false; runBtn.innerHTML = old; alertErr(e); });
+        });
         card.querySelector('[data-act="toggle"]').addEventListener("click", function () {
             api("section", "toggle", { id: s.id, active: active ? 0 : 1 }).then(loadSections).catch(alertErr);
         });
@@ -170,7 +182,9 @@
                     '<span class="scraper-placeholder">' + list.length + " section" + (list.length === 1 ? "" : "s") + "</span>" +
                     (anyActive ? "" : ' <span class="sc-badge off">all scraping off</span>') +
                 "</div>" +
-                '<div><button class="sc-btn small ' + (anyActive ? "" : "secondary") + '" data-pubtoggle>' +
+                '<div>' +
+                    (anyActive ? '<button class="sc-btn small" data-pubrun title="Scrape all enabled sections now"><i class="fas fa-bolt"></i> Run now</button> ' : "") +
+                    '<button class="sc-btn small ' + (anyActive ? "" : "secondary") + '" data-pubtoggle>' +
                     (anyActive ? '<i class="fas fa-pause"></i> Disable scraping' : '<i class="fas fa-play"></i> Enable scraping') + "</button></div>";
             var body = document.createElement("div");
             body.style.cssText = "padding:10px 12px;display:none;";
@@ -187,6 +201,17 @@
                 var enable = !anyActive;
                 if (!confirm((enable ? "Enable" : "Disable") + " scraping for ALL sections of " + pubLabel(pk) + "?")) return;
                 api("publication", "toggle", { project_id: PROJECT_ID, publication_key: pk, active: enable ? 1 : 0 }).then(loadSections).catch(alertErr);
+            });
+            var pubRun = head.querySelector("[data-pubrun]");
+            if (pubRun) pubRun.addEventListener("click", function (ev) {
+                ev.stopPropagation();
+                if (!confirm("Run an immediate scrape for all enabled sections of " + pubLabel(pk) + "?")) return;
+                var old = pubRun.innerHTML; pubRun.disabled = true;
+                pubRun.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Requesting…';
+                api("publication", "run_now", { project_id: PROJECT_ID, publication_key: pk }).then(function (j) {
+                    pubRun.innerHTML = '<i class="fas fa-check"></i> ' + (j.queued || 0) + " queued";
+                    setTimeout(function () { pubRun.disabled = false; pubRun.innerHTML = old; }, 5000);
+                }).catch(function (e) { pubRun.disabled = false; pubRun.innerHTML = old; alertErr(e); });
             });
             list.forEach(function (s) { body.appendChild(sectionCard(s)); });
         });

@@ -34,6 +34,33 @@ def _make_facts_builder(fetcher, user_agent, rate_seconds: float = 1.5, max_char
     return _build
 
 
+def drain_run_requests(repo) -> dict:
+    """Process any pending manual "run now" requests (from the management UI),
+    scraping each requested section immediately regardless of its schedule.
+    Safe to call from both run_requests.py (frequent) and run_scheduler.py."""
+    repo.ensure_run_requests_table()
+    ran, errors = [], []
+    for req_id in repo.pending_run_request_ids():
+        pub_section_id = repo.claim_run_request(req_id)
+        if pub_section_id is None:
+            continue  # already claimed by another worker
+        try:
+            result = ingest_section(repo, pub_section_id)
+            if result is None:
+                repo.finish_run_request(req_id, "done", "section inactive or not found")
+            else:
+                repo.finish_run_request(
+                    req_id, "done",
+                    f"found={result.items_found} new={result.items_new} "
+                    f"dupe={result.skipped_dupe} robots={result.skipped_robots}",
+                )
+            ran.append(req_id)
+        except Exception as exc:  # noqa: BLE001 - keep going for other requests
+            repo.finish_run_request(req_id, "error", None, str(exc)[:480])
+            errors.append((req_id, str(exc)))
+    return {"ran": ran, "errors": errors}
+
+
 def ingest_section(repo, pub_section_id: int):
     """Run ingestion for one section id. Returns the IngestResult, or None if the
     section is missing/inactive. Records a row in ten_scraper_runs either way."""

@@ -30,6 +30,88 @@ function scraper_set_publication_active(int $projectId, string $pubKey, int $act
     return $n;
 }
 
+/* ------------------------------------------- manual "run now" request queue */
+
+/** Create the run-request queue table if missing (self-migrating). */
+function scraper_ensure_run_requests_table(mysqli $conn): void {
+    @$conn->query("CREATE TABLE IF NOT EXISTS ten_scraper_run_requests (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        pub_section_id INT NOT NULL,
+        requested_by INT NULL,
+        requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        status ENUM('pending','running','done','error') NOT NULL DEFAULT 'pending',
+        started_at DATETIME NULL,
+        finished_at DATETIME NULL,
+        result VARCHAR(255) NULL,
+        error VARCHAR(500) NULL,
+        KEY idx_status (status),
+        KEY idx_section (pub_section_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
+/**
+ * Best-effort immediate start: if a run-now wrapper is present on the worker
+ * host, launch it in the background so the scrape starts within seconds. When
+ * it's absent the queued request is picked up by the worker's scheduler instead.
+ * The wrapper (kept out of public_html, holding the DB env) would be e.g.:
+ *   #!/usr/bin/env bash
+ *   cd "$(dirname "$0")"; set -a; source ./env.sh; set +a
+ *   exec ./venv/bin/python run_ingest.py --pub-section-id "$1"
+ */
+function scraper_try_spawn_worker(int $pubSectionId): bool {
+    $wrapper = '/home/tenuser/scraper_worker/run_now.sh';
+    if (!function_exists('exec') || !@is_executable($wrapper)) return false;
+    $disabled = array_map('trim', explode(',', (string)ini_get('disable_functions')));
+    if (in_array('exec', $disabled, true)) return false;
+    $cmd = escapeshellarg($wrapper) . ' ' . (int)$pubSectionId
+         . ' >> /home/tenuser/scraper_worker/run_now.log 2>&1 &';
+    @exec($cmd);
+    return true;
+}
+
+/**
+ * Queue an immediate scrape of one section (must be enabled). De-dupes against
+ * an existing pending/running request for the same section.
+ * @return array{ok:bool,message?:string,request_id?:int,already?:bool,spawned?:bool}
+ */
+function scraper_request_section_run(int $pubSectionId, ?int $userId): array {
+    $conn = getDBConnection();
+    scraper_ensure_run_requests_table($conn);
+    $r = $conn->query("SELECT is_active FROM ten_scraper_pub_sections WHERE id=" . (int)$pubSectionId);
+    $row = $r ? $r->fetch_assoc() : null;
+    if (!$row)                       { $conn->close(); return ['ok'=>false, 'message'=>'Section not found']; }
+    if ((int)$row['is_active'] !== 1){ $conn->close(); return ['ok'=>false, 'message'=>'Section is disabled — enable it first']; }
+    $r = $conn->query("SELECT id FROM ten_scraper_run_requests WHERE pub_section_id=" . (int)$pubSectionId . " AND status IN ('pending','running') ORDER BY id DESC LIMIT 1");
+    $existing = $r ? $r->fetch_assoc() : null;
+    if ($existing) { $conn->close(); return ['ok'=>true, 'request_id'=>(int)$existing['id'], 'already'=>true, 'spawned'=>false]; }
+    $s = $conn->prepare("INSERT INTO ten_scraper_run_requests (pub_section_id, requested_by) VALUES (?,?)");
+    $s->bind_param('ii', $pubSectionId, $userId);
+    $s->execute(); $id = (int)$conn->insert_id; $s->close();
+    $conn->close();
+    $spawned = scraper_try_spawn_worker($pubSectionId);
+    return ['ok'=>true, 'request_id'=>$id, 'already'=>false, 'spawned'=>$spawned];
+}
+
+/** Queue immediate runs for every ENABLED section of a publication. */
+function scraper_request_publication_run(int $projectId, string $pubKey, ?int $userId): array {
+    $conn = getDBConnection();
+    scraper_ensure_run_requests_table($conn);
+    $ids = [];
+    $st = $conn->prepare("SELECT id FROM ten_scraper_pub_sections WHERE project_id=? AND publication_key=? AND is_active=1");
+    $st->bind_param('is', $projectId, $pubKey);
+    $st->execute(); $res = $st->get_result();
+    while ($x = $res->fetch_assoc()) $ids[] = (int)$x['id'];
+    $st->close(); $conn->close();
+    if (!$ids) return ['ok'=>false, 'message'=>'No enabled sections for this publication'];
+    $queued = 0; $spawned = 0;
+    foreach ($ids as $sid) {
+        $r = scraper_request_section_run($sid, $userId);
+        if (!empty($r['ok']) && empty($r['already'])) $queued++;
+        if (!empty($r['spawned'])) $spawned++;
+    }
+    return ['ok'=>true, 'sections'=>count($ids), 'queued'=>$queued, 'spawned'=>$spawned];
+}
+
 function scraper_list_sections(int $projectId): array {
     $conn = getDBConnection();
     $stmt = $conn->prepare(

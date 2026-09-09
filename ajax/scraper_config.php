@@ -85,6 +85,25 @@ try {
             );
             echo json_encode(['success' => true, 'updated' => $n]);
             break;
+        case 'section.run_now':
+            scraper_require_manage($canManage);
+            $sid = (int)($_POST['id'] ?? 0);
+            $uid = (int)($_SESSION['ten_user_id'] ?? 0) ?: null;
+            $r = scraper_request_section_run($sid, $uid);
+            if (!empty($r['ok'])) logActivity('scraper_run_now', 'scraper_section', $sid, 'Requested immediate scrape');
+            echo json_encode(array_merge(['success' => !empty($r['ok'])], $r));
+            break;
+        case 'publication.run_now':
+            scraper_require_manage($canManage);
+            $uid = (int)($_SESSION['ten_user_id'] ?? 0) ?: null;
+            $r = scraper_request_publication_run(
+                (int)($_POST['project_id'] ?? 0),
+                (string)($_POST['publication_key'] ?? ''),
+                $uid
+            );
+            if (!empty($r['ok'])) logActivity('scraper_run_now', 'scraper_publication', (int)($_POST['project_id'] ?? 0), 'Requested immediate scrape (publication)');
+            echo json_encode(array_merge(['success' => !empty($r['ok'])], $r));
+            break;
 
         /* ---- sources ---- */
         case 'source.list':

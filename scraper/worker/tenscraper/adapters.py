@@ -107,6 +107,64 @@ class PyMySQLRepo:
             row = cur.fetchone()
         return row[0] if row else None
 
+    # --- manual "run now" request queue -----------------------------------
+
+    def ensure_run_requests_table(self) -> None:
+        with self._ten.cursor() as cur:
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS ten_scraper_run_requests ("
+                " id INT AUTO_INCREMENT PRIMARY KEY,"
+                " pub_section_id INT NOT NULL,"
+                " requested_by INT NULL,"
+                " requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                " status ENUM('pending','running','done','error') NOT NULL DEFAULT 'pending',"
+                " started_at DATETIME NULL,"
+                " finished_at DATETIME NULL,"
+                " result VARCHAR(255) NULL,"
+                " error VARCHAR(500) NULL,"
+                " KEY idx_status (status),"
+                " KEY idx_section (pub_section_id)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+            )
+        self._ten.commit()
+
+    def pending_run_request_ids(self) -> List[int]:
+        with self._ten.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM ten_scraper_run_requests WHERE status='pending' ORDER BY id"
+            )
+            return [r[0] for r in cur.fetchall()]
+
+    def claim_run_request(self, request_id: int):
+        """Atomically flip one pending request to 'running'. Returns its
+        pub_section_id, or None if another worker already claimed it."""
+        with self._ten.cursor() as cur:
+            cur.execute(
+                "UPDATE ten_scraper_run_requests SET status='running', started_at=NOW() "
+                "WHERE id=%s AND status='pending'",
+                (request_id,),
+            )
+            if cur.rowcount == 0:
+                self._ten.commit()
+                return None
+            cur.execute(
+                "SELECT pub_section_id FROM ten_scraper_run_requests WHERE id=%s",
+                (request_id,),
+            )
+            row = cur.fetchone()
+        self._ten.commit()
+        return row[0] if row else None
+
+    def finish_run_request(self, request_id: int, status: str,
+                           result: str = None, error: str = None) -> None:
+        with self._ten.cursor() as cur:
+            cur.execute(
+                "UPDATE ten_scraper_run_requests SET status=%s, result=%s, error=%s, "
+                "finished_at=NOW() WHERE id=%s",
+                (status, result, error, request_id),
+            )
+        self._ten.commit()
+
     # --- config loading ---------------------------------------------------
 
     def load_section(self, pub_section_id: int) -> Optional[dict]:
