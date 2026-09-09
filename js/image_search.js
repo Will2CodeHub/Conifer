@@ -268,14 +268,15 @@
     }
 
     function insertImage(url, attribution) {
+        // Bind the credit to the image (figure + figcaption) so removing the image
+        // removes its attribution too. Shared helper lives in module-articles.php.
+        if (window.tenInsertArticleImage) { window.tenInsertArticleImage(url, attribution); return; }
         var editor = el("article_text");
         if (!editor) { alertErr("Editor not found"); return; }
         var img = document.createElement("img");
         img.src = url;
         img.setAttribute("alt", "");
         editor.insertBefore(img, editor.firstChild);
-        var attr = el("attribution");
-        if (attr && !attr.value) attr.value = attribution || "";
     }
 
     /* ---------- open / close ---------- */
