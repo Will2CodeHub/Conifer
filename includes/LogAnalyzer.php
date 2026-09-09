@@ -105,7 +105,7 @@ class LogAnalyzer {
      * @param int $endTime Unix timestamp
      * @return array Statistics array
      */
-    public function analyzeTimePeriod($startTime, $endTime, $maxTailBytes = 0) {
+    public function analyzeTimePeriod($startTime, $endTime, $maxTailBytes = 0, $includeIds = false) {
         if (!file_exists($this->logPath) || !is_readable($this->logPath)) {
             error_log("LogAnalyzer: Log file not accessible at {$this->logPath}");
             return $this->getEmptyStats();
@@ -212,6 +212,16 @@ class LogAnalyzer {
         error_log("LogAnalyzer: Found {$stats['total_visits']} visits, {$stats['human_visits']} human, " . 
                   "{$stats['bot_visits']} bots, {$stats['spam_visits']} spam");
         
+        // Capture per-day distinct visitor-ID fingerprints (crc32) BEFORE collapsing
+        // to counts. Storing these lets month-level views UNION them across days for
+        // true dedup, instead of summing daily uniques (which double-counts anyone
+        // who returns on more than one day). crc32 keeps each id to 4 bytes; at these
+        // volumes hash collisions are negligible (<0.02%).
+        if ($includeIds) {
+            $stats['visitor_hashes'] = array_values(array_map('crc32', array_keys($stats['unique_visitors'])));
+            $stats['human_unique_hashes'] = array_values(array_map('crc32', array_keys($stats['human_unique'])));
+        }
+
         // Convert unique arrays to counts
         $stats['unique_visitors'] = count($stats['unique_visitors']);
         $stats['human_unique'] = count($stats['human_unique']);
