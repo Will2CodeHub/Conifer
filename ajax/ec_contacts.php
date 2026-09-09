@@ -35,6 +35,58 @@ function ec_parse_csv(string $text): array {
     return $rows;
 }
 
+/** pr_contacts roles -> friendly contact_type label used on import. */
+function ec_legacy_pr_roles(): array {
+    return [
+        'it_pr_contact' => 'IT/PR Contacts',
+        'contact'       => 'Press Contacts',
+        'advertiser'    => 'Advertisers',
+        'hr'            => 'HR Contacts',
+        'college'       => 'Colleges',
+        'newsletter'    => 'Newsletter Subscribers',
+    ];
+}
+
+/** WHERE clause for CONTACTABLE pr_contacts of a role (mirrors campaign_run.php).
+ *  Newsletter is double-opt-in: it additionally requires confirmed=1. */
+function ec_legacy_pr_contactable_where(mysqli $a, string $role): string {
+    $r = $a->real_escape_string($role);
+    $w = "role='$r' AND active=1 AND unsubscribed=0 AND do_not_contact=0 AND invalid_email=0 AND email IS NOT NULL AND email<>''";
+    if ($role === 'newsletter') $w .= " AND confirmed=1";
+    return $w;
+}
+
+/** Build the paged SELECT for one legacy source. Returns [sql, contact_type, consent_note]. */
+function ec_legacy_select(mysqli $a, string $source, string $role, int $batch, int $offset): array {
+    $lim = " LIMIT $batch OFFSET $offset";
+    if ($source === 'pr_contacts') {
+        $roles = ec_legacy_pr_roles();
+        if (!isset($roles[$role])) throw new Exception('Unknown pr_contacts role');
+        $where = ec_legacy_pr_contactable_where($a, $role);
+        $sql = "SELECT email, firstname AS first_name, surname AS last_name, company,
+                       '' AS phone, '' AS city, '' AS country
+                FROM pr_contacts WHERE $where ORDER BY id$lim";
+        return [$sql, $roles[$role], 'TEN PR list (public/online sources)'];
+    }
+    if ($source === 'venue_contacts') {
+        $sql = "SELECT vc.email, vc.name AS first_name, '' AS last_name,
+                       COALESCE(v.name,'') AS company, vc.phone,
+                       COALESCE(v.city,'') AS city, COALESCE(v.country,'') AS country
+                FROM venue_contacts vc LEFT JOIN venues v ON v.id=vc.venue_id
+                WHERE vc.active=1 AND vc.unsubscribed=0 AND vc.do_not_contact=0
+                  AND vc.email IS NOT NULL AND vc.email<>''
+                ORDER BY vc.id$lim";
+        return [$sql, 'Venues', 'TEN venue contacts (public sources)'];
+    }
+    if ($source === 'clinics') {
+        $sql = "SELECT email, '' AS first_name, '' AS last_name, clinic_name AS company,
+                       phone, city, country
+                FROM clinics WHERE email IS NOT NULL AND email<>'' ORDER BY id$lim";
+        return [$sql, 'Clinics', 'TEN clinics directory (public sources)'];
+    }
+    throw new Exception('Unknown source');
+}
+
 try {
     switch ($action) {
 
@@ -143,6 +195,97 @@ try {
                             WHERE r.contact_id=$id ORDER BY e.id DESC LIMIT 100");
             while($res && $x=$res->fetch_assoc()) $rows[]=$x;
             $resp=['success'=>true,'rows'=>$rows];
+            break;
+        }
+
+        /* ---- Import from existing (legacy) admin_ten lists ----
+         * Sources: pr_contacts (PR/press/advertisers/HR/colleges/newsletter),
+         * venue_contacts (event venues), clinics. We ONLY import contactable rows
+         * and additionally push anyone who opted out (unsubscribed / do-not-contact)
+         * into the EC suppression list, so the old opt-outs are always honoured.
+         * "Who not to contact" mirrors the old campaign_run.php exactly. */
+        case 'legacy_preview': {
+            $a = getDBConnection_TENAdmin();
+            $out = [];
+            // pr_contacts by role
+            $roles = ec_legacy_pr_roles();
+            $prRows = [];
+            foreach ($roles as $role => $label) {
+                $cond = ec_legacy_pr_contactable_where($a, $role);
+                $n = (int)$a->query("SELECT COUNT(*) n FROM pr_contacts WHERE $cond")->fetch_assoc()['n'];
+                if ($n > 0) $prRows[] = ['role'=>$role,'label'=>$label,'contactable'=>$n];
+            }
+            $prOptOut = (int)$a->query("SELECT COUNT(*) n FROM pr_contacts WHERE (unsubscribed=1 OR do_not_contact=1) AND email IS NOT NULL AND email<>''")->fetch_assoc()['n'];
+            // venue_contacts
+            $venContact = (int)$a->query("SELECT COUNT(*) n FROM venue_contacts WHERE active=1 AND unsubscribed=0 AND do_not_contact=0 AND email IS NOT NULL AND email<>''")->fetch_assoc()['n'];
+            $venOptOut  = (int)$a->query("SELECT COUNT(*) n FROM venue_contacts WHERE (unsubscribed=1 OR do_not_contact=1) AND email IS NOT NULL AND email<>''")->fetch_assoc()['n'];
+            // clinics (no opt-out flags)
+            $clinics = (int)$a->query("SELECT COUNT(*) n FROM clinics WHERE email IS NOT NULL AND email<>''")->fetch_assoc()['n'];
+            $a->close();
+            $resp = ['success'=>true,
+                'pr_contacts'=>['roles'=>$prRows,'opt_out'=>$prOptOut],
+                'venue_contacts'=>['contactable'=>$venContact,'opt_out'=>$venOptOut],
+                'clinics'=>['contactable'=>$clinics],
+            ];
+            break;
+        }
+
+        case 'legacy_import': {
+            @set_time_limit(0);
+            $source = $_POST['source'] ?? '';
+            $role   = $_POST['role'] ?? '';
+            $offset = max(0, (int)($_POST['offset'] ?? 0));
+            $batch  = min(5000, max(200, (int)($_POST['batch'] ?? 2000)));
+            $a = getDBConnection_TENAdmin();
+
+            $ins = $c->prepare("INSERT INTO ten_ec_contacts (email,first_name,last_name,company,contact_type,phone,city,country,source,consent_basis)
+                                VALUES (?,?,?,?,?,?,?,?,?,?)
+                                ON DUPLICATE KEY UPDATE
+                                  first_name=IF(VALUES(first_name)<>'',VALUES(first_name),first_name),
+                                  last_name=IF(VALUES(last_name)<>'',VALUES(last_name),last_name),
+                                  company=IF(VALUES(company)<>'',VALUES(company),company),
+                                  contact_type=IF(VALUES(contact_type)<>'',VALUES(contact_type),contact_type),
+                                  phone=IF(VALUES(phone)<>'',VALUES(phone),phone),
+                                  city=IF(VALUES(city)<>'',VALUES(city),city),
+                                  country=IF(VALUES(country)<>'',VALUES(country),country),
+                                  updated_at=NOW()");
+
+            $new=0;$updated=0;$invalid=0;$skipped=0;$suppressed=0;
+
+            // On the first page, push opt-outs from the source into EC suppression.
+            if ($offset === 0 && $source !== 'clinics') {
+                $optSql = $source === 'venue_contacts'
+                    ? "SELECT email, (unsubscribed=1) AS uns FROM venue_contacts WHERE (unsubscribed=1 OR do_not_contact=1) AND email IS NOT NULL AND email<>''"
+                    : "SELECT email, (unsubscribed=1) AS uns FROM pr_contacts WHERE (unsubscribed=1 OR do_not_contact=1) AND email IS NOT NULL AND email<>''";
+                $r = $a->query($optSql);
+                while ($r && $x = $r->fetch_assoc()) {
+                    $em = strtolower(trim($x['email']));
+                    if (!filter_var($em, FILTER_VALIDATE_EMAIL)) continue;
+                    ec_suppress($em, $x['uns'] ? 'unsubscribe' : 'do_not_contact');
+                    $suppressed++;
+                }
+            }
+
+            [$sel, $type, $consent] = ec_legacy_select($a, $source, $role, $batch, $offset);
+            $res = $a->query($sel);
+            $count = 0;
+            while ($res && $row = $res->fetch_assoc()) {
+                $count++;
+                $email = strtolower(trim($row['email'] ?? ''));
+                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) { $invalid++; continue; }
+                if (ec_is_suppressed($email)) { $skipped++; continue; }
+                $fn=$row['first_name']??''; $ln=$row['last_name']??''; $co=$row['company']??'';
+                $ph=$row['phone']??''; $ci=$row['city']??''; $cy=$row['country']??'';
+                $ins->bind_param('ssssssssss',$email,$fn,$ln,$co,$type,$ph,$ci,$cy,$source,$consent);
+                $ins->execute();
+                if ($c->affected_rows === 1) $new++; else $updated++;
+            }
+            $ins->close();
+            $a->close();
+            $done = $count < $batch;
+            $resp = ['success'=>true,'new'=>$new,'updated'=>$updated,'invalid'=>$invalid,
+                     'skipped_suppressed'=>$skipped,'suppressed_added'=>$suppressed,
+                     'processed'=>$count,'next_offset'=>$done?null:($offset+$batch),'done'=>$done];
             break;
         }
 

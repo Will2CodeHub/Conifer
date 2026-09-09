@@ -104,7 +104,7 @@ $currentPage = 'email_campaigns';
 
             <div class="ec-pane" data-pane="contacts">
                 <div class="ec-card">
-                    <div style="display:flex;gap:10px;margin-bottom:14px"><button class="ec-btn sm" onclick="cOpenImport()"><i class="fas fa-file-import"></i> Import contacts</button><button class="ec-btn light sm" onclick="cOpenAdd()"><i class="fas fa-plus"></i> Add one</button></div>
+                    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap"><button class="ec-btn sm" onclick="cOpenImport()"><i class="fas fa-file-import"></i> Import contacts</button><button class="ec-btn light sm" onclick="cOpenLegacy()"><i class="fas fa-database"></i> Import existing lists</button><button class="ec-btn light sm" onclick="cOpenAdd()"><i class="fas fa-plus"></i> Add one</button></div>
                     <div class="ec-filters">
                         <div class="ec-fg" style="flex:2;min-width:220px"><label>Search</label><input class="ec-in" id="cSearch" placeholder="email / name / company / city"></div>
                         <div class="ec-fg" style="min-width:170px"><label>Type</label><select class="ec-sel" id="cType"><option value="">All types</option></select></div>
@@ -363,6 +363,44 @@ function cOpenImport(){ ecModal('Import contacts',
     '<div class="ec-fg"><label>Consent basis (optional, for your records)</label><input class="ec-in" id="impConsent" placeholder="e.g. legitimate interest / opted-in list"></div>',
     '<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn" onclick="cDoImport()">Import</button>'); }
 function cDoImport(){ post(EC.contacts,{action:'import',data:document.getElementById('impData').value,contact_type:document.getElementById('impType').value,source:document.getElementById('impSource').value,consent_basis:document.getElementById('impConsent').value}).done(function(r){ if(r.success){ecClose();toast('New '+r.new+', updated '+r.updated+', skipped '+r.skipped_suppressed+', invalid '+r.invalid);cLoad();}else toast(r.message,'error'); }); }
+function cOpenLegacy(){
+    ecModal('Import from existing lists','<p class="ec-hint"><i class="fas fa-spinner fa-spin"></i> Loading counts…</p>','<button class="ec-btn light" onclick="ecClose()">Close</button>');
+    post(EC.contacts,{action:'legacy_preview'}).done(function(r){
+        if(!r.success){ document.getElementById('ecModalBody').innerHTML='<p class="ec-hint">'+esc(r.message||'Failed to load')+'</p>'; return; }
+        var h='<p class="ec-hint">Your existing TEN lists. Only <b>contactable</b> records are imported — anyone who unsubscribed or is marked do-not-contact is skipped <b>and</b> added to the suppression list, so old opt-outs are always honoured. These were sourced from public/online resources (recorded as each contact\'s consent note).</p>';
+        h+='<div id="legProgress" class="ec-hint" style="margin:8px 0;min-height:18px"></div>';
+        h+='<table class="ec-tbl"><thead><tr><th>List</th><th>Contactable</th><th></th></tr></thead><tbody>';
+        (r.pr_contacts.roles||[]).forEach(function(x){
+            h+='<tr><td>PR · '+esc(x.label)+'</td><td>'+x.contactable+'</td><td><button class="ec-btn sm" onclick="cRunLegacy(\'pr_contacts\',\''+esc(x.role)+'\',\''+esc(x.label)+'\',this)">Import</button></td></tr>';
+        });
+        h+='<tr><td>Venues (event venue contacts)</td><td>'+r.venue_contacts.contactable+'</td><td><button class="ec-btn sm" onclick="cRunLegacy(\'venue_contacts\',\'\',\'Venues\',this)">Import</button></td></tr>';
+        h+='<tr><td>Clinics</td><td>'+r.clinics.contactable+'</td><td><button class="ec-btn sm" onclick="cRunLegacy(\'clinics\',\'\',\'Clinics\',this)">Import</button></td></tr>';
+        h+='</tbody></table>';
+        h+='<p class="ec-hint" style="margin-top:8px">Opt-outs that will be added to the suppression list: PR '+r.pr_contacts.opt_out+', Venues '+r.venue_contacts.opt_out+'. Large lists import in batches — leave this open until it finishes.</p>';
+        document.getElementById('ecModalBody').innerHTML=h;
+    }).fail(function(){ document.getElementById('ecModalBody').innerHTML='<p class="ec-hint">Failed to load preview.</p>'; });
+}
+var _legTotals;
+function cRunLegacy(source, role, label, btn){
+    if(btn) btn.disabled=true;
+    _legTotals={n:0,u:0,skip:0,inv:0,sup:0};
+    var prog=document.getElementById('legProgress');
+    function step(offset){
+        if(prog) prog.innerHTML='<i class="fas fa-spinner fa-spin"></i> Importing '+esc(label)+'… '+(_legTotals.n+_legTotals.u)+' processed';
+        post(EC.contacts,{action:'legacy_import',source:source,role:role,offset:offset,batch:2000}).done(function(r){
+            if(!r.success){ toast(r.message||'Import failed','error'); if(btn) btn.disabled=false; return; }
+            _legTotals.n+=r.new; _legTotals.u+=r.updated; _legTotals.skip+=r.skipped_suppressed; _legTotals.inv+=r.invalid; _legTotals.sup+=r.suppressed_added;
+            if(!r.done && r.next_offset!==null){ step(r.next_offset); }
+            else {
+                if(prog) prog.innerHTML='<b>'+esc(label)+' imported.</b> New '+_legTotals.n+', updated '+_legTotals.u+', skipped (already suppressed) '+_legTotals.skip+', invalid '+_legTotals.inv+', opt-outs suppressed '+_legTotals.sup+'.';
+                toast(esc(label)+': +'+_legTotals.n+' new');
+                if(btn){ btn.disabled=false; btn.innerHTML='Done ✓'; }
+                cTypes();
+            }
+        }).fail(function(){ toast('Import failed','error'); if(btn) btn.disabled=false; });
+    }
+    step(0);
+}
 function cOpenAdd(){ ecModal('Add contact','<div class="ec-fg"><label>Email *</label><input class="ec-in" id="adEmail"></div><div class="ec-row"><div class="ec-fg"><label>First name</label><input class="ec-in" id="adFn"></div><div class="ec-fg"><label>Last name</label><input class="ec-in" id="adLn"></div></div><div class="ec-fg"><label>Company</label><input class="ec-in" id="adCo"></div>','<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn" onclick="cDoAdd()">Add</button>'); }
 function cDoAdd(){ post(EC.contacts,{action:'add',email:document.getElementById('adEmail').value,first_name:document.getElementById('adFn').value,last_name:document.getElementById('adLn').value,company:document.getElementById('adCo').value}).done(function(r){ if(r.success){ecClose();toast('Added');cLoad();}else toast(r.message,'error'); }); }
 function cSuppress(email){ Swal.fire({title:'Suppress '+email+'?',text:'They will never be emailed again.',icon:'warning',showCancelButton:true,confirmButtonColor:'#dc2626',confirmButtonText:'Suppress'}).then(x=>{ if(x.isConfirmed) post(EC.contacts,{action:'suppress',email:email,reason:'do_not_contact'}).done(()=>{toast('Suppressed');cLoad();}); }); }
