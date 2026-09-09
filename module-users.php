@@ -71,9 +71,10 @@ $usersResult->data_seek(0); // Reset pointer for table display
 // active list). Hidden from the main list, shown on their own tab, and can be
 // moved into the active list at any time.
 $isOldAccount = function(array $u): bool {
+    if ((int)($u['archived'] ?? 0) === 1) return true;              // explicitly archived
     $neverLoggedIn = empty($u['last_login']);
     $kept = (int)($u['kept_active'] ?? 0) === 1;
-    return $neverLoggedIn && !$kept;
+    return $neverLoggedIn && !$kept;                                // never logged in (and not pinned)
 };
 $oldCount = 0;
 foreach ($usersArray as $uu) { if ($isOldAccount($uu)) $oldCount++; }
@@ -457,8 +458,8 @@ $currentPage = 'users';
                                                 <i class="fas fa-rotate-left"></i>
                                             </button>
                                         <?php endif; ?>
-                                    <?php elseif ($neverLoggedIn): // pinned to active but never logged in ?>
-                                        <?php if (hasPermission('users.edit') || isAdmin()): ?>
+                                    <?php else: ?>
+                                        <?php if ((hasPermission('users.edit') || isAdmin()) && $user['id'] != $_SESSION['ten_user_id']): ?>
                                             <button class="action-btn btn-archive" onclick="deactivateUser(<?php echo $user['id']; ?>)" title="Move to old accounts">
                                                 <i class="fas fa-box-archive"></i>
                                             </button>
