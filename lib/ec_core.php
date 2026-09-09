@@ -105,6 +105,21 @@ function ec_rewrite_links(string $html, string $token, string $trackBase, array 
     return $html;
 }
 
+/** Build a WHERE clause for a contact filter (build-from-filter / refresh).
+ *  Always excludes suppressed unless include_suppressed=1; optionally excludes
+ *  anyone already emailed in any campaign. $p keys: q,type,country,
+ *  exclude_contacted,include_suppressed. */
+function ec_filter_where(mysqli $c, array $p): string {
+    $conds = [];
+    $q = trim($p['q'] ?? '');
+    if ($q !== '') { $qe='%'.$c->real_escape_string($q).'%'; $conds[]="(ct.email LIKE '$qe' OR ct.company LIKE '$qe' OR ct.city LIKE '$qe' OR ct.first_name LIKE '$qe' OR ct.last_name LIKE '$qe')"; }
+    if (($p['type'] ?? '') !== '') $conds[]="ct.contact_type='".$c->real_escape_string($p['type'])."'";
+    if (($p['country'] ?? '') !== '') $conds[]="ct.country LIKE '%".$c->real_escape_string($p['country'])."%'";
+    if (empty($p['include_suppressed'])) $conds[]="NOT EXISTS (SELECT 1 FROM ten_ec_suppression s WHERE s.email=ct.email)";
+    if (!empty($p['exclude_contacted'])) $conds[]="NOT EXISTS (SELECT 1 FROM ten_ec_recipients r WHERE r.contact_id=ct.id AND r.status IN('sent','bounced'))";
+    return $conds ? ('WHERE '.implode(' AND ',$conds)) : '';
+}
+
 /** Is this email on the global suppression list? */
 function ec_is_suppressed(string $email): bool {
     $c = ec_db();
