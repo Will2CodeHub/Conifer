@@ -68,17 +68,16 @@
     }
 
     function insertImage(url, attribution) {
+        // Bind the credit to the image (figure + figcaption) so removing the image
+        // removes its attribution too. The site's per-placement CSS still sizes the
+        // <img>. Shared helper lives in module-articles.php.
+        if (window.tenInsertArticleImage) { window.tenInsertArticleImage(url, attribution); return; }
         var editor = document.getElementById("article_text");
         if (!editor) return;
-        // Insert a CLEAN image (no inline max-width/float/class): the site's
-        // per-placement CSS sizes it. An inline max-width:50% shrinks the
-        // front-page headline. Attribution is stored in article_image_attribution.
         var img = document.createElement("img");
         img.src = url;
         img.setAttribute("alt", "");
         editor.insertBefore(img, editor.firstChild);
-        var attr = document.getElementById("attribution");
-        if (attr && !attr.value) attr.value = attribution || "";
     }
 
     /* ---- download -> crop -> save pipeline ---- */

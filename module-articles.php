@@ -1896,14 +1896,16 @@ document.getElementById('modal_publish_now').addEventListener('change', function
 
             // Insert image into editor
             $(document).on('click', '.image_chosen_id', function() {
-                const editor = $('.editor');
                 var image_link = $(this).prev().attr('href');
                 var image_attribution = $(this).prev().attr('title') || '';
-                // Clean image markup — the site's per-placement CSS handles sizing;
-                // an inline max-width:50% would shrink the front-page headline.
-                var image_str_prepped = '<img src="' + image_link + '" alt="" />';
-
-                insertHTMLAtCursor(image_str_prepped, editor);
+                // Insert with the attribution bound to the image (figure+figcaption)
+                // so removing the image also removes its credit. Site per-placement
+                // CSS still sizes the <img>.
+                if (window.tenInsertArticleImage) {
+                    window.tenInsertArticleImage(image_link, image_attribution, { atCursor: true });
+                } else {
+                    insertHTMLAtCursor('<img src="' + image_link + '" alt="" />', $('.editor'));
+                }
                 $('.overlay, #modal_image_insert').fadeOut();
             });
 
@@ -1961,13 +1963,20 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                 document.getElementById('editor-img-ctx-delete').addEventListener('click', function(e) {
                     e.stopPropagation();
                     if (targetImg) {
-                        // Remove the img; if it's the only child of a wrapper block, remove the wrapper too
-                        var parent = targetImg.parentElement;
-                        targetImg.parentNode.removeChild(targetImg);
-                        if (parent && parent !== document.body &&
-                            ['P','DIV','FIGURE'].indexOf(parent.tagName) !== -1 &&
-                            parent.innerHTML.trim() === '') {
-                            parent.parentNode && parent.parentNode.removeChild(parent);
+                        // If the image sits in an attribution figure, remove the whole
+                        // figure (image + its credit caption) so no orphan credit is left.
+                        var fig = targetImg.closest ? targetImg.closest('figure.ten-article-image') : null;
+                        if (fig) {
+                            fig.parentNode && fig.parentNode.removeChild(fig);
+                        } else {
+                            // Remove the img; if it's the only child of a wrapper block, remove the wrapper too
+                            var parent = targetImg.parentElement;
+                            targetImg.parentNode.removeChild(targetImg);
+                            if (parent && parent !== document.body &&
+                                ['P','DIV','FIGURE'].indexOf(parent.tagName) !== -1 &&
+                                parent.innerHTML.trim() === '') {
+                                parent.parentNode && parent.parentNode.removeChild(parent);
+                            }
                         }
                         targetImg = null;
                     }
@@ -2014,6 +2023,41 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                     editorElement.appendChild(fragment);
                 }
             }
+
+            // ---- Shared image insert with BOUND attribution (all 3 insert paths:
+            // scraper suggestions, free-image search, and the toolbar/library insert).
+            // Inserts <figure class="ten-article-image"><img>[<figcaption> credit]</figure>
+            // so the credit travels with the image — deleting the image deletes the
+            // credit too. Falls back to a plain <img> when there's no attribution.
+            function tenEscHtml(s){ return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+            window.tenInsertArticleImage = function(url, attribution, opts) {
+                opts = opts || {};
+                var editor = document.getElementById('article_text');
+                if (!editor) return;
+                var cap = (attribution == null ? '' : String(attribution)).trim();
+                var capHtml = cap ? '<figcaption class="ten-image-credit" style="font-size:12px;color:#6b7280;margin-top:4px;font-style:italic;">' + tenEscHtml(cap) + '</figcaption>' : '';
+                var attrAttr = cap ? ' data-attribution="' + tenEscHtml(cap) + '"' : '';
+                var html = '<figure class="ten-article-image"' + attrAttr + '><img src="' + tenEscHtml(url) + '" alt="" />' + capHtml + '</figure>';
+                if (opts.atCursor) {
+                    insertHTMLAtCursor(html, $(editor));
+                } else {
+                    var tmp = document.createElement('div'); tmp.innerHTML = html;
+                    var node = tmp.firstChild;
+                    if (editor.firstChild) editor.insertBefore(node, editor.firstChild); else editor.appendChild(node);
+                }
+            };
+            // Safety net: drop any image credit whose image was removed, and any
+            // empty image figure. Run before saving the body.
+            window.tenCleanupArticleImages = function(editor) {
+                if (!editor) return;
+                editor.querySelectorAll('figure.ten-article-image').forEach(function(fig){
+                    if (!fig.querySelector('img')) { if (fig.parentNode) fig.parentNode.removeChild(fig); }
+                });
+                editor.querySelectorAll('figcaption.ten-image-credit').forEach(function(cap){
+                    var fig = cap.closest ? cap.closest('figure') : null;
+                    if (!fig || !fig.querySelector('img')) { if (cap.parentNode) cap.parentNode.removeChild(cap); }
+                });
+            };
 
             // Pixabay integration
             const gallery = document.getElementById('modalBody');
@@ -2182,6 +2226,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                 if (!section) { Swal.fire('Error', 'Please select a section for this article', 'error'); return; }
                 if (!terms) { Swal.fire('Error', 'You must agree to the Terms of Article Submission', 'error'); return; }
 
+                if (window.tenCleanupArticleImages) window.tenCleanupArticleImages(document.getElementById('article_text'));
                 var article_text = $("#article_text").html();
                 if (!article_text || !article_text.trim()) { Swal.fire('Error', 'Please add some article content', 'error'); return; }
 
