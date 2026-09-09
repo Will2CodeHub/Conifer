@@ -51,7 +51,13 @@ function ec_decrypt(string $stored): string {
     return $out === false ? '' : $out;
 }
 
-/** Merge {{fields}} into a body for one contact. */
+/**
+ * Merge {{fields}} into any string (subject OR body) for one contact.
+ * Works identically on the subject line and the HTML/text body.
+ * After substituting the known fields, any leftover {{...}} placeholder (an
+ * unknown or misspelt field, e.g. {{company name}}) is stripped to empty so raw
+ * braces never reach a recipient.
+ */
 function ec_render(string $body, array $contact, string $unsubUrl): string {
     $map = [
         '{{first_name}}' => $contact['first_name'] ?? '',
@@ -61,7 +67,10 @@ function ec_render(string $body, array $contact, string $unsubUrl): string {
         '{{city}}'       => $contact['city'] ?? '',
         '{{unsubscribe_url}}' => $unsubUrl,
     ];
-    return strtr($body, $map);
+    $out = strtr($body, $map);
+    // Remove any remaining unresolved placeholders like {{ something }}.
+    $out = preg_replace('/\{\{\s*[\w .-]+\s*\}\}/', '', $out);
+    return $out;
 }
 
 /** Base URL for tracking/unsub endpoints (from settings, fallback constant). */
