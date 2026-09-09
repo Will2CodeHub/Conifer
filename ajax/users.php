@@ -261,18 +261,25 @@ try {
             
         case 'reactivate_user':
         case 'deactivate_user':
-            // "Old accounts" = users who have never logged in. kept_active=1 pins a
-            // never-logged-in account into the Active list; =0 returns it to Old.
+            // "Old accounts" = never-logged-in users, plus anyone explicitly archived.
+            // Two override flags decide placement regardless of login history:
+            //   reactivate -> kept_active=1, archived=0  (force into Active)
+            //   deactivate -> archived=1, kept_active=0  (force into Old accounts)
             $userId = intval($_POST['user_id'] ?? 0);
             if ($userId <= 0) throw new Exception('Invalid user ID');
-            $keep = ($action === 'reactivate_user') ? 1 : 0;
-            $stmt = $conn->prepare("UPDATE ten_users SET kept_active = ?, updated_at = NOW() WHERE id = ?");
-            $stmt->bind_param("ii", $keep, $userId);
+            $toActive = ($action === 'reactivate_user');
+            if (!$toActive && $userId == ($_SESSION['ten_user_id'] ?? 0)) {
+                throw new Exception('You cannot move your own account to old accounts');
+            }
+            $kept = $toActive ? 1 : 0;
+            $archived = $toActive ? 0 : 1;
+            $stmt = $conn->prepare("UPDATE ten_users SET kept_active = ?, archived = ?, updated_at = NOW() WHERE id = ?");
+            $stmt->bind_param("iii", $kept, $archived, $userId);
             if (!$stmt->execute()) throw new Exception('Failed to update account: ' . $stmt->error);
             $stmt->close();
-            logActivity($action, 'user', $userId, ($keep ? 'Moved to active list' : 'Moved to old accounts') . " user #$userId");
+            logActivity($action, 'user', $userId, ($toActive ? 'Moved to active list' : 'Moved to old accounts') . " user #$userId");
             $response['success'] = true;
-            $response['message'] = $keep ? 'Moved to the active list' : 'Moved to old accounts';
+            $response['message'] = $toActive ? 'Moved to the active list' : 'Moved to old accounts';
             break;
 
         case 'delete_user':
