@@ -71,6 +71,23 @@ $currentPage = 'statistics';
             border-color: #667eea;
             box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
         }
+        .refresh-btn {
+            padding: 10px 18px;
+            border: 1px solid #667eea;
+            background: #667eea;
+            color: #fff;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: background .2s ease;
+            white-space: nowrap;
+        }
+        .refresh-btn:hover { background: #5568d3; }
+        .refresh-btn.spinning i { animation: spin 0.8s linear infinite; }
         .summary-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -100,6 +117,33 @@ $currentPage = 'statistics';
         .summary-label {
             font-size: 13px;
             color: #9ca3af;
+        }
+        .summary-metrics {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #e5e7eb;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .summary-metric {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .summary-metric .metric-num {
+            font-size: 20px;
+            font-weight: 700;
+            color: #111827;
+            line-height: 1.1;
+        }
+        .summary-metric .metric-lbl {
+            font-size: 12px;
+            color: #6b7280;
+        }
+        .summary-metric .metric-lbl i {
+            color: #9ca3af;
+            margin-right: 4px;
         }
         .summary-projection {
             margin-top: 12px;
@@ -363,13 +407,13 @@ $currentPage = 'statistics';
                     <label><i class="fas fa-globe"></i> Select Website</label>
                     <select id="siteSelector" onchange="loadTrafficStats()">
                         <?php foreach ($sites as $key => $site): ?>
-                            <option value="<?php echo $key; ?>" <?php echo $key === 'ten' ? 'selected' : ''; ?>>
+                            <option value="<?php echo $key; ?>" <?php echo $key === 'tme' ? 'selected' : ''; ?>>
                                 <?php echo htmlspecialchars($site['name']); ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
                 </div>
-                
+
                 <div class="control-group">
                     <label><i class="fas fa-clock"></i> Time Period</label>
                     <select id="periodSelector" onchange="loadTrafficStats()">
@@ -385,6 +429,12 @@ $currentPage = 'statistics';
                         <option value="this_month">This Month</option>
                         <option value="last_month">Last Month</option>
                     </select>
+                </div>
+
+                <div class="control-group" style="flex: 0 0 auto; min-width: 0;">
+                    <button type="button" id="refreshBtn" class="refresh-btn" onclick="loadTrafficStats()" title="Refresh using the current filters">
+                        <i class="fas fa-rotate-right"></i> Refresh
+                    </button>
                 </div>
             </div>
             
@@ -577,16 +627,19 @@ $currentPage = 'statistics';
         function loadTrafficStats() {
             const siteKey = document.getElementById('siteSelector').value;
             const period = document.getElementById('periodSelector').value;
-            
+
+            const refreshBtn = document.getElementById('refreshBtn');
+            if (refreshBtn) refreshBtn.classList.add('spinning');
             document.getElementById('loadingOverlay').style.display = 'flex';
             document.getElementById('currentStats').style.display = 'none';
             document.getElementById('monthlySummary').style.display = 'none';
-            
+
             fetch(`ajax/traffic_stats.php?action=get_stats&site=${siteKey}&period=${period}`)
                 .then(response => response.json())
                 .then(data => {
                     document.getElementById('loadingOverlay').style.display = 'none';
-                    
+                    if (refreshBtn) refreshBtn.classList.remove('spinning');
+
                     if (data.success) {
                         currentData = data;
                         displayStats(data);
@@ -597,6 +650,7 @@ $currentPage = 'statistics';
                 })
                 .catch(error => {
                     document.getElementById('loadingOverlay').style.display = 'none';
+                    if (refreshBtn) refreshBtn.classList.remove('spinning');
                     console.error('Error:', error);
                     Swal.fire('Error', 'Failed to load statistics', 'error');
                 });
@@ -629,19 +683,35 @@ $currentPage = 'statistics';
                     <div class="summary-title">Last Month (${lastMonth.month_name})</div>
                     <div class="summary-value">${formatNumber(lastMonth.total_visits || 0)}</div>
                     <div class="summary-label">Total Visits</div>
-                    <div style="margin-top: 12px; font-size: 13px; color: #6b7280;">
-                        <div>👥 ${formatNumber(lastMonth.unique_visitors || 0)} Unique Visitors</div>
-                        <div>✅ ${formatNumber(lastMonth.human_visits || 0)} Human Visits</div>
+                    <div class="summary-metrics">
+                        <div class="summary-metric">
+                            <span class="metric-num">${formatNumber(lastMonth.unique_visitors || 0)}</span>
+                            <span class="metric-lbl"><i class="fas fa-user"></i> Unique Visitors</span>
+                        </div>
+                        <div class="summary-metric">
+                            <span class="metric-num">${formatNumber(lastMonth.page_views || 0)}</span>
+                            <span class="metric-lbl"><i class="fas fa-file-lines"></i> Page Views</span>
+                        </div>
                     </div>
                 </div>
             `;
-            
+
             // Current Month Card
             html += `
                 <div class="summary-card">
                     <div class="summary-title">Current Month (${currentMonth.month_name})</div>
                     <div class="summary-value">${formatNumber(currentMonth.total_visits || 0)}</div>
                     <div class="summary-label">Visits So Far (${currentMonth.days_elapsed || 0} days with data)</div>
+                    <div class="summary-metrics">
+                        <div class="summary-metric">
+                            <span class="metric-num">${formatNumber(currentMonth.unique_visitors || 0)}</span>
+                            <span class="metric-lbl"><i class="fas fa-user"></i> Unique Visitors</span>
+                        </div>
+                        <div class="summary-metric">
+                            <span class="metric-num">${formatNumber(currentMonth.page_views || 0)}</span>
+                            <span class="metric-lbl"><i class="fas fa-file-lines"></i> Page Views</span>
+                        </div>
+                    </div>
             `;
             
             if (currentMonth.projection_available && currentMonth.projected_total > 0) {
