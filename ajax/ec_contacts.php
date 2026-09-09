@@ -38,18 +38,33 @@ function ec_parse_csv(string $text): array {
 try {
     switch ($action) {
 
+        case 'types': {
+            $rows=[]; $res=$c->query("SELECT contact_type, COUNT(*) n FROM ten_ec_contacts WHERE contact_type IS NOT NULL AND contact_type<>'' GROUP BY contact_type ORDER BY contact_type");
+            while($res && $x=$res->fetch_assoc()) $rows[]=$x;
+            $resp=['success'=>true,'rows'=>$rows];
+            break;
+        }
         case 'list': {
             $q = trim($_POST['q'] ?? $_GET['q'] ?? '');
-            $limit = min(200, max(10, (int)($_POST['limit'] ?? 50)));
+            $type = trim($_POST['type'] ?? '');
+            $country = trim($_POST['country'] ?? '');
+            $excludeContacted = !empty($_POST['exclude_contacted']);
+            $excludeSuppressed = !empty($_POST['exclude_suppressed']);
+            $limit = min(500, max(10, (int)($_POST['limit'] ?? 50)));
             $offset = max(0, (int)($_POST['offset'] ?? 0));
-            $where = '';
-            if ($q !== '') {
-                $qe = '%' . $c->real_escape_string($q) . '%';
-                $where = "WHERE email LIKE '$qe' OR first_name LIKE '$qe' OR last_name LIKE '$qe' OR company LIKE '$qe'";
-            }
-            $total = (int)$c->query("SELECT COUNT(*) n FROM ten_ec_contacts $where")->fetch_assoc()['n'];
+            $conds = [];
+            if ($q !== '') { $qe='%'.$c->real_escape_string($q).'%'; $conds[]="(ct.email LIKE '$qe' OR ct.first_name LIKE '$qe' OR ct.last_name LIKE '$qe' OR ct.company LIKE '$qe' OR ct.city LIKE '$qe')"; }
+            if ($type !== '') $conds[]="ct.contact_type='".$c->real_escape_string($type)."'";
+            if ($country !== '') $conds[]="ct.country LIKE '%".$c->real_escape_string($country)."%'";
+            if ($excludeSuppressed) $conds[]="NOT EXISTS (SELECT 1 FROM ten_ec_suppression s WHERE s.email=ct.email)";
+            if ($excludeContacted) $conds[]="NOT EXISTS (SELECT 1 FROM ten_ec_recipients r WHERE r.contact_id=ct.id AND r.status IN('sent','bounced'))";
+            $where = $conds ? ('WHERE '.implode(' AND ',$conds)) : '';
+            $total = (int)$c->query("SELECT COUNT(*) n FROM ten_ec_contacts ct $where")->fetch_assoc()['n'];
             $rows = [];
-            $res = $c->query("SELECT id,email,first_name,last_name,company,city,country,source,status,created_at FROM ten_ec_contacts $where ORDER BY id DESC LIMIT $limit OFFSET $offset");
+            $res = $c->query("SELECT ct.id,ct.email,ct.first_name,ct.last_name,ct.company,ct.contact_type,ct.city,ct.country,ct.source,ct.status,
+                (SELECT COUNT(*) FROM ten_ec_recipients r WHERE r.contact_id=ct.id AND r.status='sent') AS times_sent,
+                EXISTS(SELECT 1 FROM ten_ec_suppression s WHERE s.email=ct.email) AS suppressed
+                FROM ten_ec_contacts ct $where ORDER BY ct.id DESC LIMIT $limit OFFSET $offset");
             while ($x = $res->fetch_assoc()) $rows[] = $x;
             $resp = ['success'=>true,'total'=>$total,'rows'=>$rows];
             break;
@@ -59,15 +74,17 @@ try {
             $text = $_POST['data'] ?? '';
             $source = preg_replace('/[^a-z_]/','', strtolower($_POST['source'] ?? 'csv')) ?: 'csv';
             $consent = trim($_POST['consent_basis'] ?? '');
+            $type = trim($_POST['contact_type'] ?? '');
             $rows = ec_parse_csv($text);
             if (!$rows) throw new Exception('No rows with an email column found');
             $new=0;$updated=0;$skipped=0;$invalid=0;
-            $ins = $c->prepare("INSERT INTO ten_ec_contacts (email,first_name,last_name,company,phone,city,country,source,consent_basis)
-                                VALUES (?,?,?,?,?,?,?,?,?)
+            $ins = $c->prepare("INSERT INTO ten_ec_contacts (email,first_name,last_name,company,contact_type,phone,city,country,source,consent_basis)
+                                VALUES (?,?,?,?,?,?,?,?,?,?)
                                 ON DUPLICATE KEY UPDATE
                                   first_name=IF(VALUES(first_name)<>'',VALUES(first_name),first_name),
                                   last_name=IF(VALUES(last_name)<>'',VALUES(last_name),last_name),
                                   company=IF(VALUES(company)<>'',VALUES(company),company),
+                                  contact_type=IF(VALUES(contact_type)<>'',VALUES(contact_type),contact_type),
                                   phone=IF(VALUES(phone)<>'',VALUES(phone),phone),
                                   city=IF(VALUES(city)<>'',VALUES(city),city),
                                   country=IF(VALUES(country)<>'',VALUES(country),country),
@@ -77,7 +94,8 @@ try {
                 if (!filter_var($email, FILTER_VALIDATE_EMAIL)) { $invalid++; continue; }
                 if (ec_is_suppressed($email)) { $skipped++; continue; }
                 $fn=$r['first_name']??'';$ln=$r['last_name']??'';$co=$r['company']??'';$ph=$r['phone']??'';$ci=$r['city']??'';$cy=$r['country']??'';
-                $ins->bind_param('sssssssss',$email,$fn,$ln,$co,$ph,$ci,$cy,$source,$consent);
+                $ty = trim($r['contact_type'] ?? '') ?: $type;
+                $ins->bind_param('ssssssssss',$email,$fn,$ln,$co,$ty,$ph,$ci,$cy,$source,$consent);
                 $ins->execute();
                 if ($c->affected_rows === 1) $new++; else $updated++;
             }

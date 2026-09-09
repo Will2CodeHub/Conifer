@@ -31,6 +31,7 @@ while ($camp = $camps->fetch_assoc()) {
     $cid = (int)$camp['id'];
     $batch = max(1,(int)$camp['batch_size']);
     $perDomain = (int)$camp['per_domain_limit'];
+    $profile = ec_profile((int)($camp['sending_profile_id'] ?? 0)); // per-campaign sending identity (subdomain + mailboxes)
 
     // remaining daily allowance (warm-up ramp + campaign cap + global cap)
     $sentToday = (int)$c->query("SELECT COUNT(*) n FROM ten_ec_recipients WHERE campaign_id=$cid AND status='sent' AND DATE(sent_at)=CURDATE()")->fetch_assoc()['n'];
@@ -75,17 +76,29 @@ while ($camp = $camps->fetch_assoc()) {
         $html = ec_rewrite_links($html, $token, $trackBase, $siteHosts);
         $text = ec_render($tpl['text_body'] ?: strip_tags($tpl['html_body']), $contact, $unsub);
 
-        $fromEmail = $camp['from_email'] ?: ($tpl['from_email'] ?: ($settings['default_from_email'] ?? ''));
-        $fromName  = $camp['from_name'] ?: ($tpl['from_name'] ?: ($settings['default_from_name'] ?? ''));
-        $replyTo   = $camp['reply_to'] ?: ($tpl['reply_to'] ?: ($settings['default_reply_to'] ?? $fromEmail));
-        $domain = substr(strrchr($fromEmail,'@'),1) ?: 'theeyenewspapers.com';
-        $returnPath = 'bounce+' . $token . '@' . $domain; // VERP for bounce attribution
+        // Identity: campaign override -> sending profile -> template -> global settings.
+        $fromEmail = $camp['from_email'] ?: ($profile['from_email'] ?? '') ?: ($tpl['from_email'] ?: ($settings['default_from_email'] ?? ''));
+        $fromName  = $camp['from_name'] ?: ($profile['from_name'] ?? '') ?: ($tpl['from_name'] ?: ($settings['default_from_name'] ?? ''));
+        $replyTo   = $camp['reply_to'] ?: ($profile['reply_to'] ?? '') ?: ($tpl['reply_to'] ?: ($settings['default_reply_to'] ?? $fromEmail));
+        // VERP return-path: from the profile's bounce_address (insert +token) else bounce+token@fromdomain.
+        if (!empty($profile['bounce_address']) && strpos($profile['bounce_address'],'@')!==false) {
+            [$blp,$bdom] = explode('@', $profile['bounce_address'], 2);
+            $returnPath = $blp . '+' . $token . '@' . $bdom;
+        } else {
+            $domain = substr(strrchr($fromEmail,'@'),1) ?: 'theeyenewspapers.com';
+            $returnPath = 'bounce+' . $token . '@' . $domain;
+        }
+        // SMTP transport: profile overrides global settings.
+        $sendOpts = ['from_name'=>$fromName,'from_email'=>$fromEmail,'reply_to'=>$replyTo,'return_path'=>$returnPath,'list_unsub_url'=>$unsub];
+        if (!empty($profile['smtp_host'])) {
+            $sendOpts['smtp'] = ['host'=>$profile['smtp_host'],'port'=>$profile['smtp_port'],'security'=>$profile['smtp_security'],'user'=>$profile['smtp_user'],'pass'=>$profile['smtp_pass_plain']??''];
+        }
 
         $c->query("UPDATE ten_ec_recipients SET status='sending' WHERE id=$rid");
         $res = ec_send_message(
             ['email'=>$email,'name'=>trim(($r['first_name'].' '.$r['last_name']))],
             $subject, $html, $text,
-            ['from_name'=>$fromName,'from_email'=>$fromEmail,'reply_to'=>$replyTo,'return_path'=>$returnPath,'list_unsub_url'=>$unsub]
+            $sendOpts
         );
         if ($res['ok']) {
             $mid=$c->real_escape_string($res['message_id']);

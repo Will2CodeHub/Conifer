@@ -12,6 +12,17 @@ function ec_settings(): array {
     return $row;
 }
 
+/** Decrypted sending profile by id (or null). */
+function ec_profile(int $id): ?array {
+    if ($id <= 0) return null;
+    $c = ec_db();
+    $row = $c->query("SELECT * FROM ten_ec_sending_profiles WHERE id=$id")->fetch_assoc();
+    if (!$row) return null;
+    $row['smtp_pass_plain'] = !empty($row['smtp_pass']) ? ec_decrypt($row['smtp_pass']) : '';
+    $row['imap_pass_plain'] = !empty($row['imap_pass']) ? ec_decrypt($row['imap_pass']) : '';
+    return $row;
+}
+
 /** Encode a header value as RFC2047 if it contains non-ASCII. */
 function ec_enc_header(string $v): string {
     return preg_match('/[^\x20-\x7e]/', $v) ? ('=?UTF-8?B?' . base64_encode($v) . '?=') : $v;
@@ -65,10 +76,12 @@ function ec_send_message(array $to, string $subject, string $html, string $text,
 
     $raw = implode("\r\n", $H) . "\r\n\r\n" . $B;
 
-    $res = ec_smtp_transmit([
+    // SMTP transport: per-campaign sending profile overrides the global settings.
+    $smtp = $opts['smtp'] ?? [
         'host'=>$s['smtp_host']??'', 'port'=>$s['smtp_port']??587, 'security'=>$s['smtp_security']??'tls',
         'user'=>$s['smtp_user']??'', 'pass'=>$s['smtp_pass_plain']??'',
-    ], $returnPath, $toEmail, $raw);
+    ];
+    $res = ec_smtp_transmit($smtp, $returnPath, $toEmail, $raw);
 
     return ['ok'=>$res['ok'],'message_id'=>$messageId,'error'=>$res['error']];
 }
