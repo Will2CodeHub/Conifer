@@ -1,14 +1,17 @@
 <?php
 $currentUser = getCurrentUser();
 $availableLanguages = [
-    'en' => ['name' => 'English', 'flag' => '🇬🇧'],
-    'de' => ['name' => 'Deutsch', 'flag' => '🇩🇪'],
-    'es' => ['name' => 'Español', 'flag' => '🇪🇸'],
-    'it' => ['name' => 'Italiano', 'flag' => '🇮🇹'],
-    'fr' => ['name' => 'Français', 'flag' => '🇫🇷']
+    'en' => ['name' => 'English',  'cc' => 'gb'],
+    'de' => ['name' => 'Deutsch',  'cc' => 'de'],
+    'es' => ['name' => 'Español',  'cc' => 'es'],
+    'it' => ['name' => 'Italiano', 'cc' => 'it'],
+    'fr' => ['name' => 'Français', 'cc' => 'fr'],
 ];
 $currentLang = getUserLanguage();
+if (!isset($availableLanguages[$currentLang])) $currentLang = 'en';
 ?>
+<!-- Real flag images (Windows/Chrome don't render flag emoji) -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flag-icons/7.2.3/css/flag-icons.min.css">
 <div class="top-header">
     <div class="header-left">
         <button class="mobile-toggle">
@@ -24,14 +27,14 @@ $currentLang = getUserLanguage();
         <!-- Language Switcher -->
         <div class="language-switcher">
             <button class="lang-btn" onclick="toggleLanguageMenu()">
-                <span class="flag"><?php echo $availableLanguages[$currentLang]['flag']; ?></span>
+                <span class="fi fi-<?php echo $availableLanguages[$currentLang]['cc']; ?> flag"></span>
                 <span class="lang-name"><?php echo $availableLanguages[$currentLang]['name']; ?></span>
                 <i class="fas fa-chevron-down"></i>
             </button>
             <div class="lang-menu" id="langMenu">
                 <?php foreach ($availableLanguages as $code => $lang): ?>
                     <a href="?change_language=<?php echo $code; ?>" class="lang-option <?php echo $code === $currentLang ? 'active' : ''; ?>">
-                        <span class="flag"><?php echo $lang['flag']; ?></span>
+                        <span class="fi fi-<?php echo $lang['cc']; ?> flag"></span>
                         <span><?php echo $lang['name']; ?></span>
                         <?php if ($code === $currentLang): ?>
                             <i class="fas fa-check"></i>
@@ -180,7 +183,17 @@ if (isset($_GET['change_language'])) {
 }
 
 .lang-btn .flag {
-    font-size: 18px;
+    font-size: 20px;
+}
+/* flag-icons render as background images; round the corners and add a hairline */
+.language-switcher .fi.flag {
+    border-radius: 3px;
+    box-shadow: 0 0 0 1px rgba(0,0,0,.08);
+    line-height: 1;
+}
+.lang-option .fi.flag {
+    font-size: 20px;
+    margin-right: 4px;
 }
 
 .lang-btn .lang-name {
