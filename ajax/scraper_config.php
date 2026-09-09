@@ -71,6 +71,20 @@ try {
             $ok = scraper_delete_section((int)$_POST['id']);
             echo json_encode(['success' => $ok]);
             break;
+        case 'section.toggle':
+            scraper_require_manage($canManage);
+            $ok = scraper_set_section_active((int)$_POST['id'], (int)!empty($_POST['active']));
+            echo json_encode(['success' => $ok]);
+            break;
+        case 'publication.toggle':
+            scraper_require_manage($canManage);
+            $n = scraper_set_publication_active(
+                (int)($_POST['project_id'] ?? 0),
+                (string)($_POST['publication_key'] ?? ''),
+                (int)!empty($_POST['active'])
+            );
+            echo json_encode(['success' => true, 'updated' => $n]);
+            break;
 
         /* ---- sources ---- */
         case 'source.list':

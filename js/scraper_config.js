@@ -92,6 +92,57 @@
         return v ? (v.name + " (" + (v.country || v.provider) + ")") : ("#" + id);
     }
 
+    // One section card, with a per-section enable/disable toggle. Disabling sets
+    // is_active=0, which the worker honours — so its feeds aren't fetched and no
+    // AI is spent translating them.
+    function sectionCard(s) {
+        var card = document.createElement("div");
+        card.className = "sc-card";
+        card.style.marginBottom = "8px";
+        var auto = parseInt(s.auto_publish, 10) === 1;
+        var active = parseInt(s.is_active, 10) !== 0;
+        if (!active) card.style.opacity = "0.55";
+        card.innerHTML =
+            '<div class="sc-card-head">' +
+                '<div>' +
+                    '<div class="sc-card-title">' + esc(s.ten_section) +
+                        ' <span class="sc-badge ' + (auto ? "on" : "off") + '">' + (auto ? "auto-publish" : "draft") + "</span>" +
+                        (active ? "" : ' <span class="sc-badge off">scraping off</span>') + "</div>" +
+                    '<div class="sc-card-meta">N=' + esc(s.daily_count) + " · cron " + esc(s.cron_schedule) +
+                        " · " + esc(journalistLabel(s.journalist_id)) +
+                        " · " + esc(s.ai_model || DEFAULT_MODEL) +
+                        " · VPN: " + esc(vpnLabel(s.vpn_profile_id)) +
+                        " · sources: " + esc(s.source_count) + "</div>" +
+                "</div>" +
+                "<div>" +
+                    '<button class="sc-btn small ' + (active ? "" : "secondary") + '" data-act="toggle">' +
+                        (active ? '<i class="fas fa-pause"></i> Disable' : '<i class="fas fa-play"></i> Enable') + "</button> " +
+                    '<button class="sc-btn small" data-act="sources">Sources</button> ' +
+                    '<button class="sc-btn small secondary" data-act="edit">Edit</button> ' +
+                    '<button class="sc-btn small danger" data-act="del">Delete</button>' +
+                "</div>" +
+            "</div>" +
+            '<div class="sc-card-body"></div>';
+
+        var body = card.querySelector(".sc-card-body");
+        card.querySelector('[data-act="toggle"]').addEventListener("click", function () {
+            api("section", "toggle", { id: s.id, active: active ? 0 : 1 }).then(loadSections).catch(alertErr);
+        });
+        card.querySelector('[data-act="sources"]').addEventListener("click", function () {
+            if (body.classList.contains("open")) { body.classList.remove("open"); return; }
+            body.classList.add("open");
+            loadSources(s.id, body);
+        });
+        card.querySelector('[data-act="edit"]').addEventListener("click", function () { openSectionModal(s); });
+        card.querySelector('[data-act="del"]').addEventListener("click", function () {
+            if (!confirm("Delete this section and all its sources/feeds?")) return;
+            api("section", "delete", { id: s.id }).then(loadSections).catch(alertErr);
+        });
+        return card;
+    }
+
+    // Group sections under their publication; each publication is collapsible and
+    // has its own enable/disable-all toggle.
     function renderSections(sections) {
         var box = document.getElementById("scSections");
         if (!sections.length) {
@@ -99,41 +150,45 @@
             return;
         }
         box.innerHTML = "";
+        var groups = {}, order = [];
         sections.forEach(function (s) {
-            var card = document.createElement("div");
-            card.className = "sc-card";
-            var auto = parseInt(s.auto_publish, 10) === 1;
-            card.innerHTML =
-                '<div class="sc-card-head">' +
-                    '<div>' +
-                        '<div class="sc-card-title">' + esc(pubLabel(s.publication_key)) + " › " + esc(s.ten_section) +
-                            ' <span class="sc-badge ' + (auto ? "on" : "off") + '">' + (auto ? "auto-publish" : "draft") + "</span></div>" +
-                        '<div class="sc-card-meta">N=' + esc(s.daily_count) + " · cron " + esc(s.cron_schedule) +
-                            " · " + esc(journalistLabel(s.journalist_id)) +
-                            " · " + esc(s.ai_model || DEFAULT_MODEL) +
-                            " · VPN: " + esc(vpnLabel(s.vpn_profile_id)) +
-                            " · sources: " + esc(s.source_count) + "</div>" +
-                    "</div>" +
-                    "<div>" +
-                        '<button class="sc-btn small" data-act="sources">Sources</button> ' +
-                        '<button class="sc-btn small secondary" data-act="edit">Edit</button> ' +
-                        '<button class="sc-btn small danger" data-act="del">Delete</button>' +
-                    "</div>" +
+            if (!groups[s.publication_key]) { groups[s.publication_key] = []; order.push(s.publication_key); }
+            groups[s.publication_key].push(s);
+        });
+        order.forEach(function (pk) {
+            var list = groups[pk];
+            var anyActive = list.some(function (s) { return parseInt(s.is_active, 10) !== 0; });
+            var grp = document.createElement("div");
+            grp.className = "sc-pubgroup";
+            grp.style.cssText = "border:1px solid #e5e7eb;border-radius:10px;margin-bottom:12px;overflow:hidden;";
+            var head = document.createElement("div");
+            head.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px;background:#f9fafb;cursor:pointer;";
+            head.innerHTML =
+                '<div style="display:flex;align-items:center;gap:10px;">' +
+                    '<i class="fas fa-chevron-right sc-pubchev"></i>' +
+                    "<strong>" + esc(pubLabel(pk)) + "</strong>" +
+                    '<span class="scraper-placeholder">' + list.length + " section" + (list.length === 1 ? "" : "s") + "</span>" +
+                    (anyActive ? "" : ' <span class="sc-badge off">all scraping off</span>') +
                 "</div>" +
-                '<div class="sc-card-body"></div>';
+                '<div><button class="sc-btn small ' + (anyActive ? "" : "secondary") + '" data-pubtoggle>' +
+                    (anyActive ? '<i class="fas fa-pause"></i> Disable scraping' : '<i class="fas fa-play"></i> Enable scraping') + "</button></div>";
+            var body = document.createElement("div");
+            body.style.cssText = "padding:10px 12px;display:none;";
+            grp.appendChild(head); grp.appendChild(body); box.appendChild(grp);
 
-            var body = card.querySelector(".sc-card-body");
-            card.querySelector('[data-act="sources"]').addEventListener("click", function () {
-                if (body.classList.contains("open")) { body.classList.remove("open"); return; }
-                body.classList.add("open");
-                loadSources(s.id, body);
+            head.addEventListener("click", function (ev) {
+                if (ev.target.closest("[data-pubtoggle]")) return;
+                var open = body.style.display !== "none";
+                body.style.display = open ? "none" : "block";
+                head.querySelector(".sc-pubchev").className = "fas fa-chevron-" + (open ? "right" : "down") + " sc-pubchev";
             });
-            card.querySelector('[data-act="edit"]').addEventListener("click", function () { openSectionModal(s); });
-            card.querySelector('[data-act="del"]').addEventListener("click", function () {
-                if (!confirm("Delete this section and all its sources/feeds?")) return;
-                api("section", "delete", { id: s.id }).then(loadSections).catch(alertErr);
+            head.querySelector("[data-pubtoggle]").addEventListener("click", function (ev) {
+                ev.stopPropagation();
+                var enable = !anyActive;
+                if (!confirm((enable ? "Enable" : "Disable") + " scraping for ALL sections of " + pubLabel(pk) + "?")) return;
+                api("publication", "toggle", { project_id: PROJECT_ID, publication_key: pk, active: enable ? 1 : 0 }).then(loadSections).catch(alertErr);
             });
-            box.appendChild(card);
+            list.forEach(function (s) { body.appendChild(sectionCard(s)); });
         });
     }
 
