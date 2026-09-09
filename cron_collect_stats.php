@@ -84,7 +84,9 @@ if ($existing) {
 // Analyze log file
 try {
     $analyzer = new LogAnalyzer($logPath, $siteKey);
-    $stats = $analyzer->analyzeTimePeriod($yesterdayStart, $yesterdayEnd);
+    // includeIds=true → also returns visitor_hashes/human_unique_hashes (crc32 of
+    // the day's distinct visitor IDs) so month-level views can dedup by UNION.
+    $stats = $analyzer->analyzeTimePeriod($yesterdayStart, $yesterdayEnd, 0, true);
     
     echo "→ Total Visits: " . $stats['total_visits'] . "\n";
     echo "→ Unique Visitors: " . $stats['unique_visitors'] . "\n";
@@ -168,6 +170,24 @@ try {
         $insertStmt->close();
     }
     
+    // Store the per-day distinct visitor-ID fingerprints (for month-level dedup).
+    // Done as a separate UPDATE, guarded on the column existing, so the collector
+    // keeps working on a DB that hasn't had the migration applied yet.
+    if ($success && ten_stats_has_column($conn, 'ten_traffic_stats', 'visitor_hashes')) {
+        $visitorHashesJson = json_encode(array_values($stats['visitor_hashes'] ?? []));
+        $humanHashesJson   = json_encode(array_values($stats['human_unique_hashes'] ?? []));
+        $hashStmt = $conn->prepare("UPDATE ten_traffic_stats SET visitor_hashes = ?, human_unique_hashes = ? WHERE site_key = ? AND stat_date = ?");
+        if ($hashStmt) {
+            $hashStmt->bind_param("ssss", $visitorHashesJson, $humanHashesJson, $siteKey, $yesterdayDate);
+            if ($hashStmt->execute()) {
+                echo "✓ Stored " . count($stats['visitor_hashes'] ?? []) . " visitor fingerprints for month-level dedup\n";
+            } else {
+                echo "⚠ Could not store visitor fingerprints: " . $hashStmt->error . "\n";
+            }
+            $hashStmt->close();
+        }
+    }
+
 } catch (Exception $e) {
     echo "✗ Error processing site: " . $e->getMessage() . "\n";
     $success = false;
@@ -196,6 +216,17 @@ exit($success ? 0 : 1);
  * @param int    $maxLines  final hard cap on retained lines
  * @return array
  */
+/** True if $table has a column named $col (cached per request). */
+function ten_stats_has_column($conn, $table, $col) {
+    static $cache = [];
+    $key = $table . '.' . $col;
+    if (isset($cache[$key])) return $cache[$key];
+    $has = false;
+    $r = @$conn->query("SHOW COLUMNS FROM `" . str_replace('`', '', $table) . "` LIKE '" . $conn->real_escape_string($col) . "'");
+    if ($r) { $has = $r->num_rows > 0; $r->free(); }
+    return $cache[$key] = $has;
+}
+
 function rotateVisitorLog($logPath, $keepDays = 3, $maxLines = 200000) {
     $result = ['success' => false, 'removed' => 0, 'kept' => 0, 'size_before' => 0, 'size_after' => 0, 'error' => ''];
 

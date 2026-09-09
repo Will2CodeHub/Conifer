@@ -191,6 +191,14 @@ function getMonthlySummary() {
     $lastMonthPageViews = 0;
     foreach (($lastMonthStats['page_views'] ?? []) as $c) { $lastMonthPageViews += (int)$c; }
 
+    // Month-level UNIQUE VISITORS via true dedup (union of per-day visitor
+    // fingerprints), falling back to the summed daily uniques for any month whose
+    // days predate fingerprint collection. See getUniqueVisitorsDedup().
+    $lastMonthUnique = getUniqueVisitorsDedup(
+        $conn, $siteKey, date('Y-m-d', $lastMonthStart), date('Y-m-d', $lastMonthEnd),
+        (int)$lastMonthStats['unique_visitors']
+    );
+
     // Get current month stats - need to count days with actual data
     $currentMonthStart = strtotime('first day of this month 00:00:00');
     $currentMonthEnd = time();
@@ -202,7 +210,7 @@ function getMonthlySummary() {
 
     // Total page views for the current month so far (sum of per-URL breakdown).
     $currentMonthPageViews = getPageViewsTotal($conn, $siteKey, $startDate, $endDate);
-    
+
     $stmt = $conn->prepare("
         SELECT COUNT(DISTINCT stat_date) as days_with_data,
                SUM(total_visits) as total_visits,
@@ -226,6 +234,13 @@ function getMonthlySummary() {
         'human_visits' => (int)($currentMonthData['human_visits'] ?? 0),
         'human_unique' => (int)($currentMonthData['human_unique'] ?? 0)
     ];
+
+    // Month-level unique visitors (dedup by union of per-day fingerprints; falls
+    // back to the summed daily uniques until every data-day in the range has them).
+    $currentMonthUnique = getUniqueVisitorsDedup(
+        $conn, $siteKey, $startDate, $endDate,
+        $currentMonthStats['unique_visitors']
+    );
     
     // Calculate projection based on days with actual data
     $daysInMonth = date('t');
@@ -251,7 +266,7 @@ function getMonthlySummary() {
         'last_month' => [
             'month_name' => $lastMonthName,
             'total_visits' => $lastMonthStats['total_visits'],
-            'unique_visitors' => $lastMonthStats['unique_visitors'],
+            'unique_visitors' => $lastMonthUnique,
             'page_views' => $lastMonthPageViews,
             'human_visits' => $lastMonthStats['human_visits'],
             'human_unique' => $lastMonthStats['human_unique']
@@ -261,13 +276,71 @@ function getMonthlySummary() {
             'days_in_month' => $daysInMonth,
             'days_elapsed' => $daysWithData,
             'total_visits' => $currentMonthStats['total_visits'],
-            'unique_visitors' => $currentMonthStats['unique_visitors'],
+            'unique_visitors' => $currentMonthUnique,
             'page_views' => $currentMonthPageViews,
             'human_visits' => $currentMonthStats['human_visits'],
             'projection_available' => $projectionAvailable,
             'projected_total' => $projectedTotal
         ]
     ]);
+}
+
+/**
+ * Month-level UNIQUE VISITORS with true dedup.
+ *
+ * Daily rows store each day's distinct-visitor count, so SUMming them over a month
+ * double-counts anyone who returns on more than one day. Instead we UNION the
+ * per-day visitor fingerprints (crc32 of each visitor id, written by the collector)
+ * and count the union — a person seen on 10 days counts once.
+ *
+ * Falls back to $fallbackSum (the summed daily uniques) whenever the range isn't
+ * fully fingerprinted: the column doesn't exist yet, or any day that has traffic is
+ * missing its fingerprints (i.e. predates fingerprint collection). This keeps a
+ * transition month from silently under-reporting.
+ */
+function getUniqueVisitorsDedup($conn, $siteKey, $startDate, $endDate, $fallbackSum) {
+    static $hasCol = null;
+    if ($hasCol === null) {
+        $hasCol = false;
+        $r = @$conn->query("SHOW COLUMNS FROM ten_traffic_stats LIKE 'visitor_hashes'");
+        if ($r) { $hasCol = $r->num_rows > 0; $r->free(); }
+    }
+    if (!$hasCol) return (int)$fallbackSum;
+
+    $stmt = $conn->prepare("
+        SELECT unique_visitors, visitor_hashes
+        FROM ten_traffic_stats
+        WHERE site_key = ?
+        AND stat_date BETWEEN ? AND ?
+    ");
+    if (!$stmt) return (int)$fallbackSum;
+    $stmt->bind_param("sss", $siteKey, $startDate, $endDate);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    $union = [];
+    $daysWithTraffic = 0;
+    $daysFingerprinted = 0;
+    while ($row = $result->fetch_assoc()) {
+        $uv = (int)$row['unique_visitors'];
+        $arr = ($row['visitor_hashes'] !== null && $row['visitor_hashes'] !== '')
+            ? json_decode($row['visitor_hashes'], true)
+            : null;
+        if ($uv > 0) {
+            $daysWithTraffic++;
+            if (is_array($arr)) $daysFingerprinted++;
+        }
+        if (is_array($arr)) {
+            foreach ($arr as $h) { $union[$h] = true; }
+        }
+    }
+    $stmt->close();
+
+    // Only trust the dedup when every day that had traffic was fingerprinted.
+    if ($daysWithTraffic > 0 && $daysFingerprinted >= $daysWithTraffic) {
+        return count($union);
+    }
+    return (int)$fallbackSum;
 }
 
 /**
