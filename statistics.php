@@ -148,7 +148,19 @@ $currentPage = 'statistics';
         }
         .summary-projection strong {
             color: #111827;
+            display: block;
+            margin-bottom: 6px;
         }
+        .proj-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-top: 4px;
+        }
+        .proj-row i { color: #9ca3af; margin-right: 4px; }
+        .proj-row b { color: #111827; }
+        .proj-delta { margin-top: 8px; font-weight: 600; font-size: 12.5px; }
         .info-box {
             background: #f3f4f6;
             padding: 16px;
@@ -677,77 +689,75 @@ $currentPage = 'statistics';
                 .catch(error => console.error('Error loading monthly summary:', error));
         }
         
+        // One breakdown row (Visits / Unique visitors / Page views)
+        function projRow(icon, label, value) {
+            return `<div class="proj-row"><span><i class="fas ${icon}"></i> ${label}</span><b>${formatNumber(Math.round(value || 0))}</b></div>`;
+        }
+
+        // Both month boxes share this layout so they show identical content.
+        // `foot` is the breakdown block: projected figures for the current month,
+        // final figures for last month.
+        function monthCard(heading, m, subLabel, foot) {
+            return `
+                <div class="summary-card">
+                    <div class="summary-title">${heading}</div>
+                    <div class="summary-value">${formatNumber(m.total_visits || 0)}</div>
+                    <div class="summary-label">${subLabel}</div>
+                    <div class="summary-metrics">
+                        <div class="summary-metric">
+                            <span class="metric-num">${formatNumber(m.unique_visitors || 0)}</span>
+                            <span class="metric-lbl"><i class="fas fa-user"></i> Unique Visitors</span>
+                        </div>
+                        <div class="summary-metric">
+                            <span class="metric-num">${formatNumber(m.page_views || 0)}</span>
+                            <span class="metric-lbl"><i class="fas fa-file-lines"></i> Page Views</span>
+                        </div>
+                    </div>
+                    ${foot}
+                </div>`;
+        }
+
         function displayMonthlySummary(data) {
             const container = document.getElementById('monthlySummary');
             const currentMonth = data.current_month;
             const lastMonth = data.last_month;
-            
-            let html = '';
-            
-            // Last Month Card
-            html += `
-                <div class="summary-card">
-                    <div class="summary-title">Last Month (${lastMonth.month_name})</div>
-                    <div class="summary-value">${formatNumber(lastMonth.total_visits || 0)}</div>
-                    <div class="summary-label">Total Visits</div>
-                    <div class="summary-metrics">
-                        <div class="summary-metric">
-                            <span class="metric-num">${formatNumber(lastMonth.unique_visitors || 0)}</span>
-                            <span class="metric-lbl"><i class="fas fa-user"></i> Unique Visitors</span>
-                        </div>
-                        <div class="summary-metric">
-                            <span class="metric-num">${formatNumber(lastMonth.page_views || 0)}</span>
-                            <span class="metric-lbl"><i class="fas fa-file-lines"></i> Page Views</span>
-                        </div>
-                    </div>
-                </div>
-            `;
 
-            // Current Month Card
-            html += `
-                <div class="summary-card">
-                    <div class="summary-title">Current Month (${currentMonth.month_name})</div>
-                    <div class="summary-value">${formatNumber(currentMonth.total_visits || 0)}</div>
-                    <div class="summary-label">Visits So Far (${currentMonth.days_elapsed || 0} days with data)</div>
-                    <div class="summary-metrics">
-                        <div class="summary-metric">
-                            <span class="metric-num">${formatNumber(currentMonth.unique_visitors || 0)}</span>
-                            <span class="metric-lbl"><i class="fas fa-user"></i> Unique Visitors</span>
-                        </div>
-                        <div class="summary-metric">
-                            <span class="metric-num">${formatNumber(currentMonth.page_views || 0)}</span>
-                            <span class="metric-lbl"><i class="fas fa-file-lines"></i> Page Views</span>
-                        </div>
-                    </div>
-            `;
-            
+            // Last month is complete → its "full-month total" IS its actuals.
+            const lastFoot = `
+                <div class="summary-projection">
+                    <strong>Full month total (${lastMonth.month_name})</strong>
+                    ${projRow('fa-eye', 'Visits', lastMonth.total_visits)}
+                    ${projRow('fa-user', 'Unique visitors', lastMonth.unique_visitors)}
+                    ${projRow('fa-file-lines', 'Page views', lastMonth.page_views)}
+                </div>`;
+
+            // Current month → projected to the end of the month for all three metrics.
+            let curFoot;
             if (currentMonth.projection_available && currentMonth.projected_total > 0) {
-                const projectedTotal = Math.round(currentMonth.projected_total);
-                const change = lastMonth.total_visits > 0 
-                    ? ((projectedTotal - lastMonth.total_visits) / lastMonth.total_visits * 100).toFixed(1)
+                const projVisits = Math.round(currentMonth.projected_total);
+                const change = lastMonth.total_visits > 0
+                    ? ((projVisits - lastMonth.total_visits) / lastMonth.total_visits * 100).toFixed(1)
                     : 0;
-                const changeClass = change >= 0 ? 'color: #059669;' : 'color: #dc2626;';
+                const changeClass = change >= 0 ? 'color:#059669;' : 'color:#dc2626;';
                 const changeIcon = change >= 0 ? '↑' : '↓';
-                
-                html += `
+                curFoot = `
                     <div class="summary-projection">
-                        <strong>Projected for Month:</strong> ${formatNumber(projectedTotal)}
-                        <div style="margin-top: 4px; ${changeClass}">
-                            ${changeIcon} ${Math.abs(change)}% vs last month
-                        </div>
-                    </div>
-                `;
+                        <strong>Projected for the full month (${currentMonth.month_name})</strong>
+                        ${projRow('fa-eye', 'Visits', currentMonth.projected_total)}
+                        ${projRow('fa-user', 'Unique visitors', currentMonth.projected_unique)}
+                        ${projRow('fa-file-lines', 'Page views', currentMonth.projected_page_views)}
+                        <div class="proj-delta" style="${changeClass}">${changeIcon} ${Math.abs(change)}% projected visits vs last month</div>
+                    </div>`;
             } else {
-                html += `
-                    <div class="summary-projection" style="color: #9ca3af; font-style: italic;">
-                        ${currentMonth.days_elapsed > 0 ? 'Calculating projection...' : 'No data available yet'}
-                    </div>
-                `;
+                curFoot = `
+                    <div class="summary-projection" style="color:#9ca3af;font-style:italic;">
+                        ${currentMonth.days_elapsed > 0 ? 'Projection will appear once more days of data are collected.' : 'No data available yet for this month.'}
+                    </div>`;
             }
-            
-            html += `</div>`;
-            
-            container.innerHTML = html;
+
+            container.innerHTML =
+                monthCard(`Last Month (${lastMonth.month_name})`, lastMonth, 'Total Visits', lastFoot) +
+                monthCard(`This Month (${currentMonth.month_name})`, currentMonth, `Visits so far (${currentMonth.days_elapsed || 0} days with data)`, curFoot);
             container.style.display = 'grid';
         }
         
