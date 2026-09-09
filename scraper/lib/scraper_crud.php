@@ -10,6 +10,26 @@ if (!function_exists('getDBConnection')) {
 
 /* ------------------------------------------------------------------ sections */
 
+/** Enable/disable one section's scraping (is_active gates the worker + its AI). */
+function scraper_set_section_active(int $id, int $active): bool {
+    $conn = getDBConnection();
+    $active = $active ? 1 : 0;
+    $s = $conn->prepare("UPDATE ten_scraper_pub_sections SET is_active=? WHERE id=?");
+    $s->bind_param('ii', $active, $id);
+    $ok = $s->execute(); $s->close(); $conn->close();
+    return $ok;
+}
+
+/** Enable/disable ALL sections of a publication within a project (one click). */
+function scraper_set_publication_active(int $projectId, string $pubKey, int $active): int {
+    $conn = getDBConnection();
+    $active = $active ? 1 : 0;
+    $s = $conn->prepare("UPDATE ten_scraper_pub_sections SET is_active=? WHERE project_id=? AND publication_key=?");
+    $s->bind_param('iis', $active, $projectId, $pubKey);
+    $s->execute(); $n = $s->affected_rows; $s->close(); $conn->close();
+    return $n;
+}
+
 function scraper_list_sections(int $projectId): array {
     $conn = getDBConnection();
     $stmt = $conn->prepare(
