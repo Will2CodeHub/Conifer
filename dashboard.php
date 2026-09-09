@@ -33,18 +33,22 @@ if ($canSeeStats) {
     $a = null; try { $a = getDBConnection_TENAdmin(); } catch (Throwable $e) { $a = null; } // admin_ten (articles/publications)
 
     $usersActive = dash_scalar($m, "SELECT COUNT(*) FROM ten_users WHERE status='active'");
+    $art7 = dash_scalar($a, "SELECT COUNT(*) FROM articles WHERE state='published' AND submission_date >= DATE_SUB(NOW(),INTERVAL 7 DAY)");
+    // Each tile: [icon, value, label, sub]
     $tiles = [
-        ['fa-users',       '#1e40af', '#dbeafe', dash_scalar($m, "SELECT COUNT(*) FROM ten_users"),               'Total users',            $usersActive !== null ? ($usersActive . ' active') : ''],
-        ['fa-newspaper',   '#3730a3', '#e0e7ff', dash_scalar($a, "SELECT COUNT(*) FROM publications WHERE pub_live=1"), 'Live publications',  ''],
-        ['fa-file-lines',  '#065f46', '#d1fae5', dash_scalar($a, "SELECT COUNT(*) FROM articles WHERE state='published'"), 'Articles published',
-            (function($a){ $n = dash_scalar($a, "SELECT COUNT(*) FROM articles WHERE state='published' AND submission_date >= DATE_SUB(NOW(),INTERVAL 7 DAY)"); return $n!==null ? ('+' . $n . ' this week') : ''; })($a)],
-        ['fa-pen-clip',    '#92400e', '#fef3c7', dash_scalar($a, "SELECT COUNT(*) FROM articles WHERE state='under review'"), 'Awaiting review', ''],
-        ['fa-robot',       '#9f1239', '#fce7f3', dash_scalar($m, "SELECT COUNT(*) FROM ten_scraper_pub_sections WHERE is_active=1"), 'Active scraper sections', ''],
-        ['fa-address-book','#0e7490', '#cffafe', dash_scalar($m, "SELECT COUNT(*) FROM ten_ec_contacts"),          'Email contacts',         ''],
-        ['fa-paper-plane', '#4338ca', '#e0e7ff', dash_scalar($m, "SELECT COUNT(*) FROM ten_ec_recipients WHERE status='sent' AND sent_at >= DATE_SUB(NOW(),INTERVAL 30 DAY)"), 'Emails sent (30d)', ''],
+        ['fa-users',        dash_scalar($m, "SELECT COUNT(*) FROM ten_users"),                                        'Total users',            $usersActive !== null ? ($usersActive . ' active') : ''],
+        ['fa-newspaper',    dash_scalar($a, "SELECT COUNT(*) FROM publications WHERE pub_live=1"),                     'Live publications',      ''],
+        ['fa-file-lines',   dash_scalar($a, "SELECT COUNT(*) FROM articles WHERE state='published'"),                 'Articles published',     $art7 !== null ? ('+' . number_format($art7) . ' this week') : ''],
+        ['fa-pen-clip',     dash_scalar($a, "SELECT COUNT(*) FROM articles WHERE state='under review'"),              'Awaiting review',        ''],
+        ['fa-file-pen',     dash_scalar($a, "SELECT COUNT(*) FROM articles WHERE state='draft'"),                     'Drafts',                 ''],
+        ['fa-bolt',         dash_scalar($a, "SELECT COUNT(*) FROM articles_breaking_news WHERE state='published'"),   'Breaking news',          ''],
+        ['fa-robot',        dash_scalar($m, "SELECT COUNT(*) FROM ten_scraper_pub_sections WHERE is_active=1"),       'Active scraper sections',''],
+        ['fa-address-book', dash_scalar($m, "SELECT COUNT(*) FROM ten_ec_contacts"),                                 'Email contacts',         ''],
+        ['fa-paper-plane',  dash_scalar($m, "SELECT COUNT(*) FROM ten_ec_recipients WHERE status='sent' AND sent_at >= DATE_SUB(NOW(),INTERVAL 30 DAY)"), 'Emails sent (30d)', ''],
+        ['fa-ban',          dash_scalar($m, "SELECT COUNT(*) FROM ten_ec_suppression"),                              'Suppressed emails',      ''],
     ];
     // hide tiles whose data source isn't present (null)
-    $tiles = array_values(array_filter($tiles, fn($t) => $t[3] !== null));
+    $tiles = array_values(array_filter($tiles, fn($t) => $t[1] !== null));
 
     $activityStmt = $m->prepare("SELECT al.*, u.full_name FROM ten_activity_log al LEFT JOIN ten_users u ON al.user_id=u.id ORDER BY al.created_at DESC LIMIT 10");
     if ($activityStmt) { $activityStmt->execute(); $recentActivity = $activityStmt->get_result()->fetch_all(MYSQLI_ASSOC); $activityStmt->close(); }
@@ -65,28 +69,21 @@ $currentPage = 'dashboard';
     <link rel="stylesheet" href="css/backend-style.css">
     <style>
         .welcome-card {
-            background: linear-gradient(135deg, #4f46e5 0%, #3c4f6d 100%);
-            color: #fff;
-            padding: 34px 32px;
-            border-radius: 16px;
             margin-bottom: 28px;
-            box-shadow: 0 8px 24px rgba(79,70,229,.18);
+            padding-bottom: 20px;
+            border-bottom: 1px solid #e5e7eb;
         }
         .welcome-card h1 {
-            font-size: 28px;
-            margin: 0 0 8px;
+            font-size: 24px;
+            margin: 0 0 4px;
             line-height: 1.2;
+            color: #111827;
+            font-weight: 700;
         }
         .welcome-card p {
-            font-size: 15px;
+            font-size: 14px;
             margin: 0;
-            opacity: 0.92;
-        }
-        .stat-sub {
-            font-size: 12.5px;
             color: #6b7280;
-            margin-top: 6px;
-            font-weight: 500;
         }
         .section-label {
             font-size: 12px;
@@ -98,57 +95,43 @@ $currentPage = 'dashboard';
         }
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-            gap: 24px;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
             margin-bottom: 32px;
         }
         .stat-card {
             background: white;
-            padding: 28px;
-            border-radius: 12px;
-            border: 2px solid #e5e7eb;
-            transition: all 0.3s ease;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #e5e7eb;
+            transition: border-color .2s ease, box-shadow .2s ease;
         }
         .stat-card:hover {
-            border-color: #667eea;
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.1);
-            transform: translateY(-4px);
+            border-color: #cbd5e1;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
         }
-        .stat-icon {
-            width: 56px;
-            height: 56px;
-            border-radius: 12px;
+        .stat-head {
             display: flex;
             align-items: center;
-            justify-content: center;
-            font-size: 28px;
-            margin-bottom: 16px;
+            gap: 8px;
+            color: #9ca3af;
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 12px;
         }
-        .stat-card:nth-child(1) .stat-icon {
-            background: #dbeafe;
-            color: #1e40af;
-        }
-        .stat-card:nth-child(2) .stat-icon {
-            background: #d1fae5;
-            color: #065f46;
-        }
-        .stat-card:nth-child(3) .stat-icon {
-            background: #fef3c7;
-            color: #92400e;
-        }
-        .stat-card:nth-child(4) .stat-icon {
-            background: #fce7f3;
-            color: #9f1239;
+        .stat-head i {
+            font-size: 14px;
         }
         .stat-value {
-            font-size: 36px;
+            font-size: 30px;
             font-weight: 700;
             color: #111827;
-            margin-bottom: 4px;
+            line-height: 1.1;
         }
-        .stat-label {
-            font-size: 14px;
+        .stat-sub {
+            font-size: 12.5px;
             color: #6b7280;
+            margin-top: 6px;
             font-weight: 500;
         }
         .content-grid {
@@ -159,12 +142,12 @@ $currentPage = 'dashboard';
         .content-grid .card:only-child { grid-column: 1 / -1; }
         .card {
             background: white;
-            border-radius: 12px;
-            padding: 28px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border-radius: 10px;
+            padding: 24px;
+            border: 1px solid #e5e7eb;
         }
         .card h2 {
-            font-size: 20px;
+            font-size: 17px;
             font-weight: 700;
             color: #111827;
             margin-bottom: 20px;
@@ -173,7 +156,8 @@ $currentPage = 'dashboard';
             gap: 10px;
         }
         .card h2 i {
-            color: #667eea;
+            color: #9ca3af;
+            font-size: 15px;
         }
         .roles-list {
             display: flex;
@@ -248,12 +232,12 @@ $currentPage = 'dashboard';
             <div class="stats-grid">
                 <?php foreach ($tiles as $t): ?>
                 <div class="stat-card">
-                    <div class="stat-icon" style="background:<?php echo $t[2]; ?>;color:<?php echo $t[1]; ?>;">
+                    <div class="stat-head">
                         <i class="fas <?php echo $t[0]; ?>"></i>
+                        <span><?php echo htmlspecialchars($t[2]); ?></span>
                     </div>
-                    <div class="stat-value"><?php echo number_format((int)$t[3]); ?></div>
-                    <div class="stat-label"><?php echo htmlspecialchars($t[4]); ?></div>
-                    <?php if (!empty($t[5])): ?><div class="stat-sub"><?php echo htmlspecialchars($t[5]); ?></div><?php endif; ?>
+                    <div class="stat-value"><?php echo number_format((int)$t[1]); ?></div>
+                    <?php if (!empty($t[3])): ?><div class="stat-sub"><?php echo htmlspecialchars($t[3]); ?></div><?php endif; ?>
                 </div>
                 <?php endforeach; ?>
             </div>

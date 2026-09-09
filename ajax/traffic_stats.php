@@ -187,15 +187,21 @@ function getMonthlySummary() {
     $lastMonthName = date('F Y', $lastMonthStart);
     
     $lastMonthStats = getStatsFromDatabase($siteKey, $lastMonthStart, $lastMonthEnd);
-    
+    // Total page views for last month = sum of the per-URL page_views breakdown.
+    $lastMonthPageViews = 0;
+    foreach (($lastMonthStats['page_views'] ?? []) as $c) { $lastMonthPageViews += (int)$c; }
+
     // Get current month stats - need to count days with actual data
     $currentMonthStart = strtotime('first day of this month 00:00:00');
     $currentMonthEnd = time();
     $currentMonthName = date('F Y', $currentMonthStart);
-    
+
     // Count how many days have data in current month
     $startDate = date('Y-m-d', $currentMonthStart);
     $endDate = date('Y-m-d', $currentMonthEnd);
+
+    // Total page views for the current month so far (sum of per-URL breakdown).
+    $currentMonthPageViews = getPageViewsTotal($conn, $siteKey, $startDate, $endDate);
     
     $stmt = $conn->prepare("
         SELECT COUNT(DISTINCT stat_date) as days_with_data,
@@ -246,6 +252,7 @@ function getMonthlySummary() {
             'month_name' => $lastMonthName,
             'total_visits' => $lastMonthStats['total_visits'],
             'unique_visitors' => $lastMonthStats['unique_visitors'],
+            'page_views' => $lastMonthPageViews,
             'human_visits' => $lastMonthStats['human_visits'],
             'human_unique' => $lastMonthStats['human_unique']
         ],
@@ -255,11 +262,38 @@ function getMonthlySummary() {
             'days_elapsed' => $daysWithData,
             'total_visits' => $currentMonthStats['total_visits'],
             'unique_visitors' => $currentMonthStats['unique_visitors'],
+            'page_views' => $currentMonthPageViews,
             'human_visits' => $currentMonthStats['human_visits'],
             'projection_available' => $projectionAvailable,
             'projected_total' => $projectedTotal
         ]
     ]);
+}
+
+/**
+ * Sum the total page views (across all URLs) for a site over a date range.
+ * Reads the per-day page_views JSON breakdown and adds up every count.
+ */
+function getPageViewsTotal($conn, $siteKey, $startDate, $endDate) {
+    $stmt = $conn->prepare("
+        SELECT page_views
+        FROM ten_traffic_stats
+        WHERE site_key = ?
+        AND stat_date BETWEEN ? AND ?
+    ");
+    if (!$stmt) return 0;
+    $stmt->bind_param("sss", $siteKey, $startDate, $endDate);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $total = 0;
+    while ($row = $result->fetch_assoc()) {
+        $pages = json_decode($row['page_views'], true);
+        if (is_array($pages)) {
+            foreach ($pages as $c) { $total += (int)$c; }
+        }
+    }
+    $stmt->close();
+    return $total;
 }
 
 /**
