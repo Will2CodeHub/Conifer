@@ -67,6 +67,12 @@ $usersResult = $conn->query($usersQuery);
 $usersArray = $usersResult->fetch_all(MYSQLI_ASSOC);
 $usersResult->data_seek(0); // Reset pointer for table display
 
+// "Old accounts" = inactive users; hidden from the main list and shown on their
+// own tab where they can be reactivated.
+$oldCount = 0;
+foreach ($usersArray as $uu) { if (($uu['status'] ?? '') === 'inactive') $oldCount++; }
+$activeCount = count($usersArray) - $oldCount;
+
 // Get all roles for assignment
 $rolesQuery = "SELECT * FROM ten_roles ORDER BY role_level DESC";
 $allRoles = $conn->query($rolesQuery)->fetch_all(MYSQLI_ASSOC);
@@ -218,6 +224,17 @@ $currentPage = 'users';
         .status-pending { background: #fef3c7; color: #92400e; }
         .status-inactive { background: #e5e7eb; color: #374151; }
         .status-suspended { background: #fee2e2; color: #991b1b; }
+        .user-tabs { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 2px solid #e5e7eb; }
+        .user-tab { background: none; border: none; border-bottom: 3px solid transparent; padding: 10px 18px; font-size: 14px; font-weight: 600; color: #6b7280; cursor: pointer; margin-bottom: -2px; display: inline-flex; align-items: center; gap: 8px; }
+        .user-tab:hover { color: #4f46e5; }
+        .user-tab.active { color: #4f46e5; border-bottom-color: #4f46e5; }
+        .user-tab-count { background: #e5e7eb; color: #374151; border-radius: 10px; font-size: 12px; padding: 1px 8px; font-weight: 700; }
+        .user-tab.active .user-tab-count { background: #e0e7ff; color: #3730a3; }
+        .btn-reactivate { background: #d1fae5; color: #065f46; }
+        .btn-reactivate:hover { background: #a7f3d0; }
+        .btn-archive { background: #f3f4f6; color: #374151; }
+        .btn-archive:hover { background: #e5e7eb; }
+        .users-empty td { text-align: center; color: #9ca3af; padding: 40px; }
         .role-tags {
             display: flex;
             flex-wrap: wrap;
@@ -365,7 +382,16 @@ $currentPage = 'users';
                 <?php endif; ?>
             </div>
             
-            <div class="users-table">
+            <div class="user-tabs">
+                <button type="button" class="user-tab active" data-tab="active" onclick="switchUserTab('active')">
+                    <i class="fas fa-users"></i> Active <span class="user-tab-count" id="activeTabCount"><?php echo (int)$activeCount; ?></span>
+                </button>
+                <button type="button" class="user-tab" data-tab="old" onclick="switchUserTab('old')">
+                    <i class="fas fa-box-archive"></i> Old accounts <span class="user-tab-count" id="oldTabCount"><?php echo (int)$oldCount; ?></span>
+                </button>
+            </div>
+
+            <div class="users-table" id="usersTableWrap" data-tab="active">
                 <table id="usersTable">
                     <thead>
                         <tr>
@@ -377,8 +403,8 @@ $currentPage = 'users';
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($usersArray as $user): ?>
-                            <tr>
+                        <?php foreach ($usersArray as $user): $isOld = (($user['status'] ?? '') === 'inactive'); ?>
+                            <tr class="user-row" data-group="<?php echo $isOld ? 'old' : 'active'; ?>"<?php echo $isOld ? ' style="display:none;"' : ''; ?>>
                                 <td>
                                     <div class="user-cell">
                                         <div class="user-avatar-table">
@@ -415,18 +441,32 @@ $currentPage = 'users';
                                 </td>
                                 <td>
                                     <?php if (hasPermission('users.edit') || isAdmin()): ?>
-                                        <button class="action-btn btn-edit" onclick="editUser(<?php echo $user['id']; ?>)">
+                                        <button class="action-btn btn-edit" onclick="editUser(<?php echo $user['id']; ?>)" title="Edit">
                                             <i class="fas fa-edit"></i>
                                         </button>
                                     <?php endif; ?>
+                                    <?php if ($isOld): ?>
+                                        <?php if (hasPermission('users.edit') || isAdmin()): ?>
+                                            <button class="action-btn btn-reactivate" onclick="reactivateUser(<?php echo $user['id']; ?>)" title="Reactivate account">
+                                                <i class="fas fa-rotate-left"></i>
+                                            </button>
+                                        <?php endif; ?>
+                                    <?php else: ?>
+                                        <?php if ((hasPermission('users.edit') || isAdmin()) && $user['id'] != $_SESSION['ten_user_id']): ?>
+                                            <button class="action-btn btn-archive" onclick="deactivateUser(<?php echo $user['id']; ?>)" title="Move to old accounts">
+                                                <i class="fas fa-box-archive"></i>
+                                            </button>
+                                        <?php endif; ?>
+                                    <?php endif; ?>
                                     <?php if ((hasPermission('users.delete') || isAdmin()) && $user['id'] != $_SESSION['ten_user_id']): ?>
-                                        <button class="action-btn btn-delete" onclick="deleteUser(<?php echo $user['id']; ?>)">
+                                        <button class="action-btn btn-delete" onclick="deleteUser(<?php echo $user['id']; ?>)" title="Delete permanently">
                                             <i class="fas fa-trash"></i>
                                         </button>
                                     <?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
+                        <tr id="usersEmptyRow" class="users-empty" style="display:none;"><td colspan="5">No accounts to show in this tab.</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -863,17 +903,63 @@ $currentPage = 'users';
         });
     }
     
-    function searchUsers() {
-        const input = document.getElementById('searchInput');
-        const filter = input.value.toLowerCase();
-        const table = document.getElementById('usersTable');
-        const rows = table.getElementsByTagName('tr');
-        
-        for (let i = 1; i < rows.length; i++) {
-            const text = rows[i].textContent || rows[i].innerText;
-            rows[i].style.display = text.toLowerCase().indexOf(filter) > -1 ? '' : 'none';
-        }
+    let currentUserTab = 'active';
+    function switchUserTab(tab) {
+        currentUserTab = tab;
+        document.querySelectorAll('.user-tab').forEach(function (b) {
+            b.classList.toggle('active', b.getAttribute('data-tab') === tab);
+        });
+        const wrap = document.getElementById('usersTableWrap');
+        if (wrap) wrap.setAttribute('data-tab', tab);
+        applyUserFilter();
     }
+
+    // Show only rows of the current tab (active vs old/inactive) that also match
+    // the search box. Keeps search scoped to the visible tab.
+    function applyUserFilter() {
+        const filter = (document.getElementById('searchInput').value || '').toLowerCase();
+        const rows = document.querySelectorAll('#usersTable tbody tr.user-row');
+        let shown = 0;
+        rows.forEach(function (row) {
+            const inTab = row.getAttribute('data-group') === currentUserTab;
+            const text = (row.textContent || '').toLowerCase();
+            const match = inTab && (filter === '' || text.indexOf(filter) > -1);
+            row.style.display = match ? '' : 'none';
+            if (match) shown++;
+        });
+        const empty = document.getElementById('usersEmptyRow');
+        if (empty) empty.style.display = shown === 0 ? '' : 'none';
+    }
+
+    function searchUsers() { applyUserFilter(); }
+
+    async function setUserStatus(userId, action, opts) {
+        try {
+            const fd = new FormData();
+            fd.append('action', action);
+            fd.append('user_id', userId);
+            const res = await fetch('/management/ajax/users.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.success) {
+                Swal.fire({ icon: 'success', title: opts.title, text: data.message, showConfirmButton: false, timer: 1300 })
+                    .then(function () { window.location.reload(); });
+            } else {
+                Swal.fire('Error', data.message || 'Action failed', 'error');
+            }
+        } catch (e) { Swal.fire('Error', 'An error occurred', 'error'); }
+    }
+
+    function reactivateUser(userId) {
+        Swal.fire({ title: 'Reactivate account?', text: 'This user will move back to the active list.', icon: 'question', showCancelButton: true, confirmButtonColor: '#059669', confirmButtonText: 'Reactivate' })
+            .then(function (r) { if (r.isConfirmed) setUserStatus(userId, 'reactivate_user', { title: 'Reactivated' }); });
+    }
+
+    function deactivateUser(userId) {
+        Swal.fire({ title: 'Move to old accounts?', text: 'The account is kept and can be reactivated later. It will be hidden from the active list.', icon: 'warning', showCancelButton: true, confirmButtonColor: '#4f46e5', confirmButtonText: 'Move to old accounts' })
+            .then(function (r) { if (r.isConfirmed) setUserStatus(userId, 'deactivate_user', { title: 'Moved to old accounts' }); });
+    }
+
+    document.addEventListener('DOMContentLoaded', function () { applyUserFilter(); });
     
     function generatePassword() {
         const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*";

@@ -10,7 +10,7 @@ $response = ['success' => false, 'message' => ''];
 
 // Check permissions
 $requiresManage = in_array($action, ['delete_user']);
-$requiresEdit = in_array($action, ['update_user', 'admin_upload_photo', 'send_reset']);
+$requiresEdit = in_array($action, ['update_user', 'admin_upload_photo', 'send_reset', 'reactivate_user', 'deactivate_user']);
 $requiresCreate = in_array($action, ['create_user']);
 
 if (!isAdmin()) {
@@ -259,6 +259,23 @@ try {
             $response['message'] = 'User updated successfully';
             break;
             
+        case 'reactivate_user':
+        case 'deactivate_user':
+            $userId = intval($_POST['user_id'] ?? 0);
+            if ($userId <= 0) throw new Exception('Invalid user ID');
+            $newStatus = ($action === 'reactivate_user') ? 'active' : 'inactive';
+            if ($action === 'deactivate_user' && $userId == $_SESSION['ten_user_id']) {
+                throw new Exception('You cannot deactivate your own account');
+            }
+            $stmt = $conn->prepare("UPDATE ten_users SET status = ?, updated_at = NOW() WHERE id = ?");
+            $stmt->bind_param("si", $newStatus, $userId);
+            if (!$stmt->execute()) throw new Exception('Failed to update user status: ' . $stmt->error);
+            $stmt->close();
+            logActivity($action, 'user', $userId, ($action === 'reactivate_user' ? 'Reactivated' : 'Deactivated') . " user #$userId");
+            $response['success'] = true;
+            $response['message'] = ($action === 'reactivate_user') ? 'User reactivated' : 'User moved to old accounts';
+            break;
+
         case 'delete_user':
             $userId = intval($_POST['user_id'] ?? 0);
             
