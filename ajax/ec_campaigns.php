@@ -50,6 +50,7 @@ try {
             $id=(int)($_POST['id']??0);
             $name=trim($_POST['name']??''); if($name==='') throw new Exception('Name required');
             $audience=(int)($_POST['audience_id']??0);
+            $profile=(int)($_POST['sending_profile_id']??0);
             $fromName=trim($_POST['from_name']??''); $fromEmail=trim($_POST['from_email']??''); $replyTo=trim($_POST['reply_to']??'');
             $batch=max(1,(int)($_POST['batch_size']??50)); $interval=max(0,(int)($_POST['batch_interval_min']??10));
             $perDomain=max(0,(int)($_POST['per_domain_limit']??0)); $dailyCap=max(0,(int)($_POST['daily_cap']??0));
@@ -60,13 +61,13 @@ try {
             foreach($variants as $v){ if((int)($v['template_id']??0)<=0) throw new Exception('Each variant needs a template'); }
 
             if($id>0){
-                $st=$c->prepare("UPDATE ten_ec_campaigns SET name=?,audience_id=?,from_name=?,from_email=?,reply_to=?,batch_size=?,batch_interval_min=?,per_domain_limit=?,daily_cap=?,warmup_enabled=?,ab_enabled=?,scheduled_at=".$schedSql." WHERE id=?");
-                $st->bind_param('sisssiiiiiii',$name,$audience,$fromName,$fromEmail,$replyTo,$batch,$interval,$perDomain,$dailyCap,$warmup,$ab,$id);
+                $st=$c->prepare("UPDATE ten_ec_campaigns SET name=?,audience_id=?,sending_profile_id=?,from_name=?,from_email=?,reply_to=?,batch_size=?,batch_interval_min=?,per_domain_limit=?,daily_cap=?,warmup_enabled=?,ab_enabled=?,scheduled_at=".$schedSql." WHERE id=?");
+                $st->bind_param('siisssiiiiiii',$name,$audience,$profile,$fromName,$fromEmail,$replyTo,$batch,$interval,$perDomain,$dailyCap,$warmup,$ab,$id);
                 $st->execute(); $st->close();
             } else {
                 $uid=(int)($_SESSION['ten_user_id']??0);
-                $st=$c->prepare("INSERT INTO ten_ec_campaigns (name,audience_id,from_name,from_email,reply_to,batch_size,batch_interval_min,per_domain_limit,daily_cap,warmup_enabled,ab_enabled,scheduled_at,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,".$schedSql.",?)");
-                $st->bind_param('sisssiiiiiii',$name,$audience,$fromName,$fromEmail,$replyTo,$batch,$interval,$perDomain,$dailyCap,$warmup,$ab,$uid);
+                $st=$c->prepare("INSERT INTO ten_ec_campaigns (name,audience_id,sending_profile_id,from_name,from_email,reply_to,batch_size,batch_interval_min,per_domain_limit,daily_cap,warmup_enabled,ab_enabled,scheduled_at,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,".$schedSql.",?)");
+                $st->bind_param('siisssiiiiiii',$name,$audience,$profile,$fromName,$fromEmail,$replyTo,$batch,$interval,$perDomain,$dailyCap,$warmup,$ab,$uid);
                 $st->execute(); $id=(int)$c->insert_id; $st->close();
             }
             ec_save_variants($c,$id,$variants);

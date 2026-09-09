@@ -10,6 +10,20 @@ $action = $_POST['action'] ?? $_GET['action'] ?? '';
 $c = ec_db();
 $resp = ['success'=>false,'message'=>''];
 
+/** Build a WHERE clause for a contact filter used by build-from-filter.
+ *  Always excludes suppressed (unsub/bounce/do-not-contact/replied) unless
+ *  include_suppressed=1. Optionally excludes anyone already emailed. */
+function ec_filter_where(mysqli $c, array $p): string {
+    $conds = [];
+    $q = trim($p['q'] ?? '');
+    if ($q !== '') { $qe='%'.$c->real_escape_string($q).'%'; $conds[]="(ct.email LIKE '$qe' OR ct.company LIKE '$qe' OR ct.city LIKE '$qe' OR ct.first_name LIKE '$qe' OR ct.last_name LIKE '$qe')"; }
+    if (($p['type'] ?? '') !== '') $conds[]="ct.contact_type='".$c->real_escape_string($p['type'])."'";
+    if (($p['country'] ?? '') !== '') $conds[]="ct.country LIKE '%".$c->real_escape_string($p['country'])."%'";
+    if (empty($p['include_suppressed'])) $conds[]="NOT EXISTS (SELECT 1 FROM ten_ec_suppression s WHERE s.email=ct.email)";
+    if (!empty($p['exclude_contacted'])) $conds[]="NOT EXISTS (SELECT 1 FROM ten_ec_recipients r WHERE r.contact_id=ct.id AND r.status IN('sent','bounced'))";
+    return $conds ? ('WHERE '.implode(' AND ',$conds)) : '';
+}
+
 try {
     switch ($action) {
         case 'list': {
@@ -40,17 +54,23 @@ try {
             $resp=['success'=>true];
             break;
         }
+        case 'count_filter': {
+            // preview how many contacts match a filter (with exclusions)
+            $where = ec_filter_where($c, $_POST);
+            $n=(int)$c->query("SELECT COUNT(*) n FROM ten_ec_contacts ct $where")->fetch_assoc()['n'];
+            $resp=['success'=>true,'count'=>$n];
+            break;
+        }
         case 'add_members': {
-            // by explicit contact ids, or by a search filter, or all
+            // by explicit contact ids, or by a filter (type/country/search + exclusions)
             $aid=(int)($_POST['audience_id']??0); if($aid<=0) throw new Exception('audience_id required');
             $ids = $_POST['contact_ids'] ?? [];
             if (!is_array($ids)) $ids = array_filter(array_map('intval', explode(',', (string)$ids)));
-            $q = trim($_POST['q'] ?? '');
             $added=0;
             $ins=$c->prepare("INSERT IGNORE INTO ten_ec_audience_members (audience_id,contact_id) VALUES (?,?)");
-            if ($q !== '' && !$ids) {
-                $qe='%'.$c->real_escape_string($q).'%';
-                $res=$c->query("SELECT id FROM ten_ec_contacts WHERE (email LIKE '$qe' OR company LIKE '$qe' OR city LIKE '$qe') AND status<>'suppressed'");
+            if (!$ids) {
+                $where = ec_filter_where($c, $_POST);
+                $res=$c->query("SELECT ct.id FROM ten_ec_contacts ct $where");
                 while($res && $x=$res->fetch_assoc()){ $cid=(int)$x['id']; $ins->bind_param('ii',$aid,$cid); $ins->execute(); $added+=$c->affected_rows; }
             } else {
                 foreach ($ids as $cid){ $cid=(int)$cid; if($cid<=0) continue; $ins->bind_param('ii',$aid,$cid); $ins->execute(); $added+=$c->affected_rows; }
