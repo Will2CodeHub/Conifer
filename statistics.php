@@ -12,8 +12,11 @@ $periods = ten_stats_periods();
 // admin's last choice on their own device (localStorage), which takes precedence.
 $defaultPublication = ten_get_setting('stats_default_publication', 'tme');
 if (!isset($sites[$defaultPublication])) $defaultPublication = 'tme';
-$defaultPeriod = ten_get_setting('stats_default_period', 'today');
-if (!isset($periods[$defaultPeriod])) $defaultPeriod = 'today';
+// Default to a DB-backed period so the page loads instantly. Live/intraday
+// periods (today, last N hours) scan the raw log on the fly and are slow, so
+// they're never the default — the admin can still pick them.
+$defaultPeriod = ten_get_setting('stats_default_period', 'last_7_days');
+if (!isset($periods[$defaultPeriod])) $defaultPeriod = 'last_7_days';
 
 $currentPage = 'statistics';
 ?>
