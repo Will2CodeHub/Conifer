@@ -68,9 +68,9 @@
     }
 
     function insertImage(url, attribution) {
-        // Bind the credit to the image (figure + figcaption) so removing the image
-        // removes its attribution too. The site's per-placement CSS still sizes the
-        // <img>. Shared helper lives in module-articles.php.
+        // Insert the image and append its credit at the bottom of the article, linked
+        // so removing the image removes its credit too. The site's per-placement CSS
+        // still sizes the <img>. Shared helper lives in module-articles.php.
         if (window.tenInsertArticleImage) { window.tenInsertArticleImage(url, attribution); return; }
         var editor = document.getElementById("article_text");
         if (!editor) return;

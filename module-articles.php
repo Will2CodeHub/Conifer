@@ -1963,8 +1963,16 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                 document.getElementById('editor-img-ctx-delete').addEventListener('click', function(e) {
                     e.stopPropagation();
                     if (targetImg) {
-                        // If the image sits in an attribution figure, remove the whole
-                        // figure (image + its credit caption) so no orphan credit is left.
+                        // Remove the image's linked bottom credit line, if any, so no
+                        // orphan credit is left at the foot of the article.
+                        var creditId = targetImg.getAttribute && targetImg.getAttribute('data-ten-img');
+                        if (creditId) {
+                            var ed = document.getElementById('article_text');
+                            var linked = ed && ed.querySelector('p.ten-image-credit[data-ten-credit-for="' + creditId + '"]');
+                            if (linked && linked.parentNode) linked.parentNode.removeChild(linked);
+                        }
+                        // Legacy: if the image sits in an attribution figure, remove the
+                        // whole figure (image + its credit caption).
                         var fig = targetImg.closest ? targetImg.closest('figure.ten-article-image') : null;
                         if (fig) {
                             fig.parentNode && fig.parentNode.removeChild(fig);
@@ -2026,30 +2034,50 @@ document.getElementById('modal_publish_now').addEventListener('change', function
 
             // ---- Shared image insert with BOUND attribution (all 3 insert paths:
             // scraper suggestions, free-image search, and the toolbar/library insert).
-            // Inserts <figure class="ten-article-image"><img>[<figcaption> credit]</figure>
-            // so the credit travels with the image — deleting the image deletes the
-            // credit too. Falls back to a plain <img> when there's no attribution.
+            // The image is inserted at the cursor/top; its credit is appended as a line
+            // at the BOTTOM of the article. A shared id links the two (img[data-ten-img]
+            // <-> p.ten-image-credit[data-ten-credit-for]) so removing the image also
+            // removes its bottom credit. No attribution => plain <img>, no credit line.
             function tenEscHtml(s){ return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+            function tenImgId(){ return 'ten-img-' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
             window.tenInsertArticleImage = function(url, attribution, opts) {
                 opts = opts || {};
                 var editor = document.getElementById('article_text');
                 if (!editor) return;
                 var cap = (attribution == null ? '' : String(attribution)).trim();
-                var capHtml = cap ? '<figcaption class="ten-image-credit" style="font-size:12px;color:#6b7280;margin-top:4px;font-style:italic;">' + tenEscHtml(cap) + '</figcaption>' : '';
-                var attrAttr = cap ? ' data-attribution="' + tenEscHtml(cap) + '"' : '';
-                var html = '<figure class="ten-article-image"' + attrAttr + '><img src="' + tenEscHtml(url) + '" alt="" />' + capHtml + '</figure>';
+                var id = cap ? tenImgId() : '';
+                var idAttr = id ? ' data-ten-img="' + tenEscHtml(id) + '"' : '';
+                var imgHtml = '<img src="' + tenEscHtml(url) + '" alt=""' + idAttr + ' />';
+                // Place the image at the cursor (library insert) or at the top (search paths).
                 if (opts.atCursor) {
-                    insertHTMLAtCursor(html, $(editor));
+                    insertHTMLAtCursor(imgHtml, $(editor));
                 } else {
-                    var tmp = document.createElement('div'); tmp.innerHTML = html;
+                    var tmp = document.createElement('div'); tmp.innerHTML = imgHtml;
                     var node = tmp.firstChild;
                     if (editor.firstChild) editor.insertBefore(node, editor.firstChild); else editor.appendChild(node);
                 }
+                // Append the credit as a line at the bottom of the article, linked to the image.
+                if (cap) {
+                    var credit = document.createElement('p');
+                    credit.className = 'ten-image-credit';
+                    credit.setAttribute('data-ten-credit-for', id);
+                    credit.setAttribute('style', 'font-size:12px;color:#6b7280;margin-top:4px;font-style:italic;');
+                    credit.textContent = cap;
+                    editor.appendChild(credit);
+                }
             };
-            // Safety net: drop any image credit whose image was removed, and any
-            // empty image figure. Run before saving the body.
+            // Safety net: drop any bottom credit whose linked image is gone. Also cleans up
+            // the legacy <figure>/<figcaption> structure from earlier drafts. Run before saving.
             window.tenCleanupArticleImages = function(editor) {
                 if (!editor) return;
+                // New structure: bottom credit lines linked to an image by id.
+                editor.querySelectorAll('p.ten-image-credit[data-ten-credit-for]').forEach(function(cap){
+                    var id = cap.getAttribute('data-ten-credit-for');
+                    if (!id || !editor.querySelector('img[data-ten-img="' + id + '"]')) {
+                        if (cap.parentNode) cap.parentNode.removeChild(cap);
+                    }
+                });
+                // Legacy structure: empty image figures + orphaned figcaptions.
                 editor.querySelectorAll('figure.ten-article-image').forEach(function(fig){
                     if (!fig.querySelector('img')) { if (fig.parentNode) fig.parentNode.removeChild(fig); }
                 });
