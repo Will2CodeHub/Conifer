@@ -529,8 +529,87 @@ $currentPage = 'statistics';
                         <!-- Will be populated by JavaScript -->
                     </div>
                 </div>
+
+                <!-- Traffic Sources -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;">
+                    <div class="chart-card">
+                        <h2><i class="fas fa-diagram-project"></i> Where Traffic Comes From</h2>
+                        <div class="chart-container">
+                            <canvas id="sourcesChart"></canvas>
+                        </div>
+                        <p style="font-size: 12px; color: #9ca3af; margin-top: 12px; line-height: 1.5;">
+                            Channels of <em>referred</em> human visits for this period. Visits with no referrer
+                            (typed the address, bookmarks, some apps/emails that strip it) are not counted here,
+                            so this shows where <strong>referred</strong> traffic originates — the best signal for a spike.
+                        </p>
+                    </div>
+                    <div class="chart-card">
+                        <h2><i class="fas fa-arrow-right-to-bracket"></i> Top Referrers</h2>
+                        <div class="table-controls">
+                            <input type="text" id="refSearch" placeholder="Search referrers...">
+                            <label style="font-size: 14px; color: #6b7280;">Show:
+                                <select id="refLimit" onchange="updateReferrersTable()">
+                                    <option value="10" selected>10</option>
+                                    <option value="20">20</option>
+                                    <option value="50">50</option>
+                                </select>
+                            </label>
+                        </div>
+                        <table class="data-table" id="referrersTable">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Referrer</th>
+                                    <th>Channel</th>
+                                    <th>Visits</th>
+                                    <th>% ref.</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td colspan="5" style="text-align: center; padding: 40px; color: #9ca3af;">
+                                        No referrer data
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div class="pagination" id="refPagination"></div>
+                    </div>
+                </div>
+
+                <!-- Traffic Quality & Top Source IPs -->
+                <div class="chart-card">
+                    <h2><i class="fas fa-fingerprint"></i> Traffic Quality &amp; Top Source IPs</h2>
+                    <div id="qualityBanner"></div>
+                    <div id="qualityMetrics" class="stats-grid" style="margin-bottom: 16px;"></div>
+                    <div id="reclassNote"></div>
+                    <p style="font-size: 13px; color: #6b7280; margin: 4px 0 16px;">
+                        Crawlers using ordinary browser user-agents slip past the bot filter and count as
+                        &ldquo;human.&rdquo; The clues: <strong>pages per visitor near 1.0</strong> (each request is a fresh
+                        &ldquo;visitor&rdquo; that never returns) and a handful of IPs producing a large share of hits.
+                        A real audience spreads across many IPs and views several pages each.
+                    </p>
+                    <table class="data-table" id="topIpsTable">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Source IP</th>
+                                <th>Human hits</th>
+                                <th>% of human visits</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td colspan="4" style="text-align: center; padding: 40px; color: #9ca3af;">
+                                    No source-IP data for this period yet. It is collected from the nightly run onward
+                                    (the raw logs rotate every ~3 days, so it can&rsquo;t be backfilled).
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
-            
+
             <!-- AWStats Link -->
             <div class="awstats-link">
                 <div style="flex: 1;">
@@ -589,6 +668,9 @@ $currentPage = 'statistics';
         let hourlyChart = null;
         let topPagesChart = null;
         let trafficTypeChart = null;
+        let sourcesChart = null;
+        let referrersData = [];
+        let refCurrentPage = 1;
         
         // Site configuration from PHP
         const sites = <?php echo json_encode($sites); ?>;
@@ -615,6 +697,10 @@ $currentPage = 'statistics';
             document.getElementById('pageSearch').addEventListener('input', function() {
                 currentPage = 1;
                 updatePageViewsTable();
+            });
+            document.getElementById('refSearch').addEventListener('input', function() {
+                refCurrentPage = 1;
+                updateReferrersTable();
             });
         });
         
@@ -808,7 +894,7 @@ $currentPage = 'statistics';
             updateHourlyChart(stats.hourly_distribution);
             updateTrafficTypeChart(stats);
             updateTopPagesChart(stats.page_views);
-            
+
             // Update page views table
             pageViewsData = Object.entries(stats.page_views || {}).map(([page, views]) => ({
                 page,
@@ -817,7 +903,25 @@ $currentPage = 'statistics';
             }));
             currentPage = 1;
             updatePageViewsTable();
-            
+
+            // Traffic sources (referrers): group into channels + list raw referrers.
+            const selfHost = (sites[data.site_key] && sites[data.site_key].domain
+                ? sites[data.site_key].domain : '').toLowerCase().replace(/^www\./, '');
+            const refEntries = Object.entries(stats.referrers || {});
+            const refTotal = refEntries.reduce((s, [, v]) => s + v, 0);
+            referrersData = refEntries.map(([referrer, visits]) => ({
+                referrer,
+                channel: classifyReferrer(referrer, selfHost),
+                visits,
+                percentage: refTotal > 0 ? (visits / refTotal * 100).toFixed(1) : 0
+            }));
+            refCurrentPage = 1;
+            updateSourcesChart(referrersData);
+            updateReferrersTable();
+
+            // Traffic quality + top source IPs (crawler-in-disguise detection).
+            updateTrafficQuality(stats);
+
             document.getElementById('currentStats').style.display = 'block';
         }
         
@@ -933,6 +1037,254 @@ $currentPage = 'statistics';
             });
         }
         
+        // Extract a clean hostname from a raw referrer string.
+        function refHostname(ref) {
+            let host = '';
+            try {
+                host = new URL(ref).hostname;
+            } catch (e) {
+                host = String(ref || '').replace(/^https?:\/\//i, '').split(/[\/?#]/)[0];
+            }
+            return host.toLowerCase().replace(/^www\./, '');
+        }
+
+        // Bucket a referrer into a human-readable channel. selfHost = this site's
+        // own domain, so on-site click-throughs are labelled "Internal" and don't
+        // drown out the external sources we actually care about.
+        function classifyReferrer(ref, selfHost) {
+            const h = refHostname(ref);
+            if (!h) return 'Direct / unknown';
+            if (selfHost && (h === selfHost || h.endsWith('.' + selfHost))) return 'Internal';
+            const has = s => h.indexOf(s) !== -1;
+
+            if (has('news.google')) return 'Google News';
+            if (has('google.')) return 'Google Search';
+            if (has('bing.')) return 'Bing';
+            if (has('duckduckgo')) return 'DuckDuckGo';
+            if (has('yahoo.')) return 'Yahoo';
+            if (has('ecosia') || has('yandex') || has('baidu') || has('qwant') || has('startpage')) return 'Other search';
+
+            if (h === 't.co' || has('twitter.') || h === 'x.com' || h.endsWith('.x.com')) return 'X / Twitter';
+            if (has('facebook.') || has('fb.me') || h === 'lm.facebook.com') return 'Facebook';
+            if (has('instagram')) return 'Instagram';
+            if (has('reddit') || h === 'redd.it') return 'Reddit';
+            if (has('linkedin') || h === 'lnkd.in') return 'LinkedIn';
+            if (has('youtube') || h === 'youtu.be') return 'YouTube';
+            if (has('pinterest') || h === 'pin.it') return 'Pinterest';
+            if (has('t.me') || has('telegram')) return 'Telegram';
+            if (has('whatsapp') || h === 'wa.me') return 'WhatsApp';
+            if (has('tiktok')) return 'TikTok';
+
+            if (has('flipboard') || has('smartnews') || has('msn.com') || has('news.') ||
+                has('drudge') || has('feedly') || has('upday')) return 'News aggregator';
+
+            return 'Other referrers';
+        }
+
+        // Fixed colours per channel so a source keeps its colour across periods.
+        const CHANNEL_COLORS = {
+            'Google Search': '#4285f4', 'Google News': '#1a73e8', 'Bing': '#008373',
+            'DuckDuckGo': '#de5833', 'Yahoo': '#6001d2', 'Other search': '#5f6368',
+            'Facebook': '#1877f2', 'X / Twitter': '#111827', 'Instagram': '#e1306c',
+            'Reddit': '#ff4500', 'LinkedIn': '#0a66c2', 'YouTube': '#ff0000',
+            'Pinterest': '#bd081c', 'Telegram': '#229ed9', 'WhatsApp': '#25d366',
+            'TikTok': '#000000', 'News aggregator': '#f59e0b', 'Internal': '#9ca3af',
+            'Direct / unknown': '#d1d5db', 'Other referrers': '#a78bfa'
+        };
+
+        function updateSourcesChart(rows) {
+            const ctx = document.getElementById('sourcesChart').getContext('2d');
+            if (sourcesChart) sourcesChart.destroy();
+
+            // Sum visits per channel.
+            const byChannel = {};
+            rows.forEach(r => { byChannel[r.channel] = (byChannel[r.channel] || 0) + r.visits; });
+            let entries = Object.entries(byChannel).sort((a, b) => b[1] - a[1]);
+
+            if (entries.length === 0) {
+                sourcesChart = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: { labels: ['No referrer data'], datasets: [{ data: [1], backgroundColor: ['#e5e7eb'] }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                });
+                return;
+            }
+
+            // Collapse a long tail into "Other" so the chart stays readable.
+            const MAX_SLICES = 9;
+            if (entries.length > MAX_SLICES) {
+                const head = entries.slice(0, MAX_SLICES - 1);
+                const tail = entries.slice(MAX_SLICES - 1).reduce((s, e) => s + e[1], 0);
+                entries = head.concat([['Other', tail]]);
+            }
+
+            sourcesChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: entries.map(e => e[0]),
+                    datasets: [{
+                        data: entries.map(e => e[1]),
+                        backgroundColor: entries.map(e => CHANNEL_COLORS[e[0]] || '#a78bfa')
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: { boxWidth: 12, padding: 8, font: { size: 11 } }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: c => {
+                                    const total = c.dataset.data.reduce((s, v) => s + v, 0);
+                                    const pct = total > 0 ? (c.parsed / total * 100).toFixed(1) : 0;
+                                    return `${c.label}: ${formatNumber(c.parsed)} (${pct}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateReferrersTable() {
+            const searchTerm = document.getElementById('refSearch').value.toLowerCase();
+            const limit = parseInt(document.getElementById('refLimit').value);
+
+            let filtered = referrersData.filter(item =>
+                item.referrer.toLowerCase().includes(searchTerm) ||
+                item.channel.toLowerCase().includes(searchTerm)
+            );
+            filtered.sort((a, b) => b.visits - a.visits);
+
+            const totalPages = Math.ceil(filtered.length / limit);
+            const startIndex = (refCurrentPage - 1) * limit;
+            const pageData = filtered.slice(startIndex, startIndex + limit);
+
+            const tbody = document.querySelector('#referrersTable tbody');
+            if (pageData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 40px; color: #9ca3af;">No referrers found</td></tr>';
+            } else {
+                tbody.innerHTML = pageData.map((item, index) => {
+                    const color = CHANNEL_COLORS[item.channel] || '#a78bfa';
+                    return `
+                        <tr>
+                            <td style="font-weight: 600;">${startIndex + index + 1}</td>
+                            <td><code style="font-size: 13px; color: #667eea; word-break: break-all;">${escapeHtml(refHostname(item.referrer) || item.referrer)}</code></td>
+                            <td><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;color:#fff;background:${color};">${escapeHtml(item.channel)}</span></td>
+                            <td style="font-weight: 600;">${formatNumber(item.visits)}</td>
+                            <td>${item.percentage}%</td>
+                        </tr>`;
+                }).join('');
+            }
+
+            const container = document.getElementById('refPagination');
+            if (totalPages <= 1) {
+                container.innerHTML = '';
+            } else {
+                container.innerHTML =
+                    '<button onclick="changeRefPage(-1)" ' + (refCurrentPage === 1 ? 'disabled' : '') + '>Previous</button>' +
+                    '<span class="pagination-info">Page ' + refCurrentPage + ' of ' + totalPages + ' (' + filtered.length + ' items)</span>' +
+                    '<button onclick="changeRefPage(1)" ' + (refCurrentPage === totalPages ? 'disabled' : '') + '>Next</button>';
+            }
+        }
+
+        function changeRefPage(direction) {
+            refCurrentPage += direction;
+            updateReferrersTable();
+        }
+
+        // Traffic-quality read-out: pages-per-visitor + source-IP concentration.
+        // These expose browser-UA crawlers that the user-agent bot filter counts
+        // as human. Pages-per-visitor works on ANY period (uses existing columns);
+        // the IP table needs the nightly collector's top_ips data (forward-only).
+        function updateTrafficQuality(stats) {
+            const humanVisits = stats.human_visits || 0;
+            const humanUnique = stats.human_unique || 0;
+            const ppv = humanUnique > 0 ? humanVisits / humanUnique : 0;
+
+            const ipEntries = Object.entries(stats.top_ips || {}).sort((a, b) => b[1] - a[1]);
+            const hasIps = ipEntries.length > 0;
+            const top10 = ipEntries.slice(0, 10).reduce((s, e) => s + e[1], 0);
+            const concentration = humanVisits > 0 ? (top10 / humanVisits * 100) : 0;
+
+            const ppvColor = ppv >= 1.8 ? '#059669' : (ppv >= 1.3 ? '#d97706' : '#dc2626');
+            const ppvLabel = ppv >= 1.8 ? 'Healthy — multi-page reading'
+                           : (ppv >= 1.3 ? 'Mixed' : 'Suspicious — ~1 request per visitor');
+            const concColor = concentration >= 35 ? '#dc2626' : (concentration >= 20 ? '#d97706' : '#059669');
+
+            let cards = `
+                <div class="stat-card">
+                    <div class="stat-value" style="color:${ppvColor};">${ppv ? ppv.toFixed(2) : '—'}</div>
+                    <div class="stat-label">Pages per visitor</div>
+                    <div style="font-size:12px;color:#9ca3af;margin-top:6px;">${ppvLabel}</div>
+                </div>`;
+            if (hasIps) {
+                cards += `
+                <div class="stat-card">
+                    <div class="stat-value" style="color:${concColor};">${concentration.toFixed(1)}%</div>
+                    <div class="stat-label">Top 10 IPs' share of human visits</div>
+                    <div style="font-size:12px;color:#9ca3af;margin-top:6px;">Higher = more concentrated (crawler-like)</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${formatNumber(ipEntries[0][1])}</div>
+                    <div class="stat-label">Busiest single IP</div>
+                    <div style="font-size:12px;color:#9ca3af;margin-top:6px;word-break:break-all;">${escapeHtml(ipEntries[0][0])}</div>
+                </div>`;
+            }
+            document.getElementById('qualityMetrics').innerHTML = cards;
+
+            const banner = document.getElementById('qualityBanner');
+            const suspicious = ppv > 0 && ppv < 1.25 && (!hasIps || concentration >= 25);
+            if (suspicious) {
+                banner.innerHTML = `<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:14px;">
+                    <i class="fas fa-triangle-exclamation"></i> <strong>Automated-traffic signature.</strong>
+                    Pages per visitor is ${ppv.toFixed(2)}${hasIps ? `, and the top 10 IPs are ${concentration.toFixed(1)}% of human visits` : ''} — this looks like crawler traffic counted as human, not a real audience jump.
+                </div>`;
+            } else if (ppv > 0) {
+                banner.innerHTML = `<div style="background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:14px;">
+                    <i class="fas fa-circle-check"></i> Pages per visitor is ${ppv.toFixed(2)} — consistent with real browsing.
+                </div>`;
+            } else {
+                banner.innerHTML = '';
+            }
+
+            // Reclassification note: how many hits were moved out of "human".
+            const reclassified = stats.bot_reclassified || 0;
+            const flagged = Object.entries(stats.reclassified_ips || {}).sort((a, b) => b[1] - a[1]);
+            const note = document.getElementById('reclassNote');
+            if (reclassified > 0) {
+                const chips = flagged.slice(0, 8).map(e => {
+                    const label = e[0] === 'unknown' ? 'no-IP monitor' : escapeHtml(e[0]);
+                    return `<code style="font-size:12px;color:#991b1b;background:#fef2f2;padding:2px 6px;border-radius:6px;">${label}: ${formatNumber(e[1])}</code>`;
+                }).join(' ');
+                note.innerHTML = `<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;padding:12px 16px;border-radius:8px;margin-bottom:16px;font-size:13px;line-height:1.6;">
+                    <i class="fas fa-filter"></i> <strong>${formatNumber(reclassified)} hits reclassified as automated</strong> and excluded from the human figures above
+                    (dominant single-IP crawlers and the no-IP 5-minute monitor).${flagged.length ? '<br>Sources: ' + chips : ''}
+                </div>`;
+            } else {
+                note.innerHTML = '';
+            }
+
+            const tbody = document.querySelector('#topIpsTable tbody');
+            if (!hasIps) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:40px;color:#9ca3af;">No source-IP data for this period yet. It is collected from the nightly run onward (the raw logs rotate every ~3 days, so it can’t be backfilled).</td></tr>';
+                return;
+            }
+            tbody.innerHTML = ipEntries.slice(0, 25).map((e, i) => {
+                const pct = humanVisits > 0 ? (e[1] / humanVisits * 100) : 0;
+                const flagged = pct >= 1;
+                return `<tr ${flagged ? 'style="background:#fef2f2;"' : ''}>
+                    <td style="font-weight:600;">${i + 1}</td>
+                    <td><code style="font-size:13px;color:#667eea;">${escapeHtml(e[0])}</code></td>
+                    <td style="font-weight:600;">${formatNumber(e[1])}</td>
+                    <td>${pct.toFixed(2)}%${flagged ? ' <i class="fas fa-flag" style="color:#dc2626;font-size:11px;"></i>' : ''}</td>
+                </tr>`;
+            }).join('');
+        }
+
         function updatePageViewsTable() {
             const searchTerm = document.getElementById('pageSearch').value.toLowerCase();
             const limit = parseInt(document.getElementById('pageLimit').value);

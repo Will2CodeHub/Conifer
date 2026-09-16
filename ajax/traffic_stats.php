@@ -590,8 +590,66 @@ function getStatsFromDatabase($siteKey, $startTime, $endTime) {
     arsort($userAgents);
     $stats['user_agents'] = $userAgents;
     $stmt->close();
-    
+
+    // Aggregate top human source-IPs across the period (crawler detection). The
+    // column may not exist on an un-migrated DB, so guard on it; historical rows
+    // predating collection simply contribute nothing.
+    $stats['top_ips'] = [];
+    $stats['human_ip_distinct'] = 0;
+    $stats['bot_reclassified'] = 0;
+    $stats['reclassified_ips'] = [];
+    if (ts_has_column($conn, 'top_ips')) {
+        $stmt = $conn->prepare("
+            SELECT top_ips
+            FROM ten_traffic_stats
+            WHERE site_key = ?
+            AND stat_date BETWEEN ? AND ?
+        ");
+        $stmt->bind_param("sss", $siteKey, $startDate, $endDate);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $ipHits = [];
+        $flaggedHits = [];
+        $distinctSum = 0;
+        $reclassifiedSum = 0;
+        while ($row = $result->fetch_assoc()) {
+            $obj = json_decode($row['top_ips'] ?? '', true);
+            if (!is_array($obj)) continue;
+            $distinctSum += (int)($obj['distinct'] ?? 0);
+            $reclassifiedSum += (int)($obj['reclassified'] ?? 0);
+            $ips = $obj['ips'] ?? [];
+            if (is_array($ips)) {
+                foreach ($ips as $ip => $hits) {
+                    $ipHits[$ip] = ($ipHits[$ip] ?? 0) + (int)$hits;
+                }
+            }
+            $flagged = $obj['flagged'] ?? [];
+            if (is_array($flagged)) {
+                foreach ($flagged as $ip => $hits) {
+                    $flaggedHits[$ip] = ($flaggedHits[$ip] ?? 0) + (int)$hits;
+                }
+            }
+        }
+        $stmt->close();
+        arsort($ipHits);
+        arsort($flaggedHits);
+        $stats['top_ips'] = array_slice($ipHits, 0, 50, true);
+        $stats['human_ip_distinct'] = $distinctSum; // IP-days; not a true period distinct
+        $stats['bot_reclassified'] = $reclassifiedSum;
+        $stats['reclassified_ips'] = array_slice($flaggedHits, 0, 50, true);
+    }
+
     $conn->close();
-    
+
     return $stats;
+}
+
+/** True if ten_traffic_stats has column $col (cached per request). */
+function ts_has_column($conn, $col) {
+    static $cache = [];
+    if (isset($cache[$col])) return $cache[$col];
+    $ok = false;
+    $r = @$conn->query("SHOW COLUMNS FROM ten_traffic_stats LIKE '" . $conn->real_escape_string($col) . "'");
+    if ($r) { $ok = $r->num_rows > 0; $r->free(); }
+    return $cache[$col] = $ok;
 }
