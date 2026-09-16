@@ -13,6 +13,19 @@ class LogAnalyzer {
     // Cached bot patterns
     private $botPatterns = null;
     private $spamReferrers = null;
+
+    // Auto-reclassification of browser-UA crawlers hiding in the "human" bucket.
+    // These slip past the user-agent bot filter, so we also judge by source IP:
+    // an IP that alone accounts for an implausible SHARE of human-candidate hits
+    // (no single shared NAT should dominate a news audience) or an extreme
+    // ABSOLUTE volume is reclassified as a bot. Deliberately CONSERVATIVE so we
+    // don't erase real readers behind big corporate/mobile gateways — tune these
+    // against real per-site IP data. The no-IP 5-min monitor (IP "unknown") is
+    // always reclassified regardless of volume.
+    const RECLASSIFY_MIN_ABS   = 3000;  // >=3000 human-candidate hits from one IP in the period
+    const RECLASSIFY_MIN_SHARE = 0.15;  // OR >=15% of all human-candidate hits...
+    const RECLASSIFY_SHARE_FLOOR = 300; // ...but only once the IP clears this many hits
+    const MONITOR_IP = 'unknown';       // no-IP health-check/uptime monitor token
     
     // Fallback bot patterns if files don't exist
     private $fallbackBotPatterns = [
@@ -145,8 +158,22 @@ class LogAnalyzer {
             'page_views' => [],
             'referrers' => [],
             'user_agents' => [],
+            // Per-IP hit counts among HUMAN-classified traffic. Browser-UA crawlers
+            // slip past the user-agent bot filter and land in the human bucket, so a
+            // single IP (or a few) racking up thousands of "human" hits is the tell.
+            'human_ip_hits' => [],
         ];
-        
+
+        // PASS 1: tally human-candidate hits per source IP, then decide which IPs
+        // are automated (dominant/extreme-volume crawlers + the no-IP 5-min
+        // monitor). PASS 2 (the loop below) reclassifies their hits as bots so
+        // human_visits / uniques / page-views / fingerprints stay honest.
+        $flaggedIps = $this->computeFlaggedIps(
+            $this->scanHumanIpVolumes($startTime, $endTime, $maxTailBytes)
+        );
+        $stats['bot_reclassified'] = 0;
+        $stats['reclassified_ips'] = [];
+
         $processedLines = 0;
         $skippedLines = 0;
         
@@ -171,15 +198,31 @@ class LogAnalyzer {
             $hour = (int)date('G', $parsed['timestamp']);
             $stats['hourly_distribution'][$hour]++;
             
+            // Normalise the source IP the same way pass 1 did (missing IP → monitor).
+            $lineIp = (isset($parsed['ip']) && $parsed['ip'] !== '' && $parsed['ip'] !== '-')
+                ? $parsed['ip'] : self::MONITOR_IP;
+
             // Categorize traffic
             if ($this->isBot($parsed)) {
                 $stats['bot_visits']++;
             } elseif ($this->isSpam($parsed)) {
                 $stats['spam_visits']++;
+            } elseif (isset($flaggedIps[$lineIp])) {
+                // Reclassified: automated traffic wearing an ordinary browser UA
+                // (or the no-IP monitor) — counted as a bot, not a human visitor.
+                $stats['bot_visits']++;
+                $stats['bot_reclassified']++;
+                $stats['reclassified_ips'][$lineIp] = ($stats['reclassified_ips'][$lineIp] ?? 0) + 1;
             } else {
                 $stats['human_visits']++;
                 $stats['human_unique'][$parsed['visitor_id']] = true;
-                
+
+                // Tally the source IP for human hits (crawler-in-disguise detection).
+                if (isset($parsed['ip']) && $parsed['ip'] !== '' && $parsed['ip'] !== '-') {
+                    $stats['human_ip_hits'][$parsed['ip']] =
+                        ($stats['human_ip_hits'][$parsed['ip']] ?? 0) + 1;
+                }
+
                 // Track page views
                 if (isset($parsed['url'])) {
                     if (!isset($stats['page_views'][$parsed['url']])) {
@@ -225,14 +268,90 @@ class LogAnalyzer {
         // Convert unique arrays to counts
         $stats['unique_visitors'] = count($stats['unique_visitors']);
         $stats['human_unique'] = count($stats['human_unique']);
-        
+
+        // Distinct human IPs, then keep only the top offenders (bounds storage; the
+        // long tail of one-hit reader IPs isn't useful and is needless PII to store).
+        $stats['human_ip_distinct'] = count($stats['human_ip_hits']);
+        arsort($stats['human_ip_hits']);
+        $stats['top_ips'] = array_slice($stats['human_ip_hits'], 0, 50, true);
+        unset($stats['human_ip_hits']);
+
+        // Top reclassified (automated) IPs, for transparency on the stats page.
+        arsort($stats['reclassified_ips']);
+        $stats['reclassified_ips'] = array_slice($stats['reclassified_ips'], 0, 50, true);
+
         // Sort page views and referrers
         arsort($stats['page_views']);
         arsort($stats['referrers']);
-        
+
         return $stats;
     }
     
+    /**
+     * PASS 1 for reclassification: stream the log once and count, per source IP,
+     * the hits that WOULD be classified human (not a UA-bot, not spam). Uses the
+     * same tail-seek + time-window logic as the main pass so the volumes match.
+     * A missing IP is bucketed under MONITOR_IP so the no-IP monitor is counted.
+     *
+     * @return array ip => human-candidate hit count
+     */
+    private function scanHumanIpVolumes($startTime, $endTime, $maxTailBytes) {
+        $counts = [];
+        $fh = @fopen($this->logPath, 'r');
+        if ($fh === false) return $counts;
+
+        if ($maxTailBytes > 0) {
+            $sz = @filesize($this->logPath);
+            if ($sz !== false && $sz > $maxTailBytes) {
+                fseek($fh, -$maxTailBytes, SEEK_END);
+                fgets($fh); // discard the partial first line after the seek
+            }
+        }
+
+        while (($line = fgets($fh)) !== false) {
+            if (trim($line) === '') { continue; }
+            $parsed = $this->parseLogLine($line);
+            if (!$parsed) { continue; }
+            if ($parsed['timestamp'] < $startTime || $parsed['timestamp'] > $endTime) { continue; }
+            // Only human-candidate lines count toward an IP's "human" volume.
+            if ($this->isBot($parsed) || $this->isSpam($parsed)) { continue; }
+            $ip = (isset($parsed['ip']) && $parsed['ip'] !== '' && $parsed['ip'] !== '-')
+                ? $parsed['ip'] : self::MONITOR_IP;
+            $counts[$ip] = ($counts[$ip] ?? 0) + 1;
+        }
+        fclose($fh);
+        return $counts;
+    }
+
+    /**
+     * Decide which IPs are automated, from pass-1 volumes. An IP is flagged when:
+     *  - it is the no-IP monitor (MONITOR_IP), always; or
+     *  - its human-candidate hits reach RECLASSIFY_MIN_ABS (extreme single-IP
+     *    volume); or
+     *  - it clears RECLASSIFY_SHARE_FLOOR hits AND is >= RECLASSIFY_MIN_SHARE of
+     *    all human-candidate hits (dominant single source — no legitimate shared
+     *    gateway should be that large a slice of a news audience).
+     * Conservative by design: a distributed crawler whose IPs each stay small is
+     * NOT auto-reclassified (the pages-per-visitor read-out still flags it).
+     *
+     * @return array ip => hits (only the flagged IPs)
+     */
+    private function computeFlaggedIps(array $ipCounts) {
+        $total = array_sum($ipCounts);
+        $flagged = [];
+        foreach ($ipCounts as $ip => $hits) {
+            $isMonitor = ($ip === self::MONITOR_IP);
+            $byAbs = $hits >= self::RECLASSIFY_MIN_ABS;
+            $byShare = $hits >= self::RECLASSIFY_SHARE_FLOOR
+                && $total > 0
+                && ($hits / $total) >= self::RECLASSIFY_MIN_SHARE;
+            if ($isMonitor || $byAbs || $byShare) {
+                $flagged[$ip] = $hits;
+            }
+        }
+        return $flagged;
+    }
+
     /**
      * Parse a single log line
      * Format: [30/Oct/2025:13:38:41 +0100] visitor_id ip user_agent referrer url
@@ -429,6 +548,10 @@ class LogAnalyzer {
             'page_views' => [],
             'referrers' => [],
             'user_agents' => [],
+            'top_ips' => [],
+            'human_ip_distinct' => 0,
+            'bot_reclassified' => 0,
+            'reclassified_ips' => [],
         ];
     }
     

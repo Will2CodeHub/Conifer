@@ -94,6 +94,8 @@ try {
     echo "→ Human Unique: " . $stats['human_unique'] . "\n";
     echo "→ Bot Visits: " . $stats['bot_visits'] . "\n";
     echo "→ Spam Visits: " . $stats['spam_visits'] . "\n";
+    echo "→ Reclassified as automated (browser-UA crawlers + no-IP monitor): " .
+         (int)($stats['bot_reclassified'] ?? 0) . "\n";
     
     // Prepare data for storage
     $hourlyJson = json_encode($stats['hourly_distribution']);
@@ -185,6 +187,30 @@ try {
                 echo "⚠ Could not store visitor fingerprints: " . $hashStmt->error . "\n";
             }
             $hashStmt->close();
+        }
+    }
+
+    // Store the top human source-IPs + distinct-human-IP count for the day, so the
+    // stats page can spot browser-UA crawlers (a few IPs with huge "human" hit
+    // counts) that the user-agent bot filter doesn't catch. Guarded on the column
+    // existing so the collector keeps working on an un-migrated DB.
+    if ($success && ten_stats_has_column($conn, 'ten_traffic_stats', 'top_ips')) {
+        $topIpsJson = json_encode([
+            'distinct'     => (int)($stats['human_ip_distinct'] ?? 0),
+            'ips'          => (object)($stats['top_ips'] ?? []),
+            'reclassified' => (int)($stats['bot_reclassified'] ?? 0),
+            'flagged'      => (object)($stats['reclassified_ips'] ?? []),
+        ], JSON_INVALID_UTF8_SUBSTITUTE);
+        $ipStmt = $conn->prepare("UPDATE ten_traffic_stats SET top_ips = ? WHERE site_key = ? AND stat_date = ?");
+        if ($ipStmt) {
+            $ipStmt->bind_param("sss", $topIpsJson, $siteKey, $yesterdayDate);
+            if ($ipStmt->execute()) {
+                echo "✓ Stored top " . count($stats['top_ips'] ?? []) . " human source-IPs (" .
+                     (int)($stats['human_ip_distinct'] ?? 0) . " distinct) for crawler detection\n";
+            } else {
+                echo "⚠ Could not store source-IPs: " . $ipStmt->error . "\n";
+            }
+            $ipStmt->close();
         }
     }
 
