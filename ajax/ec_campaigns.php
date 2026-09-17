@@ -8,6 +8,7 @@ ec_require_manage();
 
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
 $c = ec_db();
+ec_ensure_schema($c);
 $resp = ['success'=>false,'message'=>''];
 
 /** Expand the campaign's audience into recipients, skipping suppressed and
@@ -53,16 +54,27 @@ function ec_save_variants(mysqli $c, int $campaignId, array $variants): void {
         $st->execute();
     }
     $st->close();
+    // Variants were just deleted+recreated with NEW ids. Re-point any existing recipients
+    // whose variant no longer exists to a current variant, so they don't become orphaned
+    // ("no template" at send time) after a campaign edit.
+    $cur=[]; $vr=$c->query("SELECT id FROM ten_ec_campaign_variants WHERE campaign_id=$campaignId ORDER BY id");
+    while($vr && $x=$vr->fetch_assoc()) $cur[]=(int)$x['id'];
+    if($cur){
+        $first=$cur[0]; $list=implode(',', $cur);
+        $c->query("UPDATE ten_ec_recipients SET variant_id=$first WHERE campaign_id=$campaignId AND variant_id NOT IN ($list)");
+    }
 }
 
 try {
     switch ($action) {
         case 'list': {
             $rows=[];
+            $where = !empty($_POST['include_archived']) ? '' : 'WHERE ca.archived=0';
             $res=$c->query("SELECT ca.*, a.name AS audience_name,
                 (SELECT COUNT(*) FROM ten_ec_recipients r WHERE r.campaign_id=ca.id) AS total,
                 (SELECT COUNT(*) FROM ten_ec_recipients r WHERE r.campaign_id=ca.id AND r.status='sent') AS sent
                 FROM ten_ec_campaigns ca LEFT JOIN ten_ec_audiences a ON a.id=ca.audience_id
+                $where
                 ORDER BY ca.id DESC");
             while($res && $x=$res->fetch_assoc()) $rows[]=$x;
             $resp=['success'=>true,'rows'=>$rows];
@@ -166,6 +178,21 @@ try {
         case 'pause':  { $id=(int)($_POST['id']??0); $c->query("UPDATE ten_ec_campaigns SET status='paused' WHERE id=$id AND status IN('sending','scheduled')"); $resp=['success'=>true]; break; }
         case 'resume': { $id=(int)($_POST['id']??0); $c->query("UPDATE ten_ec_campaigns SET status='sending' WHERE id=$id AND status='paused'"); $resp=['success'=>true]; break; }
         case 'cancel': { $id=(int)($_POST['id']??0); $c->query("UPDATE ten_ec_campaigns SET status='cancelled' WHERE id=$id"); $resp=['success'=>true]; break; }
+        case 'archive':   { $id=(int)($_POST['id']??0); $c->query("UPDATE ten_ec_campaigns SET archived=1 WHERE id=$id"); $resp=['success'=>true]; break; }
+        case 'unarchive': { $id=(int)($_POST['id']??0); $c->query("UPDATE ten_ec_campaigns SET archived=0 WHERE id=$id"); $resp=['success'=>true]; break; }
+        case 'delete': {
+            $id=(int)($_POST['id']??0); if($id<=0) throw new Exception('id required');
+            $row=$c->query("SELECT status FROM ten_ec_campaigns WHERE id=$id")->fetch_assoc();
+            if(!$row) throw new Exception('Campaign not found');
+            if($row['status']==='sending') throw new Exception('Pause or cancel the campaign before deleting it.');
+            // Cascade: tracking events -> recipients -> A/B variants -> campaign.
+            $c->query("DELETE FROM ten_ec_events WHERE recipient_id IN (SELECT id FROM (SELECT id FROM ten_ec_recipients WHERE campaign_id=$id) t)");
+            $c->query("DELETE FROM ten_ec_recipients WHERE campaign_id=$id");
+            $c->query("DELETE FROM ten_ec_campaign_variants WHERE campaign_id=$id");
+            $c->query("DELETE FROM ten_ec_campaigns WHERE id=$id");
+            $resp=['success'=>true];
+            break;
+        }
 
         case 'progress': {
             $id=(int)($_POST['id']??0);
@@ -195,7 +222,17 @@ try {
                 FROM ten_ec_campaign_variants v LEFT JOIN ten_ec_recipients r ON r.variant_id=v.id
                 WHERE v.campaign_id=$id GROUP BY v.id,v.label ORDER BY v.id");
             while($vr && $x=$vr->fetch_assoc()) $variants[]=$x;
-            $resp=['success'=>true,'funnel'=>$funnel,'variants'=>$variants];
+            // delivery status breakdown (sent/queued/failed/skipped/…) so a campaign that
+            // sent nothing still reports WHY instead of showing a blank report.
+            $byStatus=[];
+            $sr=$c->query("SELECT status,COUNT(*) n FROM ten_ec_recipients WHERE campaign_id=$id GROUP BY status");
+            while($sr && $x=$sr->fetch_assoc()) $byStatus[$x['status']]=(int)$x['n'];
+            // a sample of the most recent failure/skip reasons
+            $errors=[];
+            $er=$c->query("SELECT error,COUNT(*) n FROM ten_ec_recipients WHERE campaign_id=$id AND status IN('failed','skipped') AND error IS NOT NULL AND error<>'' GROUP BY error ORDER BY n DESC LIMIT 5");
+            while($er && $x=$er->fetch_assoc()) $errors[]=$x;
+            $meta=$c->query("SELECT name,status,created_at,started_at,completed_at,scheduled_at FROM ten_ec_campaigns WHERE id=$id")->fetch_assoc();
+            $resp=['success'=>true,'campaign'=>$meta,'funnel'=>$funnel,'variants'=>$variants,'by_status'=>$byStatus,'errors'=>$errors];
             break;
         }
         case 'recipient_timeline': {
@@ -207,11 +244,26 @@ try {
         }
         case 'recipients': {
             $id=(int)($_POST['id']??0);
-            $limit=min(200,max(10,(int)($_POST['limit']??50))); $offset=max(0,(int)($_POST['offset']??0));
-            $rows=[]; $res=$c->query("SELECT r.id,ct.email,ct.first_name,ct.last_name,r.status,r.sent_at,r.opened_at,r.first_click_at,r.replied_at,r.unsubscribed_at,r.bounce_type
+            $limit=min(1000,max(10,(int)($_POST['limit']??50))); $offset=max(0,(int)($_POST['offset']??0));
+            $total=(int)$c->query("SELECT COUNT(*) n FROM ten_ec_recipients WHERE campaign_id=$id")->fetch_assoc()['n'];
+            $rows=[]; $res=$c->query("SELECT r.id,r.contact_id,ct.email,ct.first_name,ct.last_name,r.status,r.error,r.sent_at,r.opened_at,r.first_click_at,r.replied_at,r.unsubscribed_at,r.bounce_type
                 FROM ten_ec_recipients r JOIN ten_ec_contacts ct ON ct.id=r.contact_id WHERE r.campaign_id=$id ORDER BY r.id DESC LIMIT $limit OFFSET $offset");
             while($res && $x=$res->fetch_assoc()) $rows[]=$x;
-            $resp=['success'=>true,'rows'=>$rows];
+            $resp=['success'=>true,'total'=>$total,'rows'=>$rows];
+            break;
+        }
+        case 'resend': {
+            // Re-queue recipients of this campaign so they are SENT AGAIN (overrides the
+            // never-email-twice default). Empty contact_ids = everyone in the campaign.
+            // Suppressed/unsubscribed contacts are still re-checked and skipped at send time.
+            $id=(int)($_POST['id']??0); if($id<=0) throw new Exception('id required');
+            $ids=trim((string)($_POST['contact_ids']??''));
+            $where="campaign_id=$id";
+            if($ids!==''){ $list=array_filter(array_map('intval', explode(',', $ids))); if(!$list) throw new Exception('No valid recipients selected'); $where.=" AND contact_id IN (".implode(',', $list).")"; }
+            $c->query("UPDATE ten_ec_recipients SET status='queued', sent_at=NULL, error=NULL, send_after=NULL WHERE $where");
+            $n=(int)$c->affected_rows;
+            if($n>0) $c->query("UPDATE ten_ec_campaigns SET status='sending', started_at=COALESCE(started_at,NOW()), completed_at=NULL WHERE id=$id");
+            $resp=['success'=>true,'requeued'=>$n];
             break;
         }
         default: throw new Exception('Unknown action: '.$action);

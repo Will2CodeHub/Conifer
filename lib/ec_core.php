@@ -116,17 +116,113 @@ function ec_rewrite_links(string $html, string $token, string $trackBase, array 
 
 /** Build a WHERE clause for a contact filter (build-from-filter / refresh).
  *  Always excludes suppressed unless include_suppressed=1; optionally excludes
- *  anyone already emailed in any campaign. $p keys: q,type,country,
- *  exclude_contacted,include_suppressed. */
+ *  anyone already emailed in any campaign. $p keys: q,type,country,industry,
+ *  category,exclude_contacted,include_suppressed. */
 function ec_filter_where(mysqli $c, array $p): string {
     $conds = [];
     $q = trim($p['q'] ?? '');
     if ($q !== '') { $qe='%'.$c->real_escape_string($q).'%'; $conds[]="(ct.email LIKE '$qe' OR ct.company LIKE '$qe' OR ct.city LIKE '$qe' OR ct.first_name LIKE '$qe' OR ct.last_name LIKE '$qe')"; }
     if (($p['type'] ?? '') !== '') $conds[]="ct.contact_type='".$c->real_escape_string($p['type'])."'";
     if (($p['country'] ?? '') !== '') $conds[]="ct.country LIKE '%".$c->real_escape_string($p['country'])."%'";
+    if (($p['industry'] ?? '') !== '') $conds[]="ct.industry='".$c->real_escape_string($p['industry'])."'";
+    if (($p['category'] ?? '') !== '') $conds[]="ct.category='".$c->real_escape_string($p['category'])."'";
     if (empty($p['include_suppressed'])) $conds[]="NOT EXISTS (SELECT 1 FROM ten_ec_suppression s WHERE s.email=ct.email)";
     if (!empty($p['exclude_contacted'])) $conds[]="NOT EXISTS (SELECT 1 FROM ten_ec_recipients r WHERE r.contact_id=ct.id AND r.status IN('sent','bounced'))";
     return $conds ? ('WHERE '.implode(' AND ',$conds)) : '';
+}
+
+/** Extended contact columns editable/importable beyond the original core set. */
+function ec_contact_columns(): array {
+    return ['first_name','last_name','company','contact_type','phone','city','country',
+            'job_title','website','address','postcode','region','industry','category','source','consent_basis'];
+}
+
+/**
+ * Insert or update a contact keyed by email. $d holds column=>value.
+ * On an existing email, a non-empty new value overwrites; blanks preserve what's
+ * there (so a light re-import never wipes richer data). Returns [id, inserted].
+ */
+function ec_upsert_contact(mysqli $c, array $d): array {
+    $email = strtolower(trim($d['email'] ?? ''));
+    $cols  = ec_contact_columns();
+    $vals  = [$email];
+    foreach ($cols as $k) $vals[] = trim((string)($d[$k] ?? ''));
+    $fieldList = 'email,'.implode(',', $cols);
+    $ph  = implode(',', array_fill(0, count($cols)+1, '?'));
+    $upd = [];
+    foreach ($cols as $k) $upd[] = "$k=IF(VALUES($k)<>'',VALUES($k),$k)";
+    $upd[] = "updated_at=NOW()";
+    $sql = "INSERT INTO ten_ec_contacts ($fieldList) VALUES ($ph) ON DUPLICATE KEY UPDATE ".implode(',', $upd);
+    $st  = $c->prepare($sql);
+    $st->bind_param(str_repeat('s', count($vals)), ...$vals);
+    $st->execute();
+    $inserted = ($c->affected_rows === 1);
+    $id = (int)$c->insert_id;
+    $st->close();
+    if (!$id) {
+        $r = $c->query("SELECT id FROM ten_ec_contacts WHERE email='".$c->real_escape_string($email)."'");
+        $id = $r ? (int)($r->fetch_assoc()['id'] ?? 0) : 0;
+    }
+    return ['id'=>$id, 'inserted'=>$inserted];
+}
+
+/**
+ * Idempotent, cheap schema top-up for the newer contact fields, the managed
+ * categories vocabulary, and the campaign archived flag. Safe to call on every
+ * page/AJAX hit — it only ALTERs when something is actually missing.
+ */
+function ec_ensure_schema(mysqli $c): void {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+
+    $newCols = [
+        'job_title' => "VARCHAR(150) NULL",
+        'website'   => "VARCHAR(255) NULL",
+        'address'   => "VARCHAR(255) NULL",
+        'postcode'  => "VARCHAR(40) NULL",
+        'region'    => "VARCHAR(120) NULL",
+        'industry'  => "VARCHAR(150) NULL",
+        'category'  => "VARCHAR(150) NULL",
+    ];
+    foreach ($newCols as $name => $def) {
+        $chk = $c->query("SHOW COLUMNS FROM ten_ec_contacts LIKE '$name'");
+        if (!$chk || $chk->num_rows === 0) @$c->query("ALTER TABLE ten_ec_contacts ADD COLUMN $name $def");
+    }
+    // helpful indexes for the new audience filters (ignore errors if they exist)
+    $iInd = @$c->query("SHOW INDEX FROM ten_ec_contacts WHERE Key_name='idx_ec_industry'");
+    if ($iInd && $iInd->num_rows === 0) @$c->query("ALTER TABLE ten_ec_contacts ADD INDEX idx_ec_industry (industry)");
+    $iCat = @$c->query("SHOW INDEX FROM ten_ec_contacts WHERE Key_name='idx_ec_category'");
+    if ($iCat && $iCat->num_rows === 0) @$c->query("ALTER TABLE ten_ec_contacts ADD INDEX idx_ec_category (category)");
+
+    @$c->query("CREATE TABLE IF NOT EXISTS ten_ec_categories (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(150) NOT NULL UNIQUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $ca = $c->query("SHOW COLUMNS FROM ten_ec_campaigns LIKE 'archived'");
+    if (!$ca || $ca->num_rows === 0) @$c->query("ALTER TABLE ten_ec_campaigns ADD COLUMN archived TINYINT(1) NOT NULL DEFAULT 0");
+
+    $sa = $c->query("SHOW COLUMNS FROM ten_ec_recipients LIKE 'send_attempts'");
+    if (!$sa || $sa->num_rows === 0) @$c->query("ALTER TABLE ten_ec_recipients ADD COLUMN send_attempts INT NOT NULL DEFAULT 0");
+
+    // Captured replies + bounces (content), populated by the IMAP poller.
+    @$c->query("CREATE TABLE IF NOT EXISTS ten_ec_responses (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        recipient_id INT NULL,
+        campaign_id INT NULL,
+        contact_email VARCHAR(255) NULL,
+        type VARCHAR(10) NOT NULL,
+        subject VARCHAR(500) NULL,
+        body MEDIUMTEXT NULL,
+        bounce_type VARCHAR(10) NULL,
+        message_uid VARCHAR(255) NULL,
+        received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_resp_type (type),
+        INDEX idx_resp_campaign (campaign_id),
+        UNIQUE KEY uq_resp_msg (message_uid)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 }
 
 /** Is this email on the global suppression list? */

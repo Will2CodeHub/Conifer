@@ -73,19 +73,19 @@ function ec_smtp_transmit(array $s, string $envelopeFrom, string $rcpt, string $
             }
         }
 
-        [$code,] = ec_smtp_cmd($fp, 'MAIL FROM:<' . $envelopeFrom . '>');
-        if ($code !== 250) throw new Exception("MAIL FROM: $code");
-        [$code,] = ec_smtp_cmd($fp, 'RCPT TO:<' . $rcpt . '>');
-        if ($code !== 250 && $code !== 251) throw new Exception("RCPT TO: $code");
-        [$code,] = ec_smtp_cmd($fp, 'DATA');
-        if ($code !== 354) throw new Exception("DATA: $code");
+        [$code,$resp] = ec_smtp_cmd($fp, 'MAIL FROM:<' . $envelopeFrom . '>');
+        if ($code !== 250) throw new Exception("MAIL FROM rejected — $resp");
+        [$code,$resp] = ec_smtp_cmd($fp, 'RCPT TO:<' . $rcpt . '>');
+        if ($code !== 250 && $code !== 251) throw new Exception("RCPT TO rejected — $resp");
+        [$code,$resp] = ec_smtp_cmd($fp, 'DATA');
+        if ($code !== 354) throw new Exception("DATA: $resp");
 
         // dot-stuff and ensure CRLF line endings
         $body = preg_replace('/\r\n|\r|\n/', "\r\n", $rawData);
         $body = preg_replace('/^\./m', '..', $body);
         fwrite($fp, $body . "\r\n.\r\n");
-        [$code,] = ec_smtp_read($fp);
-        if ($code !== 250) throw new Exception("message not accepted: $code");
+        [$code,$resp] = ec_smtp_read($fp);
+        if ($code !== 250) throw new Exception("message not accepted — $resp");
 
         ec_smtp_cmd($fp, 'QUIT');
         fclose($fp);

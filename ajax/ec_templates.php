@@ -65,22 +65,37 @@ try {
             break;
         }
         case 'test_send': {
-            // send the rendered template to the logged-in user
-            $to = $_SESSION['ten_email'] ?? '';
-            if(!filter_var($to,FILTER_VALIDATE_EMAIL)) throw new Exception('Your account has no valid email');
+            // send the rendered template to a chosen address (defaults to the logged-in user),
+            // using a chosen SENDING PROFILE for the SMTP transport + identity (SMTP now lives
+            // per-profile, not in global Settings).
+            $to = strtolower(trim($_POST['to'] ?? '')) ?: strtolower(trim($_SESSION['ten_email'] ?? ''));
+            if(!filter_var($to,FILTER_VALIDATE_EMAIL)) throw new Exception('Enter a valid email address to send the test to');
             $subject=trim($_POST['subject']??'(test)'); $html=$_POST['html_body']??''; $text=trim($_POST['text_body']??'');
-            $fromName=trim($_POST['from_name']??''); $fromEmail=trim($_POST['from_email']??''); $replyTo=trim($_POST['reply_to']??'');
+            $profile = ec_profile((int)($_POST['profile_id'] ?? 0));
+            $s = ec_settings();
+            // Identity: sending profile wins, then the template's own from fields, then Settings defaults.
+            $fromEmail = ($profile['from_email'] ?? '') ?: trim($_POST['from_email']??'') ?: ($s['default_from_email'] ?? '');
+            $fromName  = ($profile['from_name']  ?? '') ?: trim($_POST['from_name']??'')  ?: ($s['default_from_name']  ?? '');
+            $replyTo   = ($profile['reply_to']   ?? '') ?: trim($_POST['reply_to']??'')   ?: ($s['default_reply_to']   ?? $fromEmail);
+            if($fromEmail==='') throw new Exception('No From address — pick a sending profile (Sending tab) or set a default From in Settings');
+            $opts=['from_name'=>$fromName,'from_email'=>$fromEmail,'reply_to'=>$replyTo,'list_unsub_url'=>ec_track_base().'/u.php?r=TEST'];
+            // SMTP transport: from the profile. Without one, fall back to global Settings SMTP (may be empty).
+            if(!empty($profile['smtp_host'])) {
+                $opts['smtp']=['host'=>$profile['smtp_host'],'port'=>$profile['smtp_port'],'security'=>$profile['smtp_security'],'user'=>$profile['smtp_user'],'pass'=>$profile['smtp_pass_plain']??''];
+            } elseif (empty($s['smtp_host'])) {
+                throw new Exception('No SMTP host — choose a sending profile that has SMTP configured (Sending tab)');
+            }
             $sample=ec_sample_contact(); $sample['email']=$to;
-            $unsub=ec_track_base().'/u.php?r=TEST';
+            $unsub=$opts['list_unsub_url'];
             if($text==='') $text=trim(preg_replace('/\s+/',' ',strip_tags($html)));
             $res = ec_send_message(
                 ['email'=>$to,'name'=>trim(($_SESSION['ten_full_name']??''))],
                 ec_render($subject,$sample,$unsub),
                 ec_render($html,$sample,$unsub),
                 ec_render($text,$sample,$unsub),
-                ['from_name'=>$fromName,'from_email'=>$fromEmail,'reply_to'=>$replyTo,'list_unsub_url'=>$unsub]
+                $opts
             );
-            $resp=['success'=>$res['ok'],'message'=>$res['ok']?('Sent to '.$to):$res['error']];
+            $resp=['success'=>$res['ok'],'message'=>$res['ok']?('Sent to '.$to.' via '.($profile['name']??'global settings')):$res['error']];
             break;
         }
         default: throw new Exception('Unknown action: '.$action);
