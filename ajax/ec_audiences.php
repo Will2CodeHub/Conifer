@@ -18,6 +18,8 @@ function ec_filter_fields(array $p): array {
         'q' => trim($p['q'] ?? ''),
         'type' => trim($p['type'] ?? ''),
         'country' => trim($p['country'] ?? ''),
+        'industry' => trim($p['industry'] ?? ''),
+        'category' => trim($p['category'] ?? ''),
         'exclude_contacted' => !empty($p['exclude_contacted']) ? 1 : 0,
     ];
 }

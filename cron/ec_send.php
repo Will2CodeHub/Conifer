@@ -65,6 +65,13 @@ while ($camp = $camps->fetch_assoc()) {
         // load variant + template
         $vid=(int)$r['variant_id'];
         $tpl = $c->query("SELECT v.subject_override, t.* FROM ten_ec_campaign_variants v JOIN ten_ec_templates t ON t.id=v.template_id WHERE v.id=$vid")->fetch_assoc();
+        if (!$tpl) {
+            // Recipient's variant was replaced when the campaign was re-saved (variants are
+            // deleted+recreated). Fall back to the campaign's current first variant so an
+            // edited campaign still sends, and re-point the recipient to it.
+            $tpl = $c->query("SELECT v.id AS _vid, v.subject_override, t.* FROM ten_ec_campaign_variants v JOIN ten_ec_templates t ON t.id=v.template_id WHERE v.campaign_id=$cid ORDER BY v.id LIMIT 1")->fetch_assoc();
+            if ($tpl) { $nv=(int)$tpl['_vid']; $c->query("UPDATE ten_ec_recipients SET variant_id=$nv WHERE id=$rid"); }
+        }
         if (!$tpl) { $c->query("UPDATE ten_ec_recipients SET status='failed', error='no template' WHERE id=$rid"); $failed++; continue; }
 
         $token=$r['token'];
@@ -108,8 +115,18 @@ while ($camp = $camps->fetch_assoc()) {
             $sent++;
         } else {
             $err=$c->real_escape_string(substr($res['error'],0,240));
-            $c->query("UPDATE ten_ec_recipients SET status='failed', error='$err' WHERE id=$rid");
-            $failed++;
+            // Temporary 4xx failures (e.g. greylisting "451 4.7.1 try again later") are
+            // RETRIED with backoff rather than failed — the retry reuses the same VERP token
+            // so the greylist triplet is now known and is accepted on the second attempt.
+            $temporary = (bool)preg_match('/\b4\d\d\b/', $res['error']);
+            $attempts = (int)($r['send_attempts'] ?? 0) + 1;
+            if ($temporary && $attempts < 6) {
+                $delay = 300 * $attempts; // 5,10,15,20,25 min backoff
+                $c->query("UPDATE ten_ec_recipients SET status='queued', error='$err', send_attempts=$attempts, send_after=DATE_ADD(NOW(), INTERVAL $delay SECOND) WHERE id=$rid");
+            } else {
+                $c->query("UPDATE ten_ec_recipients SET status='failed', error='$err', send_attempts=$attempts WHERE id=$rid");
+                $failed++;
+            }
         }
     }
     // complete campaign when nothing queued remains

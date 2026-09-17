@@ -9,6 +9,7 @@ ec_require_manage();
 
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
 $c = ec_db();
+ec_ensure_schema($c);
 $resp = ['success' => false, 'message' => ''];
 
 /** Parse pasted/CSV text into rows of assoc arrays keyed by header. */
@@ -96,27 +97,57 @@ try {
             $resp=['success'=>true,'rows'=>$rows];
             break;
         }
+        case 'industries': {
+            $rows=[]; $res=$c->query("SELECT industry, COUNT(*) n FROM ten_ec_contacts WHERE industry IS NOT NULL AND industry<>'' GROUP BY industry ORDER BY industry");
+            while($res && $x=$res->fetch_assoc()) $rows[]=$x;
+            $resp=['success'=>true,'rows'=>$rows];
+            break;
+        }
+        case 'get': {
+            $id=(int)($_POST['id']??0);
+            $row=$c->query("SELECT * FROM ten_ec_contacts WHERE id=$id")->fetch_assoc();
+            $resp=['success'=>(bool)$row,'contact'=>$row,'message'=>$row?'':'Contact not found'];
+            break;
+        }
         case 'list': {
+            // Columns that may be filtered (f_<col>) and sorted (sort=<col>).
+            $filterable = ['email','first_name','last_name','company','job_title','contact_type',
+                           'industry','category','website','address','city','postcode','region',
+                           'country','phone','source','status'];
             $q = trim($_POST['q'] ?? $_GET['q'] ?? '');
             $type = trim($_POST['type'] ?? '');
             $country = trim($_POST['country'] ?? '');
+            $industry = trim($_POST['industry'] ?? '');
+            $category = trim($_POST['category'] ?? '');
             $excludeContacted = !empty($_POST['exclude_contacted']);
             $excludeSuppressed = !empty($_POST['exclude_suppressed']);
             $limit = min(500, max(10, (int)($_POST['limit'] ?? 50)));
             $offset = max(0, (int)($_POST['offset'] ?? 0));
             $conds = [];
-            if ($q !== '') { $qe='%'.$c->real_escape_string($q).'%'; $conds[]="(ct.email LIKE '$qe' OR ct.first_name LIKE '$qe' OR ct.last_name LIKE '$qe' OR ct.company LIKE '$qe' OR ct.city LIKE '$qe')"; }
+            if ($q !== '') { $qe='%'.$c->real_escape_string($q).'%'; $conds[]="(ct.email LIKE '$qe' OR ct.first_name LIKE '$qe' OR ct.last_name LIKE '$qe' OR ct.company LIKE '$qe' OR ct.city LIKE '$qe' OR ct.industry LIKE '$qe' OR ct.category LIKE '$qe' OR ct.job_title LIKE '$qe')"; }
             if ($type !== '') $conds[]="ct.contact_type='".$c->real_escape_string($type)."'";
             if ($country !== '') $conds[]="ct.country LIKE '%".$c->real_escape_string($country)."%'";
+            if ($industry !== '') $conds[]="ct.industry='".$c->real_escape_string($industry)."'";
+            if ($category !== '') $conds[]="ct.category='".$c->real_escape_string($category)."'";
+            // Per-column contains-filters (f_email, f_company, …).
+            foreach ($filterable as $col) {
+                $v = trim($_POST['f_'.$col] ?? '');
+                if ($v !== '') $conds[] = "ct.$col LIKE '%".$c->real_escape_string($v)."%'";
+            }
             if ($excludeSuppressed) $conds[]="NOT EXISTS (SELECT 1 FROM ten_ec_suppression s WHERE s.email=ct.email)";
             if ($excludeContacted) $conds[]="NOT EXISTS (SELECT 1 FROM ten_ec_recipients r WHERE r.contact_id=ct.id AND r.status IN('sent','bounced'))";
             $where = $conds ? ('WHERE '.implode(' AND ',$conds)) : '';
+            // Sorting (whitelisted column + direction).
+            $sortCol = in_array($_POST['sort'] ?? '', $filterable, true) ? $_POST['sort'] : '';
+            $dir = (strtolower($_POST['dir'] ?? '') === 'desc') ? 'DESC' : 'ASC';
+            $orderBy = $sortCol ? "ct.$sortCol $dir, ct.id DESC" : "ct.id DESC";
             $total = (int)$c->query("SELECT COUNT(*) n FROM ten_ec_contacts ct $where")->fetch_assoc()['n'];
             $rows = [];
-            $res = $c->query("SELECT ct.id,ct.email,ct.first_name,ct.last_name,ct.company,ct.contact_type,ct.city,ct.country,ct.source,ct.status,
+            $res = $c->query("SELECT ct.id,ct.email,ct.first_name,ct.last_name,ct.company,ct.job_title,ct.contact_type,
+                ct.industry,ct.category,ct.website,ct.address,ct.city,ct.postcode,ct.region,ct.country,ct.phone,ct.source,ct.status,
                 (SELECT COUNT(*) FROM ten_ec_recipients r WHERE r.contact_id=ct.id AND r.status='sent') AS times_sent,
                 EXISTS(SELECT 1 FROM ten_ec_suppression s WHERE s.email=ct.email) AS suppressed
-                FROM ten_ec_contacts ct $where ORDER BY ct.id DESC LIMIT $limit OFFSET $offset");
+                FROM ten_ec_contacts ct $where ORDER BY $orderBy LIMIT $limit OFFSET $offset");
             while ($x = $res->fetch_assoc()) $rows[] = $x;
             $resp = ['success'=>true,'total'=>$total,'rows'=>$rows];
             break;
@@ -127,32 +158,25 @@ try {
             $source = preg_replace('/[^a-z_]/','', strtolower($_POST['source'] ?? 'csv')) ?: 'csv';
             $consent = trim($_POST['consent_basis'] ?? '');
             $type = trim($_POST['contact_type'] ?? '');
+            $aid = (int)($_POST['audience_id'] ?? 0); // optionally add imported contacts to an audience
             $rows = ec_parse_csv($text);
             if (!$rows) throw new Exception('No rows with an email column found');
-            $new=0;$updated=0;$skipped=0;$invalid=0;
-            $ins = $c->prepare("INSERT INTO ten_ec_contacts (email,first_name,last_name,company,contact_type,phone,city,country,source,consent_basis)
-                                VALUES (?,?,?,?,?,?,?,?,?,?)
-                                ON DUPLICATE KEY UPDATE
-                                  first_name=IF(VALUES(first_name)<>'',VALUES(first_name),first_name),
-                                  last_name=IF(VALUES(last_name)<>'',VALUES(last_name),last_name),
-                                  company=IF(VALUES(company)<>'',VALUES(company),company),
-                                  contact_type=IF(VALUES(contact_type)<>'',VALUES(contact_type),contact_type),
-                                  phone=IF(VALUES(phone)<>'',VALUES(phone),phone),
-                                  city=IF(VALUES(city)<>'',VALUES(city),city),
-                                  country=IF(VALUES(country)<>'',VALUES(country),country),
-                                  updated_at=NOW()");
+            $new=0;$updated=0;$skipped=0;$invalid=0;$added=0;
+            $link = $aid>0 ? $c->prepare("INSERT IGNORE INTO ten_ec_audience_members (audience_id,contact_id) VALUES (?,?)") : null;
             foreach ($rows as $r) {
                 $email = strtolower(trim($r['email']));
                 if (!filter_var($email, FILTER_VALIDATE_EMAIL)) { $invalid++; continue; }
                 if (ec_is_suppressed($email)) { $skipped++; continue; }
-                $fn=$r['first_name']??'';$ln=$r['last_name']??'';$co=$r['company']??'';$ph=$r['phone']??'';$ci=$r['city']??'';$cy=$r['country']??'';
-                $ty = trim($r['contact_type'] ?? '') ?: $type;
-                $ins->bind_param('ssssssssss',$email,$fn,$ln,$co,$ty,$ph,$ci,$cy,$source,$consent);
-                $ins->execute();
-                if ($c->affected_rows === 1) $new++; else $updated++;
+                $r['email']        = $email;
+                $r['contact_type'] = trim($r['contact_type'] ?? '') ?: $type;
+                $r['source']       = $source;
+                $r['consent_basis']= $consent;
+                $res = ec_upsert_contact($c, $r);
+                if ($res['inserted']) $new++; else $updated++;
+                if ($link && $res['id']>0) { $link->bind_param('ii',$aid,$res['id']); $link->execute(); $added += $c->affected_rows; }
             }
-            $ins->close();
-            $resp = ['success'=>true,'new'=>$new,'updated'=>$updated,'skipped_suppressed'=>$skipped,'invalid'=>$invalid,'total_rows'=>count($rows)];
+            if ($link) $link->close();
+            $resp = ['success'=>true,'new'=>$new,'updated'=>$updated,'skipped_suppressed'=>$skipped,'invalid'=>$invalid,'total_rows'=>count($rows),'added_to_audience'=>$added];
             break;
         }
 
@@ -160,11 +184,35 @@ try {
             $email = strtolower(trim($_POST['email'] ?? ''));
             if (!filter_var($email, FILTER_VALIDATE_EMAIL)) throw new Exception('Valid email required');
             if (ec_is_suppressed($email)) throw new Exception('That email is on the suppression list');
-            $fn=trim($_POST['first_name']??'');$ln=trim($_POST['last_name']??'');$co=trim($_POST['company']??'');
-            $ph=trim($_POST['phone']??'');$ci=trim($_POST['city']??'');$cy=trim($_POST['country']??'');
-            $st=$c->prepare("INSERT INTO ten_ec_contacts (email,first_name,last_name,company,phone,city,country,source) VALUES (?,?,?,?,?,?,?, 'manual')
-                             ON DUPLICATE KEY UPDATE first_name=VALUES(first_name),last_name=VALUES(last_name),company=VALUES(company),phone=VALUES(phone),city=VALUES(city),country=VALUES(country),updated_at=NOW()");
-            $st->bind_param('sssssss',$email,$fn,$ln,$co,$ph,$ci,$cy);
+            $d = $_POST;
+            $d['email']  = $email;
+            $d['source'] = trim($_POST['source'] ?? '') ?: 'manual';
+            $res = ec_upsert_contact($c, $d);
+            $aid = (int)($_POST['audience_id'] ?? 0);
+            if ($aid>0 && $res['id']>0) $c->query("INSERT IGNORE INTO ten_ec_audience_members (audience_id,contact_id) VALUES ($aid,".$res['id'].")");
+            $resp=['success'=>true,'id'=>$res['id']];
+            break;
+        }
+
+        case 'update': {
+            $id = (int)($_POST['id'] ?? 0);
+            if ($id <= 0) throw new Exception('id required');
+            $email = strtolower(trim($_POST['email'] ?? ''));
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) throw new Exception('Valid email required');
+            // Guard against colliding with a different contact's email.
+            $clash = $c->query("SELECT id FROM ten_ec_contacts WHERE email='".$c->real_escape_string($email)."' AND id<>$id LIMIT 1");
+            if ($clash && $clash->num_rows) throw new Exception('Another contact already uses that email');
+            $cols = ec_contact_columns(); // excludes email + source handled below
+            $set = ['email=?']; $vals=[$email];
+            foreach ($cols as $k) {
+                if ($k === 'source' || $k === 'consent_basis') continue; // preserve provenance on edit
+                $set[] = "$k=?"; $vals[] = trim((string)($_POST[$k] ?? ''));
+            }
+            $set[] = "updated_at=NOW()";
+            $sql = "UPDATE ten_ec_contacts SET ".implode(',', $set)." WHERE id=?";
+            $vals[] = $id;
+            $st = $c->prepare($sql);
+            $st->bind_param(str_repeat('s', count($vals)-1).'i', ...$vals);
             $st->execute(); $st->close();
             $resp=['success'=>true];
             break;

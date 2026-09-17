@@ -9,6 +9,8 @@ if (!hasPermission('campaigns.manage') && !isAdmin()) {
 }
 $canSettings = isAdmin() || hasPermission('system.settings');
 $currentPage = 'email_campaigns';
+require_once 'lib/ec_core.php';
+ec_ensure_schema(ec_db()); // idempotent: adds newer contact fields / categories / archived flag
 ?>
 <!DOCTYPE html>
 <html lang="<?php echo getUserLanguage(); ?>">
@@ -80,6 +82,30 @@ $currentPage = 'email_campaigns';
         .ec-mb h4{margin:22px 0 12px;font-size:14px;color:#374151;border-top:1px solid #f1f5f9;padding-top:18px}
         .ec-mb > p{margin:0 0 16px;line-height:1.6}.ec-mf{padding:14px 20px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;gap:8px}
         .closex{background:none;border:none;font-size:22px;color:#9ca3af;cursor:pointer}
+        /* keep SweetAlert toasts + confirm dialogs above every modal layer (overlays go up to 3000) */
+        .swal2-container{z-index:6000 !important}
+        /* second-layer modal (stacks above .ec-overlay) */
+        .ec-overlay2{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:flex-start;justify-content:center;z-index:2600;overflow-y:auto;padding:28px 12px}
+        .ec-overlay2.open{display:flex}
+        .ec-modal2{background:#fff;border-radius:12px;width:100%;max-width:520px;box-shadow:0 24px 60px rgba(0,0,0,.3)}
+        /* contact picker */
+        .ctp-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:flex-start;justify-content:center;z-index:3000;overflow-y:auto;padding:22px 10px}
+        .ctp-overlay.open{display:flex}
+        .ctp-modal{background:#fff;border-radius:12px;width:min(1180px,97vw);box-shadow:0 24px 70px rgba(0,0,0,.32);display:flex;flex-direction:column;max-height:93vh}
+        .ctp-head{padding:13px 18px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center}
+        .ctp-body{padding:12px 16px;overflow:hidden;display:flex;flex-direction:column}
+        .ctp-foot{padding:11px 18px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+        .ctp-filters{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px 11px;margin:0 0 12px;padding:12px 13px;background:#f9fafb;border:1px solid #eef0f3;border-radius:9px}
+        .ctp-ff label{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.3px;color:#6b7280;margin-bottom:3px;white-space:nowrap}
+        .ctp-fin{width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12.5px;font-weight:400;box-sizing:border-box}
+        .ctp-scroll{overflow:auto;max-height:48vh;border:1px solid #eef0f3;border-radius:8px}
+        table.ctp-tbl{border-collapse:separate;border-spacing:0;font-size:13px;white-space:nowrap;min-width:100%}
+        table.ctp-tbl th{position:sticky;top:0;background:#f9fafb;text-align:left;padding:8px 9px;border-bottom:1px solid #e5e7eb;z-index:2}
+        table.ctp-tbl th .ctp-hl{font-size:11.5px;text-transform:uppercase;letter-spacing:.3px;color:#6b7280;cursor:pointer;user-select:none;white-space:nowrap}
+        table.ctp-tbl th .ctp-hl:hover{color:#4f46e5}
+        table.ctp-tbl td{padding:6px 9px;border-bottom:1px solid #f1f5f9}
+        table.ctp-tbl tbody tr{cursor:pointer}
+        table.ctp-tbl tbody tr:hover td{background:#f5f7ff}
     </style>
 </head>
 <body>
@@ -96,6 +122,7 @@ $currentPage = 'email_campaigns';
                 <div class="ec-tab" data-tab="campaigns">Campaigns</div>
                 <div class="ec-tab" data-tab="sending">Sending</div>
                 <div class="ec-tab" data-tab="reports">Reports</div>
+                <div class="ec-tab" data-tab="responses">Responses</div>
                 <div class="ec-tab" data-tab="guide">Guide</div>
                 <?php if ($canSettings): ?><div class="ec-tab" data-tab="settings">Settings</div><?php endif; ?>
             </div>
@@ -104,11 +131,13 @@ $currentPage = 'email_campaigns';
 
             <div class="ec-pane" data-pane="contacts">
                 <div class="ec-card">
-                    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap"><button class="ec-btn sm" onclick="cOpenImport()"><i class="fas fa-file-import"></i> Import contacts</button><button class="ec-btn light sm" onclick="cOpenLegacy()"><i class="fas fa-database"></i> Import existing lists</button><button class="ec-btn light sm" onclick="cOpenAdd()"><i class="fas fa-plus"></i> Add one</button></div>
+                    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap"><button class="ec-btn sm" onclick="cOpenImport()"><i class="fas fa-file-import"></i> Import contacts</button><button class="ec-btn light sm" onclick="cOpenLegacy()"><i class="fas fa-database"></i> Import existing lists</button><button class="ec-btn light sm" onclick="cOpenAdd()"><i class="fas fa-plus"></i> Add one</button><button class="ec-btn light sm" onclick="cManageCats()"><i class="fas fa-tags"></i> Manage categories</button></div>
                     <div class="ec-filters">
-                        <div class="ec-fg" style="flex:2;min-width:220px"><label>Search</label><input class="ec-in" id="cSearch" placeholder="email / name / company / city"></div>
-                        <div class="ec-fg" style="min-width:170px"><label>Type</label><select class="ec-sel" id="cType"><option value="">All types</option></select></div>
-                        <div class="ec-fg" style="min-width:140px"><label>Country</label><input class="ec-in" id="cCountry" placeholder="e.g. Germany"></div>
+                        <div class="ec-fg" style="flex:2;min-width:200px"><label>Search</label><input class="ec-in" id="cSearch" placeholder="email / name / company / city"></div>
+                        <div class="ec-fg" style="min-width:150px"><label>Type</label><select class="ec-sel" id="cType"><option value="">All types</option></select></div>
+                        <div class="ec-fg" style="min-width:150px"><label>Industry</label><input class="ec-in" id="cIndustry" list="cIndustryList" placeholder="Any"><datalist id="cIndustryList"></datalist></div>
+                        <div class="ec-fg" style="min-width:150px"><label>Category</label><select class="ec-sel" id="cCategory"><option value="">All categories</option></select></div>
+                        <div class="ec-fg" style="min-width:130px"><label>Country</label><input class="ec-in" id="cCountry" placeholder="e.g. Germany"></div>
                         <label class="ec-chk"><input type="checkbox" id="cExclContacted"> Hide already-emailed</label>
                         <label class="ec-chk"><input type="checkbox" id="cExclSupp"> Hide suppressed</label>
                         <button class="ec-btn sm" onclick="cLoad()"><i class="fas fa-search"></i> Search</button>
@@ -120,13 +149,14 @@ $currentPage = 'email_campaigns';
 
             <div class="ec-pane" data-pane="audiences">
                 <div class="ec-card">
-                    <div class="ec-toolbar"><button class="ec-btn sm" onclick="aBuild()"><i class="fas fa-filter"></i> Build from filter</button><button class="ec-btn light sm" onclick="aCreate()"><i class="fas fa-plus"></i> Empty audience</button><span class="ec-hint">Build a list by type/country and automatically exclude anyone suppressed (unsubscribed/bounced/replied) — and optionally anyone already emailed.</span></div>
+                    <div class="ec-toolbar"><button class="ec-btn sm" onclick="aBuild()"><i class="fas fa-plus"></i> Create new audience</button><button class="ec-btn light sm" onclick="aCreate()"><i class="fas fa-file"></i> Empty audience</button><span class="ec-hint">Build a list by type/industry/category/country and automatically exclude anyone suppressed (unsubscribed/bounced/replied) — and optionally anyone already emailed.</span></div>
                     <div id="aTable"></div>
                 </div>
                 <div class="ec-card" id="aMembersCard" style="display:none">
                     <div class="ec-toolbar"><b id="aMembersTitle"></b><span style="flex:1"></span>
-                        <input class="ec-in" id="aAddSearch" style="max-width:240px" placeholder="Add by search (email/company/city)">
-                        <button class="ec-btn sm" onclick="aAddBySearch()">Add matches</button>
+                        <input class="ec-in" id="aAddSearch" style="max-width:220px" placeholder="Quick add by search">
+                        <button class="ec-btn light sm" onclick="aAddBySearch()">Add matches</button>
+                        <button class="ec-btn sm" onclick="aAddMembers()"><i class="fas fa-user-plus"></i> Add members</button>
                     </div>
                     <div id="aMembers"></div>
                 </div>
@@ -141,7 +171,7 @@ $currentPage = 'email_campaigns';
 
             <div class="ec-pane" data-pane="campaigns">
                 <div class="ec-card">
-                    <div class="ec-toolbar"><button class="ec-btn sm" onclick="kNew()"><i class="fas fa-plus"></i> New campaign</button></div>
+                    <div class="ec-toolbar"><button class="ec-btn sm" onclick="kNew()"><i class="fas fa-plus"></i> New campaign</button><span style="flex:1"></span><label class="ec-chk"><input type="checkbox" id="kShowArchived" onchange="kLoad()"> Show archived</label></div>
                     <div id="kTable"></div>
                 </div>
             </div>
@@ -156,8 +186,21 @@ $currentPage = 'email_campaigns';
 
             <div class="ec-pane" data-pane="reports">
                 <div class="ec-card">
-                    <div class="ec-toolbar"><select class="ec-sel" id="rCampaign" style="max-width:340px" onchange="rLoad()"><option value="">Choose a campaign…</option></select></div>
+                    <div class="ec-toolbar"><select class="ec-sel" id="rCampaign" style="max-width:340px" onchange="rLoad()"><option value="">Choose a campaign…</option></select><button class="ec-btn light sm" onclick="rLoad()"><i class="fas fa-rotate"></i> Refresh</button></div>
                     <div id="rBody"></div>
+                </div>
+            </div>
+
+            <div class="ec-pane" data-pane="responses">
+                <div class="ec-card">
+                    <div class="ec-toolbar">
+                        <button class="ec-btn sm" onclick="respPoll()"><i class="fas fa-inbox"></i> Check for new responses</button>
+                        <select class="ec-sel" id="respFilter" style="max-width:200px" onchange="respLoad()"><option value="">All responses</option><option value="reply">Replies only</option><option value="bounce">Bounces only</option></select>
+                        <button class="ec-btn light sm" onclick="respLoad()"><i class="fas fa-rotate"></i> Refresh</button>
+                        <span class="ec-hint" id="respCount" style="margin-left:auto"></span>
+                    </div>
+                    <p class="ec-hint">Replies and bounces are collected automatically from your sending profile's reply &amp; bounce mailboxes (needs IMAP configured on the profile and the poll cron running). Click a row to read it.</p>
+                    <div id="respTable"></div>
                 </div>
             </div>
 
@@ -297,14 +340,20 @@ $currentPage = 'email_campaigns';
 
     <!-- generic modal -->
     <div class="ec-overlay" id="ecModal"><div class="ec-modal"><div class="ec-mh"><h2 id="ecModalTitle"></h2><button class="closex" onclick="ecClose()">&times;</button></div><div class="ec-mb" id="ecModalBody"></div><div class="ec-mf" id="ecModalFoot"></div></div></div>
+    <div class="ec-overlay2" id="ecModal2"><div class="ec-modal2"><div class="ec-mh"><h2 id="ecM2Title"></h2><button class="closex" onclick="ecClose2()">&times;</button></div><div class="ec-mb" id="ecM2Body"></div><div class="ec-mf" id="ecM2Foot"></div></div></div>
+    <div class="ctp-overlay" id="ctpOverlay"></div>
 
 <script>
-const EC = { contacts:'ajax/ec_contacts.php', audiences:'ajax/ec_audiences.php', templates:'ajax/ec_templates.php', campaigns:'ajax/ec_campaigns.php', settings:'ajax/ec_settings.php', profiles:'ajax/ec_profiles.php' };
+const EC = { contacts:'ajax/ec_contacts.php', audiences:'ajax/ec_audiences.php', templates:'ajax/ec_templates.php', campaigns:'ajax/ec_campaigns.php', settings:'ajax/ec_settings.php', profiles:'ajax/ec_profiles.php', categories:'ajax/ec_categories.php', responses:'ajax/ec_responses.php' };
+const EC_ME = <?php echo json_encode($_SESSION['ten_email'] ?? ''); ?>;
 function toast(m,i){ Swal.fire({toast:true,position:'top-end',timer:2600,showConfirmButton:false,icon:i||'success',title:m}); }
 function esc(s){ return $('<div>').text(s==null?'':s).html(); }
 function post(url,data){ return $.post(url,data,null,'json'); }
 function ecModal(title,body,foot){ document.getElementById('ecModalTitle').textContent=title; document.getElementById('ecModalBody').innerHTML=body; document.getElementById('ecModalFoot').innerHTML=foot; document.getElementById('ecModal').classList.add('open'); }
 function ecClose(){ document.getElementById('ecModal').classList.remove('open'); }
+/* second-layer modal (opens above the main one) */
+function ecModal2(title,body,foot){ document.getElementById('ecM2Title').textContent=title; document.getElementById('ecM2Body').innerHTML=body; document.getElementById('ecM2Foot').innerHTML=foot; document.getElementById('ecModal2').classList.add('open'); }
+function ecClose2(){ document.getElementById('ecModal2').classList.remove('open'); }
 
 // tabs
 document.querySelectorAll('.ec-tab').forEach(t=>t.addEventListener('click',function(){
@@ -312,7 +361,7 @@ document.querySelectorAll('.ec-tab').forEach(t=>t.addEventListener('click',funct
     document.querySelectorAll('.ec-pane').forEach(x=>x.classList.remove('active'));
     this.classList.add('active');
     document.querySelector('.ec-pane[data-pane="'+this.dataset.tab+'"]').classList.add('active');
-    const f={dashboard:dashLoad,contacts:cLoad,audiences:aLoad,templates:tLoad,campaigns:kLoad,sending:pLoad,reports:rInit,settings:sLoad}[this.dataset.tab];
+    const f={dashboard:dashLoad,contacts:cLoad,audiences:aLoad,templates:tLoad,campaigns:kLoad,sending:pLoad,reports:rInit,responses:respLoad,settings:sLoad}[this.dataset.tab];
     if(f) f();
 }));
 
@@ -347,17 +396,37 @@ function dashProg(id){ post(EC.campaigns,{action:'progress',id:id}).done(functio
 function stat(n,l){ return '<span class="ec-stat"><b>'+n+'</b><span>'+l+'</span></span>'; }
 
 /* ---------- Contacts ---------- */
-let _types=[];
+let _types=[],_cats=[],_industries=[];
 function cTypes(cb){ post(EC.contacts,{action:'types'}).done(function(r){ _types=(r.rows||[]).map(x=>x.contact_type); const sel=document.getElementById('cType'); if(sel){ const cur=sel.value; sel.innerHTML='<option value="">All types</option>'+_types.map(t=>'<option'+(t===cur?' selected':'')+'>'+esc(t)+'</option>').join(''); } if(cb)cb(); }); }
-function cLoad(){ cTypes(); post(EC.contacts,{action:'list',q:document.getElementById('cSearch').value,type:document.getElementById('cType').value,country:document.getElementById('cCountry').value,exclude_contacted:document.getElementById('cExclContacted').checked?1:0,exclude_suppressed:document.getElementById('cExclSupp').checked?1:0}).done(function(r){
+function cCats(cb){ post(EC.categories,{action:'list'}).done(function(r){ _cats=(r.rows||[]).map(x=>x.name); const sel=document.getElementById('cCategory'); if(sel){ const cur=sel.value; sel.innerHTML='<option value="">All categories</option>'+_cats.map(t=>'<option'+(t===cur?' selected':'')+'>'+esc(t)+'</option>').join(''); } if(cb)cb(); }); }
+function cIndustries(cb){ post(EC.contacts,{action:'industries'}).done(function(r){ _industries=(r.rows||[]).map(x=>x.industry); const dl=document.getElementById('cIndustryList'); if(dl){ dl.innerHTML=_industries.map(t=>'<option value="'+esc(t)+'">').join(''); } if(cb)cb(); }); }
+function cLoad(){ cTypes(); cCats(); cIndustries(); post(EC.contacts,{action:'list',q:document.getElementById('cSearch').value,type:document.getElementById('cType').value,industry:document.getElementById('cIndustry').value,category:document.getElementById('cCategory').value,country:document.getElementById('cCountry').value,exclude_contacted:document.getElementById('cExclContacted').checked?1:0,exclude_suppressed:document.getElementById('cExclSupp').checked?1:0}).done(function(r){
     if(!r.success){toast(r.message,'error');return;}
     document.getElementById('cCount').textContent=r.total+' matching contact'+(r.total===1?'':'s');
-    let h='<table class="ec-tbl"><thead><tr><th>Email</th><th>Name</th><th>Company</th><th>Type</th><th>Country</th><th>Emailed</th><th>Status</th><th></th></tr></thead><tbody>';
-    r.rows.forEach(c=>h+='<tr><td>'+esc(c.email)+'</td><td>'+esc((c.first_name||'')+' '+(c.last_name||''))+'</td><td>'+esc(c.company||'')+'</td><td>'+esc(c.contact_type||'')+'</td><td>'+esc(c.country||'')+'</td><td>'+(c.times_sent>0?('<b>'+c.times_sent+'×</b>'):'—')+'</td><td>'+(c.suppressed==1?'<span class="ec-badge b-cancelled">suppressed</span>':esc(c.status))+'</td><td>'+(c.suppressed==1?'':'<button class="ec-btn danger sm" onclick="cSuppress(\''+esc(c.email)+'\')">Suppress</button>')+'</td></tr>');
+    let h='<table class="ec-tbl"><thead><tr><th>Email</th><th>Name</th><th>Company</th><th>Type</th><th>Category</th><th>Country</th><th>Emailed</th><th>Status</th><th></th></tr></thead><tbody>';
+    r.rows.forEach(c=>h+='<tr><td>'+esc(c.email)+'</td><td>'+esc((c.first_name||'')+' '+(c.last_name||''))+'</td><td>'+esc(c.company||'')+'</td><td>'+esc(c.contact_type||'')+'</td><td>'+esc(c.category||'')+'</td><td>'+esc(c.country||'')+'</td><td>'+(c.times_sent>0?('<b>'+c.times_sent+'×</b>'):'—')+'</td><td>'+(c.suppressed==1?'<span class="ec-badge b-cancelled">suppressed</span>':esc(c.status))+'</td><td style="white-space:nowrap"><button class="ec-btn light sm" onclick="cEdit('+c.id+')">Edit</button>'+(c.suppressed==1?' <button class="ec-btn light sm" onclick="cUnsuppress(\''+esc(c.email)+'\')">Unsuppress</button>':' <button class="ec-btn danger sm" onclick="cSuppress(\''+esc(c.email)+'\')">Suppress</button>')+'</td></tr>');
     h+='</tbody></table>'; document.getElementById('cTable').innerHTML=h;
 }); }
+/* Shared add/edit form. All fields optional except email. */
+function cForm(ct){ ct=ct||{};
+    var typeOpts=_types.map(t=>'<option value="'+esc(t)+'">').join('');
+    var indOpts=_industries.map(t=>'<option value="'+esc(t)+'">').join('');
+    var catOpts='<option value="">— none —</option>'+_cats.map(t=>'<option'+(t===(ct.category||'')?' selected':'')+'>'+esc(t)+'</option>').join('');
+    // include the contact's own category even if it is not in the managed list
+    if(ct.category && _cats.indexOf(ct.category)<0) catOpts='<option value="">— none —</option><option selected>'+esc(ct.category)+'</option>'+_cats.map(t=>'<option>'+esc(t)+'</option>').join('');
+    return '<input type="hidden" id="cfId" value="'+(ct.id||'')+'">'+
+    '<div class="ec-fg"><label>Email *</label><input class="ec-in" id="cfEmail" value="'+esc(ct.email||'')+'"></div>'+
+    '<div class="ec-row"><div class="ec-fg"><label>First name</label><input class="ec-in" id="cfFn" value="'+esc(ct.first_name||'')+'"></div><div class="ec-fg"><label>Last name</label><input class="ec-in" id="cfLn" value="'+esc(ct.last_name||'')+'"></div></div>'+
+    '<div class="ec-row"><div class="ec-fg"><label>Job title</label><input class="ec-in" id="cfTitle" value="'+esc(ct.job_title||'')+'"></div><div class="ec-fg"><label>Business name</label><input class="ec-in" id="cfCompany" value="'+esc(ct.company||'')+'"></div></div>'+
+    '<div class="ec-row"><div class="ec-fg"><label>Industry <span class="ec-hint">(area of business)</span></label><input class="ec-in" id="cfIndustry" list="cfIndustryList" value="'+esc(ct.industry||'')+'"><datalist id="cfIndustryList">'+indOpts+'</datalist></div><div class="ec-fg"><label>Category <span class="ec-hint">(<a href="#" onclick="cManageCats();return false;">manage</a>)</span></label><select class="ec-sel" id="cfCategory">'+catOpts+'</select></div></div>'+
+    '<div class="ec-row"><div class="ec-fg"><label>Contact type</label><input class="ec-in" id="cfType" list="cfTypeList" value="'+esc(ct.contact_type||'')+'"><datalist id="cfTypeList">'+typeOpts+'</datalist></div><div class="ec-fg"><label>Website</label><input class="ec-in" id="cfWebsite" value="'+esc(ct.website||'')+'"></div></div>'+
+    '<div class="ec-fg"><label>Address</label><input class="ec-in" id="cfAddress" value="'+esc(ct.address||'')+'"></div>'+
+    '<div class="ec-row"><div class="ec-fg"><label>City</label><input class="ec-in" id="cfCity" value="'+esc(ct.city||'')+'"></div><div class="ec-fg"><label>Postcode</label><input class="ec-in" id="cfPostcode" value="'+esc(ct.postcode||'')+'"></div></div>'+
+    '<div class="ec-row"><div class="ec-fg"><label>Region / State</label><input class="ec-in" id="cfRegion" value="'+esc(ct.region||'')+'"></div><div class="ec-fg"><label>Country</label><input class="ec-in" id="cfCountry" value="'+esc(ct.country||'')+'"></div></div>'+
+    '<div class="ec-fg"><label>Phone</label><input class="ec-in" id="cfPhone" value="'+esc(ct.phone||'')+'"></div>'; }
+function cGather(){ return { email:document.getElementById('cfEmail').value, first_name:document.getElementById('cfFn').value, last_name:document.getElementById('cfLn').value, job_title:document.getElementById('cfTitle').value, company:document.getElementById('cfCompany').value, industry:document.getElementById('cfIndustry').value, category:document.getElementById('cfCategory').value, contact_type:document.getElementById('cfType').value, website:document.getElementById('cfWebsite').value, address:document.getElementById('cfAddress').value, city:document.getElementById('cfCity').value, postcode:document.getElementById('cfPostcode').value, region:document.getElementById('cfRegion').value, country:document.getElementById('cfCountry').value, phone:document.getElementById('cfPhone').value }; }
 function cOpenImport(){ ecModal('Import contacts',
-    '<p class="ec-hint">Paste CSV with a header row (<code>email</code> required; optional <code>first_name,last_name,company,phone,city,country,contact_type</code>) or one email per line.</p>'+
+    '<p class="ec-hint">Paste CSV with a header row (<code>email</code> required; any of these optional columns are picked up: <code>first_name, last_name, company, job_title, contact_type, industry, category, website, address, city, postcode, region, country, phone</code>) or one email per line. Unknown columns are ignored.</p>'+
     '<textarea class="ec-ta" id="impData" style="min-height:170px" placeholder="email,first_name,company,city\njohn@x.de,John,ACME Versicherung,Berlin"></textarea>'+
     '<div class="ec-row" style="margin-top:10px"><div class="ec-fg"><label>Contact type <span class="ec-hint">(e.g. Insurance Brokers, Restaurants)</span></label><input class="ec-in" id="impType" list="impTypeList" placeholder="Insurance Brokers"><datalist id="impTypeList">'+_types.map(t=>'<option value="'+esc(t)+'">').join('')+'</datalist></div><div class="ec-fg"><label>Source tag</label><input class="ec-in" id="impSource" value="csv"></div></div>'+
     '<div class="ec-fg"><label>Consent basis (optional, for your records)</label><input class="ec-in" id="impConsent" placeholder="e.g. legitimate interest / opted-in list"></div>',
@@ -401,9 +470,102 @@ function cRunLegacy(source, role, label, btn){
     }
     step(0);
 }
-function cOpenAdd(){ ecModal('Add contact','<div class="ec-fg"><label>Email *</label><input class="ec-in" id="adEmail"></div><div class="ec-row"><div class="ec-fg"><label>First name</label><input class="ec-in" id="adFn"></div><div class="ec-fg"><label>Last name</label><input class="ec-in" id="adLn"></div></div><div class="ec-fg"><label>Company</label><input class="ec-in" id="adCo"></div>','<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn" onclick="cDoAdd()">Add</button>'); }
-function cDoAdd(){ post(EC.contacts,{action:'add',email:document.getElementById('adEmail').value,first_name:document.getElementById('adFn').value,last_name:document.getElementById('adLn').value,company:document.getElementById('adCo').value}).done(function(r){ if(r.success){ecClose();toast('Added');cLoad();}else toast(r.message,'error'); }); }
+function cReady(cb){ let n=3; const done=()=>{ if(--n===0) cb(); }; cTypes(done); cCats(done); cIndustries(done); }
+function cOpenAdd(){ cReady(function(){ ecModal('Add contact', cForm({}), '<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn" onclick="cDoAdd()">Add</button>'); }); }
+function cDoAdd(){ post(EC.contacts,Object.assign({action:'add'},cGather())).done(function(r){ if(r.success){ecClose();toast('Added');cLoad();}else toast(r.message,'error'); }); }
+function cEdit(id){ cReady(function(){ post(EC.contacts,{action:'get',id:id}).done(function(r){ if(!r.success){toast(r.message||'Not found','error');return;} ecModal('Edit contact', cForm(r.contact), '<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn" onclick="cDoUpdate()">Save</button>'); }); }); }
+function cDoUpdate(){ post(EC.contacts,Object.assign({action:'update',id:document.getElementById('cfId').value},cGather())).done(function(r){ if(r.success){ecClose();toast('Saved');cLoad();}else toast(r.message,'error'); }); }
+function cManageCats(){
+    ecModal('Manage categories','<p class="ec-hint">Categories you create here appear in the dropdown when adding or editing a contact. Renaming one updates every contact that uses it; deleting one only removes it from the list.</p><div id="catList" class="ec-hint">Loading…</div><div class="ec-row" style="margin-top:12px;align-items:end"><div class="ec-fg" style="flex:1"><label>New category</label><input class="ec-in" id="catNew" placeholder="e.g. VIP prospects"></div><button class="ec-btn" onclick="cCatCreate()">Add</button></div>','<button class="ec-btn light" onclick="ecClose()">Close</button>');
+    cCatRender();
+}
+function cCatRender(){ post(EC.categories,{action:'list'}).done(function(r){ _cats=(r.rows||[]).map(x=>x.name); var el=document.getElementById('catList'); if(!el)return; if(!r.rows||!r.rows.length){ el.innerHTML='<p class="ec-hint">No categories yet.</p>'; return; } var h='<table class="ec-tbl"><thead><tr><th>Category</th><th>Contacts</th><th></th></tr></thead><tbody>'; r.rows.forEach(x=>h+='<tr><td>'+esc(x.name)+'</td><td>'+x.contacts+'</td><td style="white-space:nowrap"><button class="ec-btn light sm" onclick="cCatRename('+x.id+',\''+esc(x.name).replace(/\'/g,"")+'\')">Rename</button> <button class="ec-btn danger sm" onclick="cCatDelete('+x.id+')">Delete</button></td></tr>'); h+='</tbody></table>'; el.innerHTML=h; }); }
+function cCatCreate(){ var v=document.getElementById('catNew').value.trim(); if(!v)return; post(EC.categories,{action:'create',name:v}).done(function(r){ if(r.success){document.getElementById('catNew').value='';cCatRender();cCats();}else toast(r.message,'error'); }); }
+function cCatRename(id,cur){ Swal.fire({title:'Rename category',input:'text',inputValue:cur,showCancelButton:true,confirmButtonText:'Rename'}).then(function(x){ if(x.isConfirmed && x.value){ post(EC.categories,{action:'rename',id:id,name:x.value}).done(function(r){ if(r.success){cCatRender();cCats();}else toast(r.message,'error'); }); } }); }
+function cCatDelete(id){ Swal.fire({title:'Delete category?',text:'Contacts keep their current value; it is just removed from the list.',icon:'warning',showCancelButton:true,confirmButtonColor:'#dc2626',confirmButtonText:'Delete'}).then(function(x){ if(x.isConfirmed) post(EC.categories,{action:'delete',id:id}).done(function(r){ if(r.success){cCatRender();cCats();}else toast(r.message,'error'); }); }); }
 function cSuppress(email){ Swal.fire({title:'Suppress '+email+'?',text:'They will never be emailed again.',icon:'warning',showCancelButton:true,confirmButtonColor:'#dc2626',confirmButtonText:'Suppress'}).then(x=>{ if(x.isConfirmed) post(EC.contacts,{action:'suppress',email:email,reason:'do_not_contact'}).done(()=>{toast('Suppressed');cLoad();}); }); }
+function cUnsuppress(email){ Swal.fire({title:'Unsuppress '+email+'?',text:'They can be emailed again. Only do this if they did not opt out.',icon:'warning',showCancelButton:true,confirmButtonText:'Unsuppress'}).then(x=>{ if(x.isConfirmed) post(EC.contacts,{action:'unsuppress',email:email}).done(()=>{toast('Unsuppressed');cLoad();}); }); }
+
+/* ======= Reusable contact picker — full filterable / sortable / paged table =======
+ * ctpOpen({multi, onPick, title, confirmLabel}). Single-select fires onPick(row) on
+ * click; multi-select fires onPick([rows]) from the Add button. Renders in its own
+ * top-layer overlay so it stacks above any open modal. Filters map to the list
+ * action's f_<col> params; sorting maps to sort/dir. */
+const CTP_COLS=[
+  {k:'email',l:'Email'},{k:'first_name',l:'First name'},{k:'last_name',l:'Last name'},
+  {k:'company',l:'Company'},{k:'job_title',l:'Job title'},{k:'contact_type',l:'Type'},
+  {k:'industry',l:'Industry'},{k:'category',l:'Category'},{k:'city',l:'City'},
+  {k:'region',l:'Region'},{k:'postcode',l:'Postcode'},{k:'country',l:'Country'},
+  {k:'phone',l:'Phone'},{k:'website',l:'Website'},{k:'address',l:'Address'},{k:'status',l:'Status'}
+];
+let _ctp=null,_ctpT;
+function ctpOpen(opts){
+  _ctp={multi:!!opts.multi,onPick:opts.onPick,title:opts.title||(opts.multi?'Select contacts':'Choose a contact'),
+        confirmLabel:opts.confirmLabel||'Add selected',filters:{},sort:'',dir:'asc',offset:0,limit:100,selected:{},byId:{},q:'',total:0};
+  var head=(_ctp.multi?'<th style="width:32px"><input type="checkbox" title="Select all on this page" onclick="ctpAll(this)"></th>':'<th style="width:74px"></th>')+
+    CTP_COLS.map(function(col){ return '<th><span class="ctp-hl" onclick="ctpSort(\''+col.k+'\')">'+col.l+' <span id="ctpar_'+col.k+'"></span></span></th>'; }).join('');
+  var filterGrid=CTP_COLS.map(function(col){ return '<div class="ctp-ff"><label>'+col.l+'</label><input class="ctp-fin" data-col="'+col.k+'" oninput="ctpFilterInput()" placeholder="contains…"></div>'; }).join('');
+  var ov=document.getElementById('ctpOverlay');
+  ov.innerHTML='<div class="ctp-modal">'+
+    '<div class="ctp-head"><b>'+esc(_ctp.title)+'</b><button class="closex" onclick="ctpClose()">&times;</button></div>'+
+    '<div class="ctp-body">'+
+      '<div style="display:flex;gap:12px;align-items:center;margin-bottom:10px;flex-wrap:wrap">'+
+        '<input class="ec-in" id="ctpQ" style="max-width:300px" placeholder="Search all fields…" oninput="ctpQInput()">'+
+        '<label class="ec-chk" style="padding:0"><input type="checkbox" id="ctpHideSupp" checked onchange="ctpReload()"> Hide suppressed</label>'+
+        '<label class="ec-chk" style="padding:0"><input type="checkbox" id="ctpHideEmailed" onchange="ctpReload()"> Hide already-emailed</label>'+
+        '<button class="ec-btn light sm" onclick="ctpClearFilters()">Clear filters</button>'+
+        '<span style="flex:1"></span><span class="ec-hint" id="ctpCount"></span>'+
+      '</div>'+
+      '<div class="ctp-filters">'+filterGrid+'</div>'+
+      '<div class="ctp-scroll"><table class="ctp-tbl"><thead><tr>'+head+'</tr></thead><tbody id="ctpBody"></tbody></table></div>'+
+    '</div>'+
+    '<div class="ctp-foot">'+
+      '<div><button class="ec-btn light sm" onclick="ctpPage(-1)">‹ Prev</button> <button class="ec-btn light sm" onclick="ctpPage(1)">Next ›</button> <span class="ec-hint" id="ctpPageInfo"></span></div>'+
+      '<div style="display:flex;align-items:center;gap:10px">'+(_ctp.multi?'<span class="ec-hint" id="ctpSel">0 selected</span><button class="ec-btn" onclick="ctpConfirm()">'+esc(_ctp.confirmLabel)+'</button>':'<span class="ec-hint">Click a row to choose</span>')+' <button class="ec-btn light" onclick="ctpClose()">Close</button></div>'+
+    '</div></div>';
+  ov.classList.add('open');
+  ctpFetch();
+}
+function ctpClose(){ var ov=document.getElementById('ctpOverlay'); if(ov){ ov.classList.remove('open'); ov.innerHTML=''; } _ctp=null; }
+function ctpQInput(){ _ctp.q=document.getElementById('ctpQ').value; clearTimeout(_ctpT); _ctpT=setTimeout(function(){ _ctp.offset=0; ctpFetch(); },300); }
+function ctpFilterInput(){ var f={}; document.querySelectorAll('#ctpOverlay .ctp-fin').forEach(function(i){ if(i.value.trim()!=='') f[i.dataset.col]=i.value.trim(); }); _ctp.filters=f; clearTimeout(_ctpT); _ctpT=setTimeout(function(){ _ctp.offset=0; ctpFetch(); },350); }
+function ctpClearFilters(){ document.querySelectorAll('#ctpOverlay .ctp-fin').forEach(function(i){ i.value=''; }); var q=document.getElementById('ctpQ'); if(q) q.value=''; _ctp.filters={}; _ctp.q=''; _ctp.offset=0; ctpFetch(); }
+function ctpReload(){ _ctp.offset=0; ctpFetch(); }
+function ctpSort(k){ if(_ctp.sort===k){ _ctp.dir=(_ctp.dir==='asc'?'desc':'asc'); } else { _ctp.sort=k; _ctp.dir='asc'; } _ctp.offset=0; ctpFetch(); }
+function ctpPage(d){ var no=_ctp.offset+d*_ctp.limit; if(no<0||no>=_ctp.total)return; _ctp.offset=no; ctpFetch(); }
+function ctpAll(cb){ document.querySelectorAll('#ctpBody .ctp-chk').forEach(function(x){ x.checked=cb.checked; ctpMark(x.value,cb.checked); }); ctpSelCount(); }
+function ctpMark(id,on){ if(on){ _ctp.selected[id]=_ctp.byId[id]||{id:id}; } else { delete _ctp.selected[id]; } }
+function ctpChk(el){ ctpMark(el.value,el.checked); ctpSelCount(); }
+function ctpSelCount(){ var el=document.getElementById('ctpSel'); if(el) el.textContent=Object.keys(_ctp.selected).length+' selected'; }
+function ctpRowToggle(id){ var cb=document.querySelector('#ctpBody .ctp-chk[value="'+id+'"]'); if(cb){ cb.checked=!cb.checked; ctpChk(cb); } }
+function ctpChoose(id){ var row=(_ctp.byId&&_ctp.byId[id])||{id:id}; var cb=_ctp.onPick; ctpClose(); if(cb) cb(row); }
+function ctpConfirm(){ var ids=Object.keys(_ctp.selected); if(!ids.length){ toast('Tick some contacts first','error'); return; } var rows=ids.map(function(id){ return _ctp.selected[id]; }); var cb=_ctp.onPick; ctpClose(); if(cb) cb(rows); }
+function ctpFetch(){
+  var p={action:'list',q:_ctp.q,limit:_ctp.limit,offset:_ctp.offset};
+  if(_ctp.sort){ p.sort=_ctp.sort; p.dir=_ctp.dir; }
+  Object.keys(_ctp.filters).forEach(function(k){ p['f_'+k]=_ctp.filters[k]; });
+  if(document.getElementById('ctpHideSupp') && document.getElementById('ctpHideSupp').checked) p.exclude_suppressed=1;
+  if(document.getElementById('ctpHideEmailed') && document.getElementById('ctpHideEmailed').checked) p.exclude_contacted=1;
+  post(EC.contacts,p).done(function(r){
+    if(!r.success){ toast(r.message,'error'); return; }
+    _ctp.total=r.total;
+    var b=document.getElementById('ctpBody'); if(!b)return;
+    if(!r.rows.length){ b.innerHTML='<tr><td colspan="'+(CTP_COLS.length+1)+'" style="padding:18px;color:#6b7280;text-align:center">No contacts match these filters.</td></tr>'; }
+    else { b.innerHTML=r.rows.map(function(c){
+        _ctp.byId[c.id]=c;
+        var cells=CTP_COLS.map(function(col){ var v=c[col.k]||''; if(col.k==='status'&&c.suppressed==1)v='suppressed'; return '<td>'+esc(v)+'</td>'; }).join('');
+        var first=_ctp.multi
+          ? '<td onclick="event.stopPropagation()"><input type="checkbox" class="ctp-chk" value="'+c.id+'" '+(_ctp.selected[c.id]?'checked':'')+' onchange="ctpChk(this)"></td>'
+          : '<td><button class="ec-btn light sm" onclick="event.stopPropagation();ctpChoose('+c.id+')">Choose</button></td>';
+        return '<tr '+(_ctp.multi?'onclick="ctpRowToggle('+c.id+')"':'onclick="ctpChoose('+c.id+')"')+'>'+first+cells+'</tr>';
+      }).join(''); }
+    CTP_COLS.forEach(function(col){ var a=document.getElementById('ctpar_'+col.k); if(a) a.textContent=(_ctp.sort===col.k?(_ctp.dir==='asc'?'▲':'▼'):''); });
+    var cc=document.getElementById('ctpCount'); if(cc) cc.textContent=(r.total).toLocaleString()+' contact'+(r.total===1?'':'s');
+    var from=_ctp.total?_ctp.offset+1:0, to=Math.min(_ctp.offset+_ctp.limit,_ctp.total);
+    var pi=document.getElementById('ctpPageInfo'); if(pi) pi.textContent=from+'–'+to+' of '+(_ctp.total).toLocaleString();
+    ctpSelCount();
+  });
+}
 
 /* ---------- Audiences ---------- */
 let aCurrent=null;
@@ -414,10 +576,11 @@ function aLoad(){ post(EC.audiences,{action:'list'}).done(function(r){
     h+='</tbody></table>'; document.getElementById('aTable').innerHTML=h;
 }); }
 function aCreate(){ ecModal('New audience','<div class="ec-fg"><label>Name *</label><input class="ec-in" id="auName"></div><div class="ec-fg"><label>Description</label><input class="ec-in" id="auDesc"></div>','<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn" onclick="aDoCreate()">Create</button>'); }
-function aBuild(){ cTypes(function(){
-    ecModal('Build audience from filter',
+function aBuild(){ cReady(function(){
+    ecModal('Create new audience',
     '<div class="ec-fg"><label>Audience name *</label><input class="ec-in" id="abName" placeholder="Brokers — Germany (Sept)"></div>'+
     '<div class="ec-row"><div class="ec-fg"><label>Contact type</label><select class="ec-sel" id="abType"><option value="">Any type</option>'+_types.map(t=>'<option>'+esc(t)+'</option>').join('')+'</select></div><div class="ec-fg"><label>Country</label><input class="ec-in" id="abCountry" placeholder="Germany"></div></div>'+
+    '<div class="ec-row"><div class="ec-fg"><label>Industry</label><input class="ec-in" id="abIndustry" list="cIndustryList" placeholder="Any industry"></div><div class="ec-fg"><label>Category</label><select class="ec-sel" id="abCategory"><option value="">Any category</option>'+_cats.map(t=>'<option>'+esc(t)+'</option>').join('')+'</select></div></div>'+
     '<div class="ec-fg"><label>Extra search (optional)</label><input class="ec-in" id="abQ" placeholder="company / city / keyword"></div>'+
     '<label class="ec-chk"><input type="checkbox" id="abExclContacted" checked> Exclude anyone already emailed in a previous campaign</label>'+
     '<div class="ec-hint" style="margin-top:6px">Suppressed contacts (unsubscribed, bounced, replied, do-not-contact) are <b>always</b> excluded.</div>'+
@@ -425,7 +588,7 @@ function aBuild(){ cTypes(function(){
     '<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn" onclick="aBuildDo()">Create &amp; populate</button>');
     aBuildCount();
 }); }
-function aBuildFilter(){ return {q:document.getElementById('abQ').value,type:document.getElementById('abType').value,country:document.getElementById('abCountry').value,exclude_contacted:document.getElementById('abExclContacted').checked?1:0}; }
+function aBuildFilter(){ return {q:document.getElementById('abQ').value,type:document.getElementById('abType').value,country:document.getElementById('abCountry').value,industry:document.getElementById('abIndustry').value,category:document.getElementById('abCategory').value,exclude_contacted:document.getElementById('abExclContacted').checked?1:0}; }
 function aBuildCount(){ post(EC.audiences,Object.assign({action:'count_filter'},aBuildFilter())).done(function(r){ if(r.success) document.getElementById('abCount').textContent=r.count; }); }
 function aBuildDo(){ const name=document.getElementById('abName').value.trim(); if(!name){toast('Name required','error');return;}
     post(EC.audiences,Object.assign({action:'create',name:name,save_filter:1},aBuildFilter())).done(function(r){ if(!r.success){toast(r.message,'error');return;} post(EC.audiences,Object.assign({action:'add_members',audience_id:r.id},aBuildFilter())).done(function(x){ ecClose(); toast('Audience created with '+(x.added||0)+' contacts (filter saved for refresh)'); aLoad(); }); }); }
@@ -434,26 +597,82 @@ function aDel(id){ Swal.fire({title:'Delete audience?',icon:'warning',showCancel
 function aOpen(id,name){ aCurrent=id; document.getElementById('aMembersCard').style.display='block'; document.getElementById('aMembersTitle').textContent='Members of "'+name+'"'; aMembers(); }
 function aMembers(){ post(EC.audiences,{action:'members',audience_id:aCurrent}).done(function(r){ let h='<table class="ec-tbl"><thead><tr><th>Email</th><th>Name</th><th>Company</th><th>Status</th><th></th></tr></thead><tbody>'; (r.rows||[]).forEach(m=>h+='<tr><td>'+esc(m.email)+'</td><td>'+esc((m.first_name||'')+' '+(m.last_name||''))+'</td><td>'+esc(m.company||'')+'</td><td>'+esc(m.status)+'</td><td><button class="ec-btn light sm" onclick="aRemove('+m.id+')">Remove</button></td></tr>'); h+='</tbody></table>'; document.getElementById('aMembers').innerHTML=h; }); }
 function aAddBySearch(){ post(EC.audiences,{action:'add_members',audience_id:aCurrent,q:document.getElementById('aAddSearch').value}).done(function(r){ if(r.success){toast('Added '+r.added);aMembers();aLoad();}else toast(r.message,'error'); }); }
+function aAddMembers(){ if(!aCurrent){toast('Open an audience first','error');return;} cReady(function(){
+    var body='<div class="ec-tabs" style="margin-bottom:16px">'+
+        '<div class="ec-tab active" data-am="select" onclick="amTab(\'select\')">Select from contacts</div>'+
+        '<div class="ec-tab" data-am="import" onclick="amTab(\'import\')">Import</div>'+
+        '<div class="ec-tab" data-am="manual" onclick="amTab(\'manual\')">Add new contact</div></div>'+
+        '<div class="am-pane" data-am="select">'+
+            '<p class="ec-hint">Open the full contact list — search, filter by any field and sort — then tick everyone you want and add them to this audience in one go.</p>'+
+            '<button class="ec-btn" onclick="amPick()"><i class="fas fa-table"></i> Open contact picker</button></div>'+
+        '<div class="am-pane" data-am="import" style="display:none">'+
+            '<p class="ec-hint">Paste CSV (<code>email</code> required, same optional columns as Import contacts). New contacts are created and added to this audience.</p>'+
+            '<textarea class="ec-ta" id="amImp" style="min-height:150px" placeholder="email,first_name,company,city"></textarea>'+
+            '<div class="ec-fg" style="margin-top:8px"><label>Contact type (optional)</label><input class="ec-in" id="amImpType" placeholder="e.g. Insurance Brokers"></div>'+
+            '<button class="ec-btn" onclick="amImport()">Import &amp; add</button></div>'+
+        '<div class="am-pane" data-am="manual" style="display:none">'+cForm({})+
+            '<button class="ec-btn" style="margin-top:6px" onclick="amManual()">Add contact to audience</button></div>';
+    ecModal('Add members', body, '<button class="ec-btn light" onclick="ecClose()">Done</button>');
+}); }
+function amTab(which){ document.querySelectorAll('.ec-tab[data-am]').forEach(t=>t.classList.toggle('active',t.dataset.am===which)); document.querySelectorAll('.am-pane').forEach(p=>p.style.display=(p.dataset.am===which?'':'none')); }
+function amPick(){ ctpOpen({multi:true,title:'Add contacts to this audience',confirmLabel:'Add selected to audience',onPick:function(rows){ var ids=rows.map(function(r){return r.id;}); post(EC.audiences,{action:'add_members',audience_id:aCurrent,contact_ids:ids.join(',')}).done(function(r){ if(r.success){ toast('Added '+r.added+' to audience'); aMembers(); aLoad(); } else toast(r.message,'error'); }); }}); }
+function amImport(){ post(EC.contacts,{action:'import',data:document.getElementById('amImp').value,contact_type:document.getElementById('amImpType').value,source:'audience_add',audience_id:aCurrent}).done(function(r){ if(r.success){toast('New '+r.new+', '+(r.added_to_audience||0)+' added to audience');aMembers();aLoad();}else toast(r.message,'error'); }); }
+function amManual(){ post(EC.contacts,Object.assign({action:'add',audience_id:aCurrent},cGather())).done(function(r){ if(r.success){toast('Contact added to audience');ecClose();aMembers();aLoad();}else toast(r.message,'error'); }); }
 function aRemove(cid){ post(EC.audiences,{action:'remove_member',audience_id:aCurrent,contact_id:cid}).done(()=>{aMembers();aLoad();}); }
 
 /* ---------- Templates ---------- */
 function tLoad(){ post(EC.templates,{action:'list'}).done(function(r){ if(!r.success){toast(r.message,'error');return;} let h='<table class="ec-tbl"><thead><tr><th>Name</th><th>Subject</th><th>From</th><th></th></tr></thead><tbody>'; r.rows.forEach(t=>h+='<tr><td>'+esc(t.name)+'</td><td>'+esc(t.subject)+'</td><td>'+esc(t.from_email||'')+'</td><td><button class="ec-btn light sm" onclick="tEdit('+t.id+')">Edit</button> <button class="ec-btn danger sm" onclick="tDel('+t.id+')">Delete</button></td></tr>'); h+='</tbody></table>'; document.getElementById('tTable').innerHTML=h; }); }
 function tForm(t){ t=t||{}; return '<input type="hidden" id="tId" value="'+(t.id||'')+'">'+
     '<div class="ec-row"><div class="ec-fg"><label>Name *</label><input class="ec-in" id="tName" value="'+esc(t.name||'')+'"></div><div class="ec-fg"><label>Subject * <span class="ec-hint">merge fields work here too, e.g. {{company}} - The Munich Eye</span></label><input class="ec-in" id="tSubject" value="'+esc(t.subject||'')+'"></div></div>'+
-    '<div class="ec-row"><div class="ec-fg"><label>From name</label><input class="ec-in" id="tFromName" value="'+esc(t.from_name||'')+'"></div><div class="ec-fg"><label>From email</label><input class="ec-in" id="tFromEmail" value="'+esc(t.from_email||'')+'"></div></div>'+
-    '<div class="ec-fg"><label>Reply-to</label><input class="ec-in" id="tReplyTo" value="'+esc(t.reply_to||'')+'"></div>'+
+    /* From/Reply-to are set by the sending profile (Sending tab), so they're hidden here to avoid confusion. */
+    '<input type="hidden" id="tFromName" value=""><input type="hidden" id="tFromEmail" value=""><input type="hidden" id="tReplyTo" value="">'+
     '<div class="ec-fg"><label>HTML body * <span class="ec-hint">merge: {{first_name}} {{company}} — must include {{unsubscribe_url}}</span></label><textarea class="ec-ta" id="tHtml" style="min-height:200px">'+esc(t.html_body||'<p>Hello {{first_name}},</p>\n\n<p>...</p>\n\n<p><a href="{{unsubscribe_url}}">Unsubscribe</a></p>')+'</textarea></div>'+
     '<div class="ec-fg"><label>Plain text (optional — auto-generated if blank)</label><textarea class="ec-ta" id="tText">'+esc(t.text_body||'')+'</textarea></div>'; }
-function tNew(){ ecModal('New template',tForm(),'<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn light" onclick="tPreview()">Preview</button><button class="ec-btn light" onclick="tTest()">Send test to me</button><button class="ec-btn" onclick="tSave()">Save</button>'); }
-function tEdit(id){ post(EC.templates,{action:'get',id:id}).done(function(r){ if(r.success){ ecModal('Edit template',tForm(r.template),'<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn light" onclick="tPreview()">Preview</button><button class="ec-btn light" onclick="tTest()">Send test to me</button><button class="ec-btn" onclick="tSave()">Save</button>'); } }); }
+function tNew(){ ecModal('New template',tForm(),'<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn light" onclick="tPreview()">Preview</button><button class="ec-btn light" onclick="tTestModal()">Send test</button><button class="ec-btn" onclick="tSave()">Save</button>'); }
+function tEdit(id){ post(EC.templates,{action:'get',id:id}).done(function(r){ if(r.success){ ecModal('Edit template',tForm(r.template),'<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn light" onclick="tPreview()">Preview</button><button class="ec-btn light" onclick="tTestModal()">Send test</button><button class="ec-btn" onclick="tSave()">Save</button>'); } }); }
 function tPayload(){ return {id:document.getElementById('tId').value,name:document.getElementById('tName').value,subject:document.getElementById('tSubject').value,from_name:document.getElementById('tFromName').value,from_email:document.getElementById('tFromEmail').value,reply_to:document.getElementById('tReplyTo').value,html_body:document.getElementById('tHtml').value,text_body:document.getElementById('tText').value}; }
 function tSave(){ post(EC.templates,Object.assign({action:'save'},tPayload())).done(function(r){ if(r.success){ecClose();toast('Saved');tLoad();}else toast(r.message,'error'); }); }
 function tDel(id){ Swal.fire({title:'Delete template?',icon:'warning',showCancelButton:true,confirmButtonColor:'#dc2626'}).then(x=>{ if(x.isConfirmed) post(EC.templates,{action:'delete',id:id}).done(()=>{toast('Deleted');tLoad();}); }); }
 function tPreview(){ post(EC.templates,Object.assign({action:'preview'},tPayload())).done(function(r){ if(r.success){ const w=window.open('','_blank'); w.document.write('<h3 style="font-family:sans-serif">Subject: '+esc(r.subject)+'</h3><hr>'+r.html); } }); }
-function tTest(){ post(EC.templates,Object.assign({action:'test_send'},tPayload())).done(function(r){ toast(r.message, r.success?'success':'error'); }); }
+/* Send-test opens a second-layer modal above the still-open template editor, so
+ * unsaved edits (read via tPayload) survive and are what gets sent. "Choose from
+ * contacts" opens the full picker (top layer) and fills the address. */
+function tTestModal(){ post(EC.profiles,{action:'list'}).done(function(r){
+    var profs=r.rows||[];
+    var opts=profs.map(function(p){ return '<option value="'+p.id+'">'+esc(p.name)+(p.from_email?(' — '+esc(p.from_email)):'')+'</option>'; }).join('');
+    var profField = profs.length
+        ? '<div class="ec-fg"><label>Send using profile *</label><select class="ec-sel" id="ttProfile">'+opts+'</select></div>'
+        : '<div class="ec-fg"><label>Send using profile</label><div class="ec-hint" style="color:#b45309">No sending profiles yet — create one in the <b>Sending</b> tab first (that\'s where the SMTP host/login live). The test can\'t send without one.</div></div>';
+    var body='<p class="ec-hint" style="margin-top:0">Send a one-off test of this template. Merge fields use sample values, and it goes out through the chosen sending profile.</p>'+
+        profField+
+        '<div class="ec-fg"><label>Send to *</label><input class="ec-in" id="ttTo" value="'+esc(EC_ME||'')+'"></div>'+
+        '<button class="ec-btn light sm" onclick="ttPick()"><i class="fas fa-address-book"></i> Choose from contacts</button>';
+    ecModal2('Send test email', body, '<button class="ec-btn light" onclick="ecClose2()">Cancel</button><button class="ec-btn" onclick="tTestSend()">Send test</button>');
+}); }
+function ttPick(){ ctpOpen({multi:false,title:'Choose a contact to send the test to',onPick:function(c){ var f=document.getElementById('ttTo'); if(f) f.value=c.email; }}); }
+function tTestSend(){ var to=(document.getElementById('ttTo').value||'').trim(); if(!to){ toast('Enter an email address','error'); return; } var pf=document.getElementById('ttProfile'); post(EC.templates,Object.assign({action:'test_send',to:to,profile_id:(pf?pf.value:0)},tPayload())).done(function(r){ toast(r.message, r.success?'success':'error'); if(r.success) ecClose2(); }); }
 
 /* ---------- Campaigns ---------- */
-function kLoad(){ post(EC.campaigns,{action:'list'}).done(function(r){ if(!r.success){toast(r.message,'error');return;} let h='<table class="ec-tbl"><thead><tr><th>Name</th><th>Audience</th><th>Status</th><th>Sent/Total</th><th></th></tr></thead><tbody>'; r.rows.forEach(c=>h+='<tr><td>'+esc(c.name)+'</td><td>'+esc(c.audience_name||'')+'</td><td><span class="ec-badge b-'+c.status+'">'+c.status+'</span></td><td>'+c.sent+'/'+c.total+'</td><td style="white-space:nowrap"><button class="ec-btn light sm" onclick="kEdit('+c.id+')">Edit</button> <button class="ec-btn light sm" onclick="kReview('+c.id+')">Review &amp; launch</button> <button class="ec-btn light sm" onclick="kRerun('+c.id+')">Add new &amp; re-run</button></td></tr>'); h+='</tbody></table>'; document.getElementById('kTable').innerHTML=h; }); }
+function kLoad(){ var showArch=document.getElementById('kShowArchived')&&document.getElementById('kShowArchived').checked?1:0; post(EC.campaigns,{action:'list',include_archived:showArch}).done(function(r){ if(!r.success){toast(r.message,'error');return;} let h='<table class="ec-tbl"><thead><tr><th>Name</th><th>Audience</th><th>Status</th><th>Sent/Total</th><th></th></tr></thead><tbody>'; r.rows.forEach(function(c){ var arch=(c.archived==1); h+='<tr'+(arch?' style="opacity:.55"':'')+'><td>'+esc(c.name)+(arch?' <span class="ec-badge b-cancelled">archived</span>':'')+'</td><td>'+esc(c.audience_name||'')+'</td><td><span class="ec-badge b-'+c.status+'">'+c.status+'</span></td><td>'+c.sent+'/'+c.total+'</td><td style="white-space:nowrap"><button class="ec-btn light sm" onclick="kEdit('+c.id+')">Edit</button> <button class="ec-btn light sm" onclick="kReview('+c.id+')">Review &amp; launch</button> <button class="ec-btn light sm" onclick="kRerun('+c.id+')">Add new &amp; re-run</button> '+(c.total>0?'<button class="ec-btn light sm" onclick="kResend('+c.id+')">Send again</button> ':'')+(arch?'<button class="ec-btn light sm" onclick="kArchive('+c.id+',0)">Unarchive</button>':'<button class="ec-btn light sm" onclick="kArchive('+c.id+',1)">Archive</button>')+' <button class="ec-btn danger sm" onclick="kDelete('+c.id+')">Delete</button></td></tr>'; }); h+='</tbody></table>'; document.getElementById('kTable').innerHTML=h; }); }
+/* Send again: shows everyone already in the campaign and re-queues all or a selection
+ * to be emailed AGAIN (overrides the never-email-twice default). */
+function kResend(id){ post(EC.campaigns,{action:'recipients',id:id,limit:1000}).done(function(r){ if(!r.success){toast(r.message,'error');return;}
+    var rows=r.rows||[], total=r.total||rows.length;
+    var body='<p class="ec-hint" style="margin-top:0">Everyone already contacted in this campaign. Re-queuing sends the email to them <b>again</b>. Anyone who has since unsubscribed or bounced is still skipped automatically at send time.</p>'+
+        '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><button class="ec-btn" onclick="kResendDo('+id+',true)">Re-send to everyone ('+total+')</button><span class="ec-hint" id="rsSel"></span></div>'+
+        '<div style="max-height:46vh;overflow:auto;border:1px solid #eef0f3;border-radius:8px"><table class="ec-tbl"><thead><tr><th style="width:30px"><input type="checkbox" onclick="rsAll(this)"></th><th>Email</th><th>Last status</th><th>Last sent</th></tr></thead><tbody>'+
+        rows.map(function(x){ return '<tr><td><input type="checkbox" class="rsChk" value="'+x.contact_id+'" onchange="rsCount()"></td><td>'+esc(x.email)+'</td><td>'+esc(x.status)+(x.error?(' <span style="color:#b91c1c">('+esc(x.error)+')</span>'):'')+'</td><td>'+esc((x.sent_at||'').replace('T',' '))+'</td></tr>'; }).join('')+
+        '</tbody></table></div>'+
+        (total>rows.length?('<p class="ec-hint">Showing '+rows.length+' of '+total+'. "Re-send to everyone" still covers all of them.</p>'):'');
+    ecModal('Send again', body, '<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn" onclick="kResendDo('+id+',false)">Re-send to selected</button>');
+}); }
+function rsAll(cb){ document.querySelectorAll('.rsChk').forEach(function(x){ x.checked=cb.checked; }); rsCount(); }
+function rsCount(){ var n=document.querySelectorAll('.rsChk:checked').length; var el=document.getElementById('rsSel'); if(el) el.textContent=n?(n+' selected'):''; }
+function kResendDo(id,all){ var ids=''; if(!all){ var arr=[]; document.querySelectorAll('.rsChk:checked').forEach(function(x){ arr.push(x.value); }); if(!arr.length){ toast('Tick some recipients, or use "Re-send to everyone"','error'); return; } ids=arr.join(','); }
+    var msg = all ? 'Re-send this campaign to EVERYONE already contacted?' : 'Re-send to the selected recipients?';
+    Swal.fire({title:msg,text:'They will be emailed again.',icon:'warning',showCancelButton:true,confirmButtonText:'Re-send'}).then(function(x){ if(!x.isConfirmed) return; post(EC.campaigns,{action:'resend',id:id,contact_ids:ids}).done(function(r){ if(r.success){ ecClose(); toast(r.requeued+' re-queued — sending again'); kLoad(); dashLoad(); } else toast(r.message,'error'); }); }); }
+function kArchive(id,on){ post(EC.campaigns,{action:(on?'archive':'unarchive'),id:id}).done(function(r){ if(r.success){toast(on?'Archived':'Unarchived');kLoad();}else toast(r.message,'error'); }); }
+function kDelete(id){ Swal.fire({title:'Delete campaign?',text:'This permanently removes the campaign and all its recipients, tracking and reports. This cannot be undone.',icon:'warning',showCancelButton:true,confirmButtonColor:'#dc2626',confirmButtonText:'Delete permanently'}).then(function(x){ if(x.isConfirmed) post(EC.campaigns,{action:'delete',id:id}).done(function(r){ if(r.success){toast('Deleted');kLoad();}else toast(r.message,'error'); }); }); }
 let _tpls=[],_auds=[],_profs=[];
 function kNew(){ Promise.all([post(EC.audiences,{action:'list'}),post(EC.templates,{action:'list'}),post(EC.profiles,{action:'list'})]).then(function(a){ _auds=a[0].rows||[]; _tpls=a[1].rows||[]; _profs=a[2].rows||[]; kForm({}); }); }
 function kEdit(id){ Promise.all([post(EC.audiences,{action:'list'}),post(EC.templates,{action:'list'}),post(EC.profiles,{action:'list'}),post(EC.campaigns,{action:'get',id:id})]).then(function(a){ _auds=a[0].rows||[]; _tpls=a[1].rows||[]; _profs=a[2].rows||[]; kForm(a[3].campaign, a[3].variants); }); }
@@ -464,29 +683,39 @@ function kForm(c,vars){ c=c||{}; vars=vars&&vars.length?vars:[{template_id:'',we
     ecModal(c.id?'Edit campaign':'New campaign',
         '<input type="hidden" id="kId" value="'+(c.id||'')+'">'+
         '<div class="ec-row"><div class="ec-fg"><label>Name *</label><input class="ec-in" id="kName" value="'+esc(c.name||'')+'"></div><div class="ec-fg"><label>Audience *</label><select class="ec-sel" id="kAud"><option value="">— audience —</option>'+optList(_auds,c.audience_id,'id','name')+'</select></div></div>'+
-        '<div class="ec-fg"><label>Sending profile <span class="ec-hint">(the subdomain + mailboxes to send from; manage under the Sending tab)</span></label><select class="ec-sel" id="kProfile"><option value="">— use global default —</option>'+optList(_profs,c.sending_profile_id,'id','name')+'</select></div>'+
-        '<div class="ec-row"><div class="ec-fg"><label>From name <span class="ec-hint">(blank = use profile)</span></label><input class="ec-in" id="kFromName" value="'+esc(c.from_name||'')+'"></div><div class="ec-fg"><label>From email <span class="ec-hint">(blank = use profile)</span></label><input class="ec-in" id="kFromEmail" value="'+esc(c.from_email||'')+'"></div></div>'+
-        '<div class="ec-fg"><label>Reply-to <span class="ec-hint">(blank = use profile)</span></label><input class="ec-in" id="kReplyTo" value="'+esc(c.reply_to||'')+'"></div>'+
+        '<div class="ec-fg"><label>Sending profile * <span class="ec-hint">(the From address + SMTP to send from; manage under the Sending tab)</span></label><select class="ec-sel" id="kProfile"><option value="">— use global default —</option>'+optList(_profs,c.sending_profile_id,'id','name')+'</select></div>'+
+        /* From/Reply-to come from the sending profile, so they're hidden here to avoid confusion. */
+        '<input type="hidden" id="kFromName" value=""><input type="hidden" id="kFromEmail" value=""><input type="hidden" id="kReplyTo" value="">'+
         '<div class="ec-row"><div class="ec-fg"><label>Batch size</label><input class="ec-in" id="kBatch" value="'+(c.batch_size||50)+'"></div><div class="ec-fg"><label>Interval between batches (min)</label><input class="ec-in" id="kInterval" value="'+(c.batch_interval_min||10)+'"></div></div>'+
         '<div class="ec-row"><div class="ec-fg"><label>Per-domain limit / run <span class="ec-hint">(0=none)</span></label><input class="ec-in" id="kPerDomain" value="'+(c.per_domain_limit||0)+'"></div><div class="ec-fg"><label>Daily cap <span class="ec-hint">(0=none)</span></label><input class="ec-in" id="kDaily" value="'+(c.daily_cap||0)+'"></div></div>'+
         '<div class="ec-row"><div class="ec-fg"><label>Schedule start <span class="ec-hint">(blank=now)</span></label><input class="ec-in" id="kSched" type="datetime-local"></div><div class="ec-fg"><label><input type="checkbox" id="kWarm" '+(c.warmup_enabled?'checked':'')+'> Warm-up ramp &nbsp; <input type="checkbox" id="kAB" '+(c.ab_enabled?'checked':'')+'> A/B</label></div></div>'+
         '<div id="kVars">'+vh+'</div><button class="ec-btn light sm" onclick="kAddVar()">+ Add A/B variant</button>',
         '<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn" onclick="kSave()">Save</button>');
+    // Set dropdown values explicitly — reliable preselection on edit (inline `selected` can miss).
+    var ka=document.getElementById('kAud'); if(ka && c.audience_id) ka.value=String(c.audience_id);
+    var kp=document.getElementById('kProfile'); if(kp && c.sending_profile_id) kp.value=String(c.sending_profile_id);
+    document.querySelectorAll('.kVarTpl').forEach(function(sel,i){ if(vars[i] && vars[i].template_id) sel.value=String(vars[i].template_id); });
 }
 function kAddVar(){ const i=document.querySelectorAll('.kVarTpl').length; const tplOpts='<option value="">— template —</option>'+_tpls.map(o=>'<option value="'+o.id+'">'+esc(o.name)+'</option>').join(''); const div=document.createElement('div'); div.className='ec-row'; div.style.alignItems='end'; div.innerHTML='<div class="ec-fg"><label>Variant '+String.fromCharCode(65+i)+' template</label><select class="ec-sel kVarTpl">'+tplOpts+'</select></div><div class="ec-fg"><label>Weight</label><input class="ec-in kVarW" value="1"></div>'; document.getElementById('kVars').appendChild(div); }
 function kSave(){ const vars=[]; document.querySelectorAll('.kVarTpl').forEach((el,i)=>{ if(el.value) vars.push({label:String.fromCharCode(65+i),template_id:el.value,weight:document.querySelectorAll('.kVarW')[i].value||1}); }); if(!vars.length){toast('Add at least one template variant','error');return;}
     post(EC.campaigns,{action:'save',id:document.getElementById('kId').value,name:document.getElementById('kName').value,audience_id:document.getElementById('kAud').value,sending_profile_id:document.getElementById('kProfile').value,from_name:document.getElementById('kFromName').value,from_email:document.getElementById('kFromEmail').value,reply_to:document.getElementById('kReplyTo').value,batch_size:document.getElementById('kBatch').value,batch_interval_min:document.getElementById('kInterval').value,per_domain_limit:document.getElementById('kPerDomain').value,daily_cap:document.getElementById('kDaily').value,warmup_enabled:document.getElementById('kWarm').checked?1:0,ab_enabled:document.getElementById('kAB').checked?1:0,scheduled_at:document.getElementById('kSched').value,variants:JSON.stringify(vars)}).done(function(r){ if(r.success){ecClose();toast('Saved');kLoad();}else toast(r.message,'error'); }); }
 function kReview(id){ post(EC.campaigns,{action:'materialise',id:id}).done(function(m){ post(EC.campaigns,{action:'preview_count',id:id}).done(function(p){
-    ecModal('Review &amp; launch','<p>Materialised <b>'+(m.materialised||0)+'</b> new recipients this run.</p><p>Total queued to send (after suppression &amp; dedup): confirm below.</p><p class="ec-hint">Suppressed and already-contacted addresses are excluded automatically.</p>',
+    ecModal('Review & launch','<p>Materialised <b>'+(m.materialised||0)+'</b> new recipients this run.</p><p>Total queued to send (after suppression &amp; dedup): confirm below.</p><p class="ec-hint">Suppressed and already-contacted addresses are excluded automatically.</p>',
     '<button class="ec-btn light" onclick="ecClose()">Close</button><button class="ec-btn" onclick="kLaunch('+id+')">Launch now</button>'); }); }); }
 function kLaunch(id){ post(EC.campaigns,{action:'launch',id:id}).done(function(r){ if(r.success){ecClose();toast('Campaign '+r.status);kLoad();dashLoad();}else toast(r.message,'error'); }); }
 function kCtl(id,act){ post(EC.campaigns,{action:act,id:id}).done(()=>{toast(act+'d');dashLoad();kLoad();}); }
-function kRerun(id){ ecModal('Add new contacts &amp; re-run',
-    '<p>This adds <b>newly-found</b> contacts to this campaign and resumes sending. Anyone already contacted in <b>this</b> campaign is skipped, and suppressed/unsubscribed/replied contacts are always excluded.</p>'+
-    '<label class="ec-chk" style="padding:4px 0"><input type="checkbox" id="rrFilter" checked> Also pull new contacts from the audience\'s saved filter <span class="ec-hint">(re-applies e.g. "all brokers in Germany" to catch ones the scraper added since)</span></label>'+
-    '<p class="ec-hint">Tip: to add contacts manually instead, import them (Contacts) or add them to the audience (Audiences), then run this.</p>',
-    '<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn" onclick="kRerunDo('+id+')">Add &amp; continue</button>'); }
-function kRerunDo(id){ post(EC.campaigns,{action:'rerun',id:id,refresh_from_filter:document.getElementById('rrFilter').checked?1:0}).done(function(r){ if(r.success){ ecClose(); toast('Added '+(r.audience_added||0)+' to audience, '+r.materialised+' new recipients queued'); kLoad(); dashLoad(); } else toast(r.message,'error'); }); }
+function kRerun(id){ post(EC.campaigns,{action:'get',id:id}).done(function(g){ var aud=(g.campaign&&g.campaign.audience_id)?g.campaign.audience_id:0;
+    ecModal('Add new contacts & re-run',
+    '<p>This queues <b>new</b> contacts for this campaign and resumes sending. Anyone already contacted in <b>this</b> campaign is skipped, and suppressed/unsubscribed/replied contacts are always excluded.</p>'+
+    '<div style="padding:12px;background:#f9fafb;border:1px solid #eef0f3;border-radius:9px;margin-bottom:12px"><b style="font-size:13px">Add contacts to this campaign</b><div style="margin-top:8px">'+
+        (aud?('<button class="ec-btn sm" onclick="kRerunPick('+aud+')"><i class="fas fa-user-plus"></i> Pick contacts</button> <span class="ec-hint" id="rrAdded"></span>')
+            :'<span class="ec-hint">This campaign has no audience, so contacts can\'t be added here.</span>')+
+        '</div></div>'+
+    (aud?'<label class="ec-chk" style="padding:4px 0"><input type="checkbox" id="rrFilter"> Also pull new contacts from the audience\'s saved filter <span class="ec-hint">(re-applies e.g. "all brokers in Germany" to catch ones added since)</span></label>':'<input type="hidden" id="rrFilter">')+
+    '<p class="ec-hint">Pick contacts above (they\'re added to the audience), then click <b>Queue &amp; continue</b> to send to just the new ones.</p>',
+    '<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn" onclick="kRerunDo('+id+')">Queue &amp; continue</button>'); }); }
+function kRerunPick(aud){ ctpOpen({multi:true,title:'Add contacts to this campaign',confirmLabel:'Add to campaign',onPick:function(rows){ var ids=rows.map(function(r){return r.id;}); post(EC.audiences,{action:'add_members',audience_id:aud,contact_ids:ids.join(',')}).done(function(r){ if(r.success){ var el=document.getElementById('rrAdded'); if(el) el.innerHTML='<b>'+(r.added||0)+'</b> added — now click "Queue &amp; continue".'; toast('Added '+r.added); } else toast(r.message,'error'); }); }}); }
+function kRerunDo(id){ var rf=document.getElementById('rrFilter'); post(EC.campaigns,{action:'rerun',id:id,refresh_from_filter:(rf&&rf.checked)?1:0}).done(function(r){ if(r.success){ ecClose(); toast((r.materialised||0)+' new recipient(s) queued'); kLoad(); dashLoad(); } else toast(r.message,'error'); }); }
 
 /* ---------- Sending profiles ---------- */
 function pLoad(){ post(EC.profiles,{action:'list'}).done(function(r){ if(!r.success){toast(r.message,'error');return;} let h='<table class="ec-tbl"><thead><tr><th>Name</th><th>From</th><th>SMTP</th><th>IMAP</th><th>Active</th><th></th></tr></thead><tbody>'; (r.rows||[]).forEach(p=>h+='<tr><td>'+esc(p.name)+'</td><td>'+esc(p.from_email)+'</td><td>'+esc(p.smtp_host||'')+(p.smtp_pass_set==1?' 🔑':'')+'</td><td>'+esc(p.imap_host||'')+(p.imap_pass_set==1?' 🔑':'')+'</td><td>'+(p.active==1?'yes':'no')+'</td><td><button class="ec-btn light sm" onclick="pEdit('+p.id+')">Edit</button> <button class="ec-btn danger sm" onclick="pDel('+p.id+')">Delete</button></td></tr>'); h+='</tbody></table>'; document.getElementById('pTable').innerHTML=h; }); }
@@ -497,10 +726,10 @@ function pForm(p){ p=p||{}; return '<input type="hidden" id="pId" value="'+(p.id
     '<h4 style="margin:14px 0 6px">SMTP (sending)</h4>'+
     '<div class="ec-row"><div class="ec-fg"><label>Host</label><input class="ec-in" id="pSmtpHost" value="'+esc(p.smtp_host||'')+'"></div><div class="ec-fg"><label>Port</label><input class="ec-in" id="pSmtpPort" value="'+(p.smtp_port||587)+'"></div></div>'+
     '<div class="ec-row"><div class="ec-fg"><label>Security</label><select class="ec-sel" id="pSmtpSec"><option value="tls"'+((p.smtp_security||"tls")=="tls"?" selected":"")+'>STARTTLS (587)</option><option value="ssl"'+(p.smtp_security=="ssl"?" selected":"")+'>SSL (465)</option><option value="none"'+(p.smtp_security=="none"?" selected":"")+'>None</option></select></div><div class="ec-fg"><label>Username</label><input class="ec-in" id="pSmtpUser" value="'+esc(p.smtp_user||'')+'"></div></div>'+
-    '<div class="ec-fg"><label>SMTP password <span class="ec-hint">(blank = keep; currently '+(p.smtp_pass_set==1?'set':'not set')+')</span></label><input class="ec-in" id="pSmtpPass" type="password" autocomplete="new-password"></div>'+
+    '<div class="ec-fg"><label>SMTP password <span class="ec-hint">'+(p.smtp_pass_set==1?'(a password is saved — leave blank to keep it, or type a new one to change it)':'(no password saved yet)')+'</span></label><input class="ec-in" id="pSmtpPass" type="password" autocomplete="off" readonly onfocus="this.removeAttribute(\'readonly\')" placeholder="'+(p.smtp_pass_set==1?'••••••••••••  (saved)':'no password set')+'"></div>'+
     '<h4 style="margin:14px 0 6px">IMAP (replies &amp; bounces)</h4>'+
     '<div class="ec-row"><div class="ec-fg"><label>Host</label><input class="ec-in" id="pImapHost" value="'+esc(p.imap_host||'')+'"></div><div class="ec-fg"><label>Port</label><input class="ec-in" id="pImapPort" value="'+(p.imap_port||993)+'"></div></div>'+
-    '<div class="ec-row"><div class="ec-fg"><label>Username</label><input class="ec-in" id="pImapUser" value="'+esc(p.imap_user||'')+'"></div><div class="ec-fg"><label>IMAP password <span class="ec-hint">(blank = keep; currently '+(p.imap_pass_set==1?'set':'not set')+')</span></label><input class="ec-in" id="pImapPass" type="password" autocomplete="new-password"></div></div>'+
+    '<div class="ec-row"><div class="ec-fg"><label>Username</label><input class="ec-in" id="pImapUser" value="'+esc(p.imap_user||'')+'"></div><div class="ec-fg"><label>IMAP password <span class="ec-hint">'+(p.imap_pass_set==1?'(a password is saved — leave blank to keep it, or type a new one to change it)':'(no password saved yet)')+'</span></label><input class="ec-in" id="pImapPass" type="password" autocomplete="off" readonly onfocus="this.removeAttribute(\'readonly\')" placeholder="'+(p.imap_pass_set==1?'••••••••••••  (saved)':'no password set')+'"></div></div>'+
     '<div class="ec-row"><div class="ec-fg"><label>Reply mailbox (folder)</label><input class="ec-in" id="pReplyMbx" value="'+esc(p.reply_mailbox||'INBOX')+'"></div><div class="ec-fg"><label>Bounce mailbox (folder)</label><input class="ec-in" id="pBounceMbx" value="'+esc(p.bounce_mailbox||'')+'"></div></div>'; }
 function pNew(){ ecModal('New sending profile',pForm(),'<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn" onclick="pSave()">Save</button>'); }
 function pEdit(id){ post(EC.profiles,{action:'get',id:id}).done(function(r){ if(r.success) ecModal('Edit sending profile',pForm(r.profile),'<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn" onclick="pSave()">Save</button>'); }); }
@@ -509,12 +738,43 @@ function pDel(id){ Swal.fire({title:'Delete profile?',icon:'warning',showCancelB
 
 /* ---------- Reports ---------- */
 function rInit(){ post(EC.campaigns,{action:'list'}).done(function(r){ const sel=document.getElementById('rCampaign'); sel.innerHTML='<option value="">Choose a campaign…</option>'+(r.rows||[]).map(c=>'<option value="'+c.id+'">'+esc(c.name)+'</option>').join(''); }); }
-function rLoad(){ const id=document.getElementById('rCampaign').value; if(!id){document.getElementById('rBody').innerHTML='';return;} post(EC.campaigns,{action:'report',id:id}).done(function(r){ if(!r.success){toast(r.message,'error');return;} const f=r.funnel; let h='<div class="ec-statrow">'+stat(f.sent,'sent')+stat(f.open,'opened')+stat(f.click,'clicked')+stat(f.reply,'replied')+stat(f.visit,'visits')+stat(f.bounce,'bounced')+stat(f.unsubscribe,'unsub')+'</div>';
+function rLoad(){ const id=document.getElementById('rCampaign').value; if(!id){document.getElementById('rBody').innerHTML='';return;} post(EC.campaigns,{action:'report',id:id}).done(function(r){ if(!r.success){toast(r.message,'error');return;} const f=r.funnel,bs=r.by_status||{},cm=r.campaign||{};
+    const fmt=function(d){ return d? String(d).replace('T',' ').slice(0,16) : '—'; };
+    let h='<div class="ec-hint" style="margin:0 0 14px">Status: <b>'+esc(cm.status||'')+'</b> &nbsp;·&nbsp; Created '+fmt(cm.created_at)+(cm.scheduled_at?(' &nbsp;·&nbsp; Scheduled '+fmt(cm.scheduled_at)):'')+' &nbsp;·&nbsp; Started '+fmt(cm.started_at)+' &nbsp;·&nbsp; Completed '+fmt(cm.completed_at)+'</div>';
+    // Delivery row — so a campaign that sent nothing still shows why.
+    h+='<h3 style="margin-top:0">Delivery</h3><div class="ec-statrow">'+stat(bs.sent||0,'sent')+stat(bs.queued||0,'queued')+stat(bs.sending||0,'sending')+stat(bs.failed||0,'failed')+stat(bs.skipped||0,'skipped')+'</div>';
+    if((bs.failed||0)>0 || (bs.skipped||0)>0){
+        h+='<div class="ec-callout" style="margin-top:10px"><b>'+((bs.failed||0)+(bs.skipped||0))+' recipient(s) did not send.</b> ';
+        if(r.errors&&r.errors.length){ h+='Reasons: '+r.errors.map(e=>esc(e.error)+' ('+e.n+')').join(', ')+'.'; }
+        h+=' See the per-recipient list below.</div>';
+    }
+    h+='<h3>Engagement</h3><div class="ec-statrow">'+stat(f.sent,'sent')+stat(f.open,'opened')+stat(f.click,'clicked')+stat(f.reply,'replied')+stat(f.visit,'visits')+stat(f.bounce,'bounced')+stat(f.unsubscribe,'unsub')+'</div>';
     h+='<h3>A/B variants</h3><table class="ec-tbl"><thead><tr><th>Variant</th><th>Recipients</th><th>Sent</th><th>Opened</th><th>Clicked</th><th>Replied</th></tr></thead><tbody>';
     (r.variants||[]).forEach(v=>h+='<tr><td>'+esc(v.label)+'</td><td>'+v.recips+'</td><td>'+(v.sent||0)+'</td><td>'+(v.opened||0)+'</td><td>'+(v.clicked||0)+'</td><td>'+(v.replied||0)+'</td></tr>');
     h+='</tbody></table><div style="margin-top:10px"><button class="ec-btn light sm" onclick="rRecips('+id+')">Show recipients</button></div><div id="rRecips"></div>';
-    document.getElementById('rBody').innerHTML=h; }); }
-function rRecips(id){ post(EC.campaigns,{action:'recipients',id:id}).done(function(r){ let h='<table class="ec-tbl"><thead><tr><th>Email</th><th>Status</th><th>Sent</th><th>Opened</th><th>Clicked</th><th>Replied</th></tr></thead><tbody>'; (r.rows||[]).forEach(x=>h+='<tr><td>'+esc(x.email)+'</td><td>'+esc(x.status)+'</td><td>'+esc(x.sent_at||'')+'</td><td>'+(x.opened_at?'✓':'')+'</td><td>'+(x.first_click_at?'✓':'')+'</td><td>'+(x.replied_at?'✓':'')+'</td></tr>'); h+='</tbody></table>'; document.getElementById('rRecips').innerHTML=h; }); }
+    document.getElementById('rBody').innerHTML=h;
+    if((bs.failed||0)>0 || (bs.skipped||0)>0) rRecips(id); // auto-open so the reason is visible
+    }); }
+function rRecips(id){ post(EC.campaigns,{action:'recipients',id:id}).done(function(r){ let h='<table class="ec-tbl"><thead><tr><th>Email</th><th>Status</th><th>Reason / error</th><th>Sent</th><th>Opened</th><th>Clicked</th><th>Replied</th><th>Unsub</th><th>Bounced</th></tr></thead><tbody>'; (r.rows||[]).forEach(x=>h+='<tr><td>'+esc(x.email)+'</td><td>'+esc(x.status)+'</td><td style="color:#b91c1c">'+esc(x.error||'')+'</td><td>'+esc((x.sent_at||'').replace('T',' '))+'</td><td>'+(x.opened_at?'✓':'')+'</td><td>'+(x.first_click_at?'✓':'')+'</td><td>'+(x.replied_at?'✓':'')+'</td><td>'+(x.unsubscribed_at?'<span style="color:#b45309">✓</span>':'')+'</td><td>'+(x.bounce_type?esc(x.bounce_type):'')+'</td></tr>'); h+='</tbody></table>'; document.getElementById('rRecips').innerHTML=h; }); }
+
+/* ---------- Responses (replies + bounces) ---------- */
+function respLoad(){ var type=document.getElementById('respFilter')?document.getElementById('respFilter').value:''; post(EC.responses,{action:'list',type:type,limit:200}).done(function(r){ if(!r.success){toast(r.message,'error');return;}
+    var cc=document.getElementById('respCount'); if(cc) cc.textContent=(r.total||0)+' '+(type||'response')+(r.total===1?'':'s');
+    if(!r.rows||!r.rows.length){ document.getElementById('respTable').innerHTML='<p class="ec-hint">No responses collected yet. Click <b>Check for new responses</b> to poll your mailboxes now (IMAP must be set on the sending profile).</p>'; return; }
+    var h='<table class="ec-tbl"><thead><tr><th>Type</th><th>From</th><th>Campaign</th><th>Subject</th><th>When</th><th></th></tr></thead><tbody>';
+    r.rows.forEach(function(x){
+        var badge = x.type==='bounce' ? '<span class="ec-badge b-cancelled">bounce'+(x.bounce_type?(' · '+esc(x.bounce_type)):'')+'</span>' : '<span class="ec-badge b-sending">reply</span>';
+        h+='<tr style="cursor:pointer" onclick="respView('+x.id+')"><td>'+badge+'</td><td>'+esc(x.contact_email||'')+'</td><td>'+esc(x.campaign||'—')+'</td><td>'+esc(x.subject||'(no subject)')+'<div class="ec-hint" style="max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(x.snippet||'')+'</div></td><td>'+esc((x.received_at||'').replace('T',' '))+'</td><td><button class="ec-btn light sm" onclick="event.stopPropagation();respView('+x.id+')">Read</button></td></tr>';
+    });
+    h+='</tbody></table>'; document.getElementById('respTable').innerHTML=h;
+}); }
+function respView(id){ post(EC.responses,{action:'get',id:id}).done(function(r){ if(!r.success){toast(r.message||'Not found','error');return;} var x=r.response;
+    var meta='<div class="ec-hint" style="margin-bottom:12px">'+(x.type==='bounce'?'<b>Bounce</b>'+(x.bounce_type?(' ('+esc(x.bounce_type)+')'):''):'<b>Reply</b>')+' from <b>'+esc(x.contact_email||'')+'</b>'+(x.campaign?(' · campaign: '+esc(x.campaign)):'')+' · '+esc((x.received_at||'').replace('T',' '))+'</div>';
+    var body='<div style="white-space:pre-wrap;font-size:13.5px;line-height:1.55;max-height:52vh;overflow:auto;border:1px solid #eef0f3;border-radius:8px;padding:12px;background:#fafafa">'+esc(x.body||'(no text content)')+'</div>';
+    ecModal(x.subject||'(no subject)', meta+body, '<button class="ec-btn danger light" onclick="respDel('+id+')">Delete</button><span style="flex:1"></span><button class="ec-btn" onclick="ecClose()">Close</button>');
+}); }
+function respDel(id){ post(EC.responses,{action:'delete',id:id}).done(function(r){ if(r.success){ ecClose(); toast('Deleted'); respLoad(); } else toast(r.message,'error'); }); }
+function respPoll(){ toast('Checking mailboxes…','info'); post(EC.responses,{action:'poll'}).done(function(r){ if(r.success){ toast('Checked. '+(r.log||'').split('\n')[0]); respLoad(); } else toast(r.message||'Poll failed','error'); }); }
 
 /* ---------- Settings ---------- */
 const S_FIELDS=['default_from_name','default_from_email','default_reply_to','daily_cap','warmup_json','track_base'];
