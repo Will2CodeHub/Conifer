@@ -83,12 +83,14 @@ function ec_track_base(): string {
 }
 
 /**
- * Rewrite <a href> links to the click tracker and append the open pixel.
+ * Rewrite <a href> links to the click tracker (click tracking).
  * On-site links (matching $siteHosts) also get ?ec=<token>+UTM for visit attribution.
+ * NOTE: this does the LINK rewriting only. The open pixel is added separately by
+ * ec_add_open_pixel() so opens and clicks can be toggled independently per campaign.
  */
 function ec_rewrite_links(string $html, string $token, string $trackBase, array $siteHosts = []): string {
     $trackBase = rtrim($trackBase, '/');
-    $html = preg_replace_callback('/href\s*=\s*(["\'])(https?:\/\/[^"\']+)\1/i', function ($mm) use ($token, $trackBase, $siteHosts) {
+    return preg_replace_callback('/href\s*=\s*(["\'])(https?:\/\/[^"\']+)\1/i', function ($mm) use ($token, $trackBase, $siteHosts) {
         $url = $mm[2];
         // tag on-site links for visit attribution
         $host = parse_url($url, PHP_URL_HOST);
@@ -104,14 +106,19 @@ function ec_rewrite_links(string $html, string $token, string $trackBase, array 
         $click = $trackBase . '/t/c.php?r=' . urlencode($token) . '&u=' . urlencode($url);
         return 'href=' . $mm[1] . $click . $mm[1];
     }, $html);
-    // open pixel
+}
+
+/**
+ * Append the 1x1 invisible open-tracking pixel (open tracking). Inserted before
+ * </body> when present, else at the end. Gated per campaign by track_opens.
+ */
+function ec_add_open_pixel(string $html, string $token, string $trackBase): string {
+    $trackBase = rtrim($trackBase, '/');
     $pixel = '<img src="' . $trackBase . '/t/o.php?r=' . rawurlencode($token) . '" width="1" height="1" alt="" style="display:none" />';
     if (stripos($html, '</body>') !== false) {
-        $html = preg_replace('/<\/body>/i', $pixel . '</body>', $html, 1);
-    } else {
-        $html .= $pixel;
+        return preg_replace('/<\/body>/i', $pixel . '</body>', $html, 1);
     }
-    return $html;
+    return $html . $pixel;
 }
 
 /** Build a WHERE clause for a contact filter (build-from-filter / refresh).
@@ -203,6 +210,13 @@ function ec_ensure_schema(mysqli $c): void {
 
     $ca = $c->query("SHOW COLUMNS FROM ten_ec_campaigns LIKE 'archived'");
     if (!$ca || $ca->num_rows === 0) @$c->query("ALTER TABLE ten_ec_campaigns ADD COLUMN archived TINYINT(1) NOT NULL DEFAULT 0");
+
+    // Per-campaign tracking + format controls. All default OFF: no open pixel, no link
+    // rewriting, HTML body. Toggled in the campaign form; enforced in cron/ec_send.php.
+    foreach (['track_opens','track_clicks','plain_text'] as $col) {
+        $chk = $c->query("SHOW COLUMNS FROM ten_ec_campaigns LIKE '$col'");
+        if (!$chk || $chk->num_rows === 0) @$c->query("ALTER TABLE ten_ec_campaigns ADD COLUMN $col TINYINT(1) NOT NULL DEFAULT 0");
+    }
 
     $sa = $c->query("SHOW COLUMNS FROM ten_ec_recipients LIKE 'send_attempts'");
     if (!$sa || $sa->num_rows === 0) @$c->query("ALTER TABLE ten_ec_recipients ADD COLUMN send_attempts INT NOT NULL DEFAULT 0");
