@@ -79,9 +79,21 @@ while ($camp = $camps->fetch_assoc()) {
         $unsub = $trackBase . '/u.php?r=' . rawurlencode($token);
         $contact = ['first_name'=>$r['first_name'],'last_name'=>$r['last_name'],'company'=>$r['company'],'email'=>$email,'city'=>$r['city']];
         $subject = ec_render($tpl['subject_override'] ?: $tpl['subject'], $contact, $unsub);
-        $html = ec_render($tpl['html_body'], $contact, $unsub);
-        $html = ec_rewrite_links($html, $token, $trackBase, $siteHosts);
         $text = ec_render($tpl['text_body'] ?: strip_tags($tpl['html_body']), $contact, $unsub);
+
+        // Per-campaign tracking + format flags (all default OFF).
+        $plainOnly  = !empty($camp['plain_text']);
+        $trackClicks = !$plainOnly && !empty($camp['track_clicks']); // plain text can't carry rewritten links
+        $trackOpens  = !$plainOnly && !empty($camp['track_opens']);  // plain text can't carry a pixel
+        if ($plainOnly) {
+            $html = '';
+        } else {
+            $html = ec_render($tpl['html_body'], $contact, $unsub);
+            // Click tracking: rewrite links through /t/c.php. OFF => links stay exactly as written.
+            if ($trackClicks) $html = ec_rewrite_links($html, $token, $trackBase, $siteHosts);
+            // Open tracking: add the invisible pixel. OFF => no pixel.
+            if ($trackOpens)  $html = ec_add_open_pixel($html, $token, $trackBase);
+        }
 
         // Identity: campaign override -> sending profile -> template -> global settings.
         $fromEmail = $camp['from_email'] ?: ($profile['from_email'] ?? '') ?: ($tpl['from_email'] ?: ($settings['default_from_email'] ?? ''));
@@ -97,6 +109,7 @@ while ($camp = $camps->fetch_assoc()) {
         }
         // SMTP transport: profile overrides global settings.
         $sendOpts = ['from_name'=>$fromName,'from_email'=>$fromEmail,'reply_to'=>$replyTo,'return_path'=>$returnPath,'list_unsub_url'=>$unsub];
+        if ($plainOnly) $sendOpts['plain_only'] = true;
         if (!empty($profile['smtp_host'])) {
             $sendOpts['smtp'] = ['host'=>$profile['smtp_host'],'port'=>$profile['smtp_port'],'security'=>$profile['smtp_security'],'user'=>$profile['smtp_user'],'pass'=>$profile['smtp_pass_plain']??''];
         }
