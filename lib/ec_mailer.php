@@ -31,7 +31,9 @@ function ec_enc_header(string $v): string {
 /**
  * Send one message.
  * @param array  $to   ['email'=>..., 'name'=>...]
- * @param array  $opts from_name, from_email, reply_to, message_id, return_path, list_unsub_url, extra_headers[]
+ * @param array  $opts from_name, from_email, reply_to, message_id, return_path, list_unsub_url, extra_headers[], plain_only
+ *                      plain_only=true sends a single text/plain part (no HTML) for the
+ *                      most inbox-friendly, tracking-free format.
  * @return array{ok:bool,message_id:string,error:string}
  */
 function ec_send_message(array $to, string $subject, string $html, string $text, array $opts = []): array {
@@ -64,15 +66,22 @@ function ec_send_message(array $to, string $subject, string $html, string $text,
     }
     $H[] = 'X-Mailer: TEN-EC';
     foreach (($opts['extra_headers'] ?? []) as $eh) $H[] = $eh;
-    $H[] = 'Content-Type: multipart/alternative; boundary="' . $boundary . '"';
 
-    $B  = '--' . $boundary . "\r\n";
-    $B .= "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n";
-    $B .= chunk_split(base64_encode($text)) . "\r\n";
-    $B .= '--' . $boundary . "\r\n";
-    $B .= "Content-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n";
-    $B .= chunk_split(base64_encode($html)) . "\r\n";
-    $B .= '--' . $boundary . "--\r\n";
+    if (!empty($opts['plain_only'])) {
+        // Single text/plain part — no HTML, so no pixel and no rewritten links are possible.
+        $H[] = 'Content-Type: text/plain; charset=UTF-8';
+        $H[] = 'Content-Transfer-Encoding: base64';
+        $B = chunk_split(base64_encode($text));
+    } else {
+        $H[] = 'Content-Type: multipart/alternative; boundary="' . $boundary . '"';
+        $B  = '--' . $boundary . "\r\n";
+        $B .= "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n";
+        $B .= chunk_split(base64_encode($text)) . "\r\n";
+        $B .= '--' . $boundary . "\r\n";
+        $B .= "Content-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n";
+        $B .= chunk_split(base64_encode($html)) . "\r\n";
+        $B .= '--' . $boundary . "--\r\n";
+    }
 
     $raw = implode("\r\n", $H) . "\r\n\r\n" . $B;
 

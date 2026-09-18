@@ -97,19 +97,24 @@ try {
             $batch=max(1,(int)($_POST['batch_size']??50)); $interval=max(0,(int)($_POST['batch_interval_min']??10));
             $perDomain=max(0,(int)($_POST['per_domain_limit']??0)); $dailyCap=max(0,(int)($_POST['daily_cap']??0));
             $warmup=(int)(!empty($_POST['warmup_enabled'])); $ab=(int)(!empty($_POST['ab_enabled']));
+            // Tracking + format controls (all default off). Plain text forces tracking off:
+            // a text-only email can carry neither a pixel nor rewritten links.
+            $plainText=(int)(!empty($_POST['plain_text']));
+            $trackOpens=$plainText?0:(int)(!empty($_POST['track_opens']));
+            $trackClicks=$plainText?0:(int)(!empty($_POST['track_clicks']));
             $sched=trim($_POST['scheduled_at']??''); $schedSql = $sched!=='' ? "'".$c->real_escape_string(date('Y-m-d H:i:s',strtotime($sched)))."'" : "NULL";
             $variants = json_decode($_POST['variants']??'[]', true);
             if(!is_array($variants) || !$variants) throw new Exception('At least one variant (template) is required');
             foreach($variants as $v){ if((int)($v['template_id']??0)<=0) throw new Exception('Each variant needs a template'); }
 
             if($id>0){
-                $st=$c->prepare("UPDATE ten_ec_campaigns SET name=?,audience_id=?,sending_profile_id=?,from_name=?,from_email=?,reply_to=?,batch_size=?,batch_interval_min=?,per_domain_limit=?,daily_cap=?,warmup_enabled=?,ab_enabled=?,scheduled_at=".$schedSql." WHERE id=?");
-                $st->bind_param('siisssiiiiiii',$name,$audience,$profile,$fromName,$fromEmail,$replyTo,$batch,$interval,$perDomain,$dailyCap,$warmup,$ab,$id);
+                $st=$c->prepare("UPDATE ten_ec_campaigns SET name=?,audience_id=?,sending_profile_id=?,from_name=?,from_email=?,reply_to=?,batch_size=?,batch_interval_min=?,per_domain_limit=?,daily_cap=?,warmup_enabled=?,ab_enabled=?,track_opens=?,track_clicks=?,plain_text=?,scheduled_at=".$schedSql." WHERE id=?");
+                $st->bind_param('siisssiiiiiiiiii',$name,$audience,$profile,$fromName,$fromEmail,$replyTo,$batch,$interval,$perDomain,$dailyCap,$warmup,$ab,$trackOpens,$trackClicks,$plainText,$id);
                 $st->execute(); $st->close();
             } else {
                 $uid=(int)($_SESSION['ten_user_id']??0);
-                $st=$c->prepare("INSERT INTO ten_ec_campaigns (name,audience_id,sending_profile_id,from_name,from_email,reply_to,batch_size,batch_interval_min,per_domain_limit,daily_cap,warmup_enabled,ab_enabled,scheduled_at,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,".$schedSql.",?)");
-                $st->bind_param('siisssiiiiiii',$name,$audience,$profile,$fromName,$fromEmail,$replyTo,$batch,$interval,$perDomain,$dailyCap,$warmup,$ab,$uid);
+                $st=$c->prepare("INSERT INTO ten_ec_campaigns (name,audience_id,sending_profile_id,from_name,from_email,reply_to,batch_size,batch_interval_min,per_domain_limit,daily_cap,warmup_enabled,ab_enabled,track_opens,track_clicks,plain_text,scheduled_at,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,".$schedSql.",?)");
+                $st->bind_param('siisssiiiiiiiiii',$name,$audience,$profile,$fromName,$fromEmail,$replyTo,$batch,$interval,$perDomain,$dailyCap,$warmup,$ab,$trackOpens,$trackClicks,$plainText,$uid);
                 $st->execute(); $id=(int)$c->insert_id; $st->close();
             }
             ec_save_variants($c,$id,$variants);
@@ -231,7 +236,7 @@ try {
             $errors=[];
             $er=$c->query("SELECT error,COUNT(*) n FROM ten_ec_recipients WHERE campaign_id=$id AND status IN('failed','skipped') AND error IS NOT NULL AND error<>'' GROUP BY error ORDER BY n DESC LIMIT 5");
             while($er && $x=$er->fetch_assoc()) $errors[]=$x;
-            $meta=$c->query("SELECT name,status,created_at,started_at,completed_at,scheduled_at FROM ten_ec_campaigns WHERE id=$id")->fetch_assoc();
+            $meta=$c->query("SELECT name,status,created_at,started_at,completed_at,scheduled_at,track_opens,track_clicks,plain_text FROM ten_ec_campaigns WHERE id=$id")->fetch_assoc();
             $resp=['success'=>true,'campaign'=>$meta,'funnel'=>$funnel,'variants'=>$variants,'by_status'=>$byStatus,'errors'=>$errors];
             break;
         }
