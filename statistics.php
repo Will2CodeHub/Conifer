@@ -466,11 +466,11 @@ $currentPage = 'statistics';
                     <!-- Will be populated by JavaScript -->
                 </div>
                 
-                <!-- Hourly Distribution Chart -->
+                <!-- Daily Traffic Chart (last 31 days) -->
                 <div class="chart-card">
-                    <h2><i class="fas fa-clock"></i> Hourly Traffic Distribution</h2>
+                    <h2><i class="fas fa-calendar-days"></i> Traffic &mdash; Last 31 Days</h2>
                     <div class="chart-container">
-                        <canvas id="hourlyChart"></canvas>
+                        <canvas id="dailyChart"></canvas>
                     </div>
                 </div>
                 
@@ -665,7 +665,7 @@ $currentPage = 'statistics';
         let pageViewsData = [];
         let currentPage = 1;
         let currentSort = { column: 'views', direction: 'desc' };
-        let hourlyChart = null;
+        let dailyChart = null;
         let topPagesChart = null;
         let trafficTypeChart = null;
         let sourcesChart = null;
@@ -891,7 +891,7 @@ $currentPage = 'statistics';
             `;
             
             // Update charts
-            updateHourlyChart(stats.hourly_distribution);
+            updateDailyChart(stats.daily_series);
             updateTrafficTypeChart(stats);
             updateTopPagesChart(stats.page_views);
 
@@ -925,20 +925,21 @@ $currentPage = 'statistics';
             document.getElementById('currentStats').style.display = 'block';
         }
         
-        function updateHourlyChart(hourlyData) {
-            const ctx = document.getElementById('hourlyChart').getContext('2d');
-            
-            if (hourlyChart) {
-                hourlyChart.destroy();
+        function updateDailyChart(dailySeries) {
+            const ctx = document.getElementById('dailyChart').getContext('2d');
+            const series = Array.isArray(dailySeries) ? dailySeries : [];
+
+            if (dailyChart) {
+                dailyChart.destroy();
             }
-            
-            hourlyChart = new Chart(ctx, {
+
+            dailyChart = new Chart(ctx, {
                 type: 'bar',
                 data: {
-                    labels: Array.from({length: 24}, (_, i) => i + ':00'),
+                    labels: series.map(d => d.label),
                     datasets: [{
                         label: 'Visits',
-                        data: hourlyData,
+                        data: series.map(d => d.visits),
                         backgroundColor: '#667eea',
                         borderRadius: 6
                     }]
@@ -947,13 +948,30 @@ $currentPage = 'statistics';
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: { display: false }
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                // Show the full date (the axis labels are abbreviated "j M").
+                                title: (items) => {
+                                    const i = items[0].dataIndex;
+                                    return series[i] ? series[i].date : '';
+                                }
+                            }
+                        }
                     },
                     scales: {
-                        y: { 
+                        y: {
                             beginAtZero: true,
                             ticks: {
                                 precision: 0
+                            }
+                        },
+                        x: {
+                            ticks: {
+                                autoSkip: true,
+                                maxTicksLimit: 16,
+                                maxRotation: 90,
+                                minRotation: 45
                             }
                         }
                     }
