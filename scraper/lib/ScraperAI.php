@@ -115,6 +115,55 @@ function scraper_ai_http(string $url, array $headers, array $payload): string {
     return $resp;
 }
 
+/**
+ * Remove em/en dashes — a strong AI tell. Between digits they become a hyphen
+ * (numeric ranges); everywhere else a comma.
+ */
+function scraper_txt_dedash($s): string {
+    $s = (string)$s;
+    $s = preg_replace('/(\d)\s*[\x{2014}\x{2013}]\s*(\d)/u', '$1-$2', $s);
+    $s = preg_replace('/\s*[\x{2014}\x{2013}]\s*/u', ', ', $s);
+    return (string)preg_replace('/,\s*,/', ',', $s);
+}
+
+/**
+ * Remove the "+" shorthand (another machine tell). "20+" → "over 20", " A + B " →
+ * " A and B ", and any stray "+" becomes "and".
+ */
+function scraper_txt_deplus($s): string {
+    $s = (string)$s;
+    $s = preg_replace('/(\d+)\s*\+/', 'over $1', $s);  // 20+ -> over 20
+    $s = preg_replace('/\s+\+\s+/', ' and ', $s);        // A + B -> A and B
+    $s = str_replace('+', ' and ', $s);                  // any leftover
+    return (string)preg_replace('/\s{2,}/', ' ', $s);
+}
+
+/**
+ * Clean a HEADLINE so it never carries the machine tells our readers keep seeing:
+ * no em/en dashes, no "+", and no colon-label format ("Analysis:", "Munich: ..."). A
+ * short leading label before a colon is dropped; any other colon becomes a comma.
+ * This is a safety net — the prompts already ask the model to avoid all of these.
+ */
+function scraper_clean_title($s): string {
+    $s = trim(scraper_txt_deplus(scraper_txt_dedash($s)));
+    if (strpos($s, ':') !== false) {
+        // Drop a pure label prefix ("Breaking: ...", "Munich: ...") when what
+        // precedes the first colon is at most three words; otherwise soften to a comma.
+        if (preg_match('/^\s*([^:]{1,40}?):\s+(\S.*)$/u', $s, $m) && str_word_count($m[1]) <= 3) {
+            $s = $m[2];
+        }
+        // Convert remaining colons to commas, but leave clock times ("15:00") alone.
+        $s = preg_replace('/(?<!\d)\s*:\s*(?!\d)/', ', ', $s);
+    }
+    $s = preg_replace('/\s+([,.;])/', '$1', $s); // no space before punctuation
+    return trim(preg_replace('/\s{2,}/', ' ', (string)$s));
+}
+
+/** Clean body/summary PROSE: strip dashes and "+" (colons are legitimate in prose). */
+function scraper_clean_prose($s): string {
+    return scraper_txt_deplus(scraper_txt_dedash($s));
+}
+
 /** Strip ```json ... ``` fences and decode. Returns array or null. */
 function scraper_ai_decode_json(string $text) {
     $t = trim($text);
@@ -137,8 +186,14 @@ function scraper_ai_translate(string $provider, string $model, string $targetLan
         return [];
     }
     $lang = $targetLanguage !== '' ? $targetLanguage : 'English';
-    $system = "You are a professional news translator. Translate each item's title and summary into {$lang}. "
+    $system = "You are a professional news sub-editor and translator. Translate each item's title and summary into {$lang}. "
         . "Preserve meaning and proper nouns; do not editorialise or add content. "
+        . "Render the TITLE as a clean, natural {$lang} news headline. Headline rules (strict): "
+        . "do NOT use a colon-and-label format — no \"Word:\" or \"Label:\" prefixes; "
+        . "do NOT use em or en dashes (— –) or plus signs (+); "
+        . "do NOT use ALL-CAPS words or clickbait; write in normal sentence case. "
+        . "If the source headline uses any of these, rewrite it into a plain declarative headline conveying the same fact. "
+        . "In the summary, likewise avoid em/en dashes and \"+\". "
         . "Return ONLY a JSON object with key \"items\": an array in the SAME order, each element "
         . "{\"id\": <same id>, \"title\": \"...\", \"summary\": \"...\"}. No commentary.";
 
@@ -158,8 +213,9 @@ function scraper_ai_translate(string $provider, string $model, string $targetLan
         foreach ($decoded['items'] as $row) {
             if (isset($row['id'])) {
                 $out[(int)$row['id']] = [
-                    'title' => (string)($row['title'] ?? ''),
-                    'summary' => (string)($row['summary'] ?? ''),
+                    // Safety net: enforce the headline/prose rules even if the model slips.
+                    'title' => scraper_clean_title((string)($row['title'] ?? '')),
+                    'summary' => scraper_clean_prose((string)($row['summary'] ?? '')),
                 ];
             }
         }
@@ -182,10 +238,24 @@ function scraper_ai_write_article(string $provider, string $model, string $promp
     // The template both instructs the task and asks for JSON output.
     $system = "You are an experienced staff news journalist. Write the ENTIRE article (title, body_html and all meta "
         . "fields) in {$lang}, regardless of the source language. Write a factual news report of AT LEAST 700 words in "
-        . "flowing paragraphs — no opinion, analysis or editorialising, and avoid libel (report any allegation only as "
+        . "flowing paragraphs. No opinion, analysis or editorialising, and avoid libel (report any allegation only as "
         . "an attributed claim, never as established fact). Do NOT litter the piece with subheadings; over-use of "
-        . "headings reads as machine-generated. Use a subheading only if genuinely warranted, and even then rarely — "
+        . "headings reads as machine-generated. Use a subheading only if genuinely warranted, and even then rarely; "
         . "most articles need none. NEVER begin the article with a heading: it MUST open with a body paragraph. "
+        . "HEADLINE (the \"title\" field): write a plain, declarative news headline in normal sentence case. It MUST NOT "
+        . "use a colon-and-label format (no \"Analysis:\", \"Exclusive:\", \"CityName:\" style prefixes and no colons at "
+        . "all), MUST NOT contain em or en dashes (— –) or plus signs (+), and MUST NOT be clickbait or ALL-CAPS. "
+        . "WRITE LIKE A HUMAN, NOT AN AI. This is critical. Do NOT use em dashes or en dashes anywhere (— –); use commas "
+        . "or full stops. Do NOT use the \"+\" sign; write \"and\". Ban these AI-tell words and phrases outright: delve, "
+        . "tapestry, landscape, realm, underscore(s), showcase, foster, garner, testament, beacon, nestled, boasts, "
+        . "\"plays a crucial/vital/pivotal/key role\", \"rich history\", \"stands as\", \"a stark reminder\", \"it is "
+        . "worth noting\", \"in today's world\", \"in the ever-evolving\", \"navigating the\", \"at the heart of\", "
+        . "\"when it comes to\", \"a testament to\", \"leaves much to be desired\", \"the world of\". Ban these transition "
+        . "words as sentence openers: Moreover, Furthermore, Additionally, Notably, Importantly, Consequently, "
+        . "\"In conclusion\", \"In summary\", \"Overall\", \"Ultimately\". Do NOT use the \"not only X but also Y\" "
+        . "construction, do NOT pile adjectives or nouns in threes (the rule-of-three cadence), and do NOT end with a "
+        . "reflective summary or takeaway paragraph. Vary sentence length, lead with the news (inverted pyramid), and "
+        . "keep the register that of a wire-service reporter, not an essayist. "
         . "COPYRIGHT (CRITICAL): reproduce NO copyrighted material whatsoever. Never copy the source's sentences, "
         . "distinctive phrasing, wording or structure — extract only the underlying facts and rewrite EVERYTHING "
         . "entirely in your own original words. Facts are not copyrightable, but the source's expression of them is, so "
@@ -218,14 +288,8 @@ function scraper_ai_write_article(string $provider, string $model, string $promp
     // on its own line at the foot of the article, not woven into the prose. Unwrap
     // any links the model added (keep the visible text).
     $body = preg_replace('#<a\b[^>]*>(.*?)</a>#is', '$1', $body);
-    // Em/en dashes are a strong AI tell — remove them everywhere. Between digits
-    // they become a hyphen (ranges); in prose a comma.
-    $dedash = function ($s) {
-        $s = preg_replace('/(\d)\s*[\x{2014}\x{2013}]\s*(\d)/u', '$1-$2', (string)$s);
-        $s = preg_replace('/\s*[\x{2014}\x{2013}]\s*/u', ', ', $s);
-        return preg_replace('/,\s*,/', ',', $s);
-    };
-    $body = $dedash($body);
+    // Em/en dashes and "+" are strong AI tells — strip them from the body prose.
+    $body = scraper_clean_prose($body);
     // Append the source reference as its own line at the very bottom — but ONLY when
     // the writer judged attribution genuinely necessary (direct quotes, copyrighted
     // expression, or an outlet's exclusive reporting). Plain factual reporting needs
@@ -241,10 +305,11 @@ function scraper_ai_write_article(string $provider, string $model, string $promp
             . htmlspecialchars($host, ENT_QUOTES) . '</a></p>';
     }
     return [
-        'title' => $dedash((string)($decoded['title'] ?? '')),
+        'title' => scraper_clean_title((string)($decoded['title'] ?? '')),
         'body_html' => $body,
-        'meta_title' => $dedash((string)($decoded['meta_title'] ?? '')),
-        'meta_description' => $dedash((string)($decoded['meta_description'] ?? '')),
+        // meta_title mirrors the headline, so clean it the same way; meta_description is prose.
+        'meta_title' => scraper_clean_title((string)($decoded['meta_title'] ?? '')),
+        'meta_description' => scraper_clean_prose((string)($decoded['meta_description'] ?? '')),
         'meta_keywords' => (string)($decoded['meta_keywords'] ?? ''),
     ];
 }

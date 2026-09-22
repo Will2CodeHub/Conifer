@@ -41,8 +41,15 @@ $done = []; $processed = 0;
 foreach ($ids as $sid) {
     if ((time() - $start) > $budget) { $done[] = "stopped (time budget) with " . (count($ids) - $processed) . " section(s) left"; break; }
     try {
-        $r = scraper_precompute_section((int)$sid);
-        $done[] = "section $sid: translated={$r['translated']} ranked={$r['ranked']}";
+        // Keep passing over the section until it is translated AND ranked (a big
+        // "Run now" ingest can be 200 items = several 60-item passes), within budget.
+        $tr = 0; $rk = 0; $passes = 0;
+        do {
+            $r = scraper_precompute_section((int)$sid);
+            $tr += (int)($r['translated'] ?? 0); $rk += (int)($r['ranked'] ?? 0); $passes++;
+            $progress = !empty($r['translated']) && empty($r['busy']);
+        } while (!empty($r['more']) && $progress && (time() - $start) <= $budget);
+        $done[] = "section $sid: translated=$tr ranked=$rk passes=$passes" . (!empty($r['busy']) ? ' (busy)' : '') . (!empty($r['more']) ? ' (more)' : '');
     } catch (Throwable $e) {
         $done[] = "section $sid: ERROR " . $e->getMessage();
     }
