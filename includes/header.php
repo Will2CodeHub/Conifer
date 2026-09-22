@@ -9,6 +9,21 @@ $availableLanguages = [
 ];
 $currentLang = getUserLanguage();
 if (!isset($availableLanguages[$currentLang])) $currentLang = 'en';
+
+// Header badges, computed at render so they never flicker: post-it summary + bell count.
+$hdrNotes = ['deadlines' => 0, 'overdue' => 0, 'page' => 0];
+$hdrBellCount = 0;
+try {
+    require_once __DIR__ . '/../lib/notifications_core.php';
+    $hdrConn = getDBConnection();
+    notes_ensure_schema($hdrConn);
+    $hdrUid = (int) ($_SESSION['ten_user_id'] ?? 0);
+    $hdrNotes = notes_header_summary($hdrConn, $hdrUid, notes_current_page_key());
+    $hdrBellCount = ten_notifications_count($hdrConn, $hdrUid);
+    $hdrConn->close();
+} catch (Throwable $e) {
+    error_log('header badges: ' . $e->getMessage());
+}
 ?>
 <!-- Real flag images (Windows/Chrome don't render flag emoji) -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flag-icons/7.2.3/css/flag-icons.min.css">
@@ -44,11 +59,24 @@ if (!isset($availableLanguages[$currentLang])) $currentLang = 'en';
             </div>
         </div>
         
-        <!-- Notifications -->
-        <button class="icon-btn" title="Notifications">
-            <i class="fas fa-bell"></i>
-            <span class="badge">3</span>
-        </button>
+        <!-- Post-it notes: badge = my open notes with a deadline; glows when this page has notes -->
+        <div class="hdr-pop-wrap" id="hdrNotesWrap">
+            <button class="icon-btn hdr-notes-btn<?php echo $hdrNotes['page'] > 0 ? ' has-page-notes' : ''; ?>" id="hdrNotesBtn"
+                    title="<?php echo $hdrNotes['page'] > 0 ? $hdrNotes['page'] . ' note(s) on this page' : 'Notes'; ?>">
+                <i class="fas fa-note-sticky"></i>
+                <span class="badge<?php echo $hdrNotes['overdue'] > 0 ? ' badge-red' : ' badge-amber'; ?>" id="hdrNotesBadge"<?php echo $hdrNotes['deadlines'] > 0 ? '' : ' style="display:none"'; ?>><?php echo (int) $hdrNotes['deadlines']; ?></span>
+            </button>
+            <div class="hdr-pop" id="hdrNotesPop"></div>
+        </div>
+
+        <!-- Notifications: live "needs attention" feed (lib/notifications_core.php) -->
+        <div class="hdr-pop-wrap" id="hdrBellWrap">
+            <button class="icon-btn" id="hdrBellBtn" title="Notifications">
+                <i class="fas fa-bell"></i>
+                <span class="badge" id="hdrBellBadge"<?php echo $hdrBellCount > 0 ? '' : ' style="display:none"'; ?>><?php echo $hdrBellCount > 99 ? '99+' : (int) $hdrBellCount; ?></span>
+            </button>
+            <div class="hdr-pop" id="hdrBellPop"></div>
+        </div>
         
         <!-- User Menu -->
         <div class="user-menu">
@@ -279,6 +307,116 @@ if (isset($_GET['change_language'])) {
     min-width: 18px;
     text-align: center;
 }
+.icon-btn .badge.badge-amber { background: #d97706; }
+.icon-btn .badge.badge-red { background: #dc2626; }
+
+/* Post-it button: yellow glow when the current page has notes */
+.hdr-notes-btn.has-page-notes {
+    background: #fff59d;
+    border-color: #eab308;
+    color: #854d0e;
+    box-shadow: 0 0 0 3px rgba(234, 179, 8, .25);
+    animation: hdrNotesPulse 2.4s ease-in-out 2;
+}
+@keyframes hdrNotesPulse {
+    50% { box-shadow: 0 0 0 7px rgba(234, 179, 8, .12); }
+}
+
+/* Header dropdown panels (notes + bell) */
+.hdr-pop-wrap { position: relative; }
+.hdr-pop {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 10px);
+    width: 400px;
+    max-width: calc(100vw - 32px);
+    max-height: 75vh;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    box-shadow: 0 16px 40px rgba(15, 23, 42, .18);
+    z-index: 1200;
+}
+.hdr-pop.active { display: block; }
+.hdr-pop-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid #f1f5f9;
+    position: sticky;
+    top: 0;
+    background: #fff;
+    z-index: 2;
+}
+.hdr-pop-head h4 { margin: 0; font-size: 15px; flex: 1; color: #111827; }
+.hdr-pop-head button {
+    background: none; border: none; color: #4f46e5; font-size: 12.5px; font-weight: 600; cursor: pointer;
+    padding: 4px 8px; border-radius: 6px;
+}
+.hdr-pop-head button:hover { background: #eef2ff; }
+.hdr-pop-sec { padding: 12px 16px; }
+.hdr-pop-sec + .hdr-pop-sec { border-top: 1px solid #f1f5f9; }
+.hdr-pop-label {
+    font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: #9ca3af; margin-bottom: 10px;
+}
+.hdr-pop-empty { color: #9ca3af; font-size: 13px; padding: 4px 0 6px; }
+.hdr-pop .pn-board { grid-template-columns: 1fr 1fr; gap: 16px; padding: 8px 2px 4px; }
+.hdr-pop .pn-postit { min-height: 120px; padding: 12px 12px 10px; }
+.hdr-pop .pn-postit-title { font-size: 21px; }
+.hdr-pop .pn-postit-body { font-size: 12.5px; }
+.hdr-new-note {
+    width: 100%; margin-top: 12px; padding: 10px; border: 2px dashed #eab308; border-radius: 10px;
+    background: #fffbeb; color: #854d0e; font-weight: 700; font-size: 13px; cursor: pointer;
+}
+.hdr-new-note:hover { background: #fef3c7; }
+.hdr-dl-row {
+    display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-radius: 8px; cursor: pointer;
+}
+.hdr-dl-row:hover { background: #f9fafb; }
+.hdr-dl-dot { width: 14px; height: 14px; border-radius: 3px; flex: 0 0 auto; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.hdr-dl-main { flex: 1; min-width: 0; }
+.hdr-dl-title { font-size: 13.5px; font-weight: 600; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hdr-dl-sub { font-size: 11.5px; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* bell rows */
+.hdr-nt-row {
+    display: flex; gap: 12px; padding: 10px 16px; cursor: pointer; border-left: 3px solid transparent;
+    text-decoration: none; color: inherit;
+}
+.hdr-nt-row:hover { background: #f9fafb; }
+.hdr-nt-ic {
+    width: 32px; height: 32px; border-radius: 50%; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+.hdr-nt-row.t-red .hdr-nt-ic { background: #fee2e2; color: #dc2626; }
+.hdr-nt-row.t-red { border-left-color: #dc2626; }
+.hdr-nt-row.t-amber .hdr-nt-ic { background: #fef3c7; color: #b45309; }
+.hdr-nt-row.t-blue .hdr-nt-ic { background: #dbeafe; color: #1d4ed8; }
+.hdr-nt-row.t-yellow .hdr-nt-ic { background: #fff59d; color: #854d0e; }
+.hdr-nt-row.t-green .hdr-nt-ic { background: #dcfce7; color: #15803d; }
+.hdr-nt-row.t-gray .hdr-nt-ic { background: #f3f4f6; color: #4b5563; }
+.hdr-nt-main { flex: 1; min-width: 0; }
+.hdr-nt-title { font-size: 13.5px; font-weight: 600; color: #111827; }
+.hdr-nt-detail { font-size: 12px; color: #6b7280; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.hdr-nt-when { font-size: 11px; color: #9ca3af; white-space: nowrap; }
+.hdr-nt-ck, #hdrBellSelAll { width: 15px; height: 15px; margin: 8px 0 0; flex: 0 0 auto; cursor: pointer; accent-color: #4f46e5; }
+#hdrBellSelAll { margin: 0; }
+.hdr-nt-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.hdr-nt-del {
+    background: none; border: none; color: #cbd5e1; cursor: pointer; padding: 2px 4px; border-radius: 5px; font-size: 12.5px;
+    opacity: 0; transition: opacity .12s;
+}
+.hdr-nt-row:hover .hdr-nt-del { opacity: 1; }
+.hdr-nt-del:hover { color: #dc2626; background: #fef2f2; }
+.hdr-pop-head button.hdr-danger { color: #dc2626; }
+.hdr-pop-head button.hdr-danger:hover { background: #fef2f2; }
+@media (hover: none) { .hdr-nt-del { opacity: 1; } }
+
+@media (max-width: 640px) {
+    .hdr-pop { position: fixed; top: 64px; right: 16px; left: 16px; width: auto; max-width: none; }
+    .hdr-pop .pn-board { grid-template-columns: 1fr; }
+}
 
 .user-menu {
     position: relative;
@@ -417,6 +555,11 @@ if (isset($_GET['change_language'])) {
 }
 </style>
 
+<script>
+window.TEN_HEADER = { pageKey: <?php echo json_encode(notes_current_page_key()); ?> };
+</script>
+<script src="/management/js/project_notes.js?v=<?php echo @filemtime(__DIR__ . '/../js/project_notes.js'); ?>" defer></script>
+<script src="/management/js/header_notes.js?v=<?php echo @filemtime(__DIR__ . '/../js/header_notes.js'); ?>" defer></script>
 <script>
 function toggleLanguageMenu() {
     const menu = document.getElementById('langMenu');
