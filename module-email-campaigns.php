@@ -106,6 +106,33 @@ ec_ensure_schema(ec_db()); // idempotent: adds newer contact fields / categories
         table.ctp-tbl td{padding:6px 9px;border-bottom:1px solid #f1f5f9}
         table.ctp-tbl tbody tr{cursor:pointer}
         table.ctp-tbl tbody tr:hover td{background:#f5f7ff}
+        /* ── Template HTML editor (mirrors the article editor toolbar) ── */
+        .ecedit{border:1px solid #d1d5db;border-radius:8px;overflow:hidden;background:#fff}
+        .ecedit-tb{display:flex;flex-wrap:wrap;align-items:center;gap:2px;padding:6px 8px;background:#f8fafc;border-bottom:1px solid #e5e7eb}
+        .ecedit-tb button{width:32px;height:30px;border:1px solid transparent;background:none;border-radius:6px;color:#475569;cursor:pointer;font-size:13px;display:inline-flex;align-items:center;justify-content:center}
+        .ecedit-tb button:hover{background:#eef2f7;color:#1e293b}
+        .ecedit-tb button.on{background:#e0e7ff;color:#4338ca;border-color:#c7d2fe}
+        .ecedit-sep{width:1px;height:20px;background:#e2e8f0;margin:0 4px}
+        .ecedit-area{min-height:220px;max-height:52vh;overflow-y:auto;padding:14px 16px;outline:none;font-size:14px;line-height:1.6;color:#111827}
+        .ecedit-area:focus{background:#fefefe}
+        .ecedit-area p{margin:0 0 1em}
+        .ecedit-area img{max-width:100%}
+        .ecedit-src{width:100%;min-height:220px;max-height:52vh;border:none;padding:14px 16px;box-sizing:border-box;font-family:ui-monospace,Menlo,Consolas,'Courier New',monospace;font-size:13px;line-height:1.7;background:#0f172a;color:#e2e8f0;outline:none;resize:vertical}
+        .ecedit-sel{height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#334155;font-size:12.5px;max-width:190px;cursor:pointer}
+        .ecfmt{display:flex;gap:18px;align-items:center;padding:2px 0;flex-wrap:wrap}
+        .ecfmt label{font-weight:400;text-transform:none;letter-spacing:0;display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+        .ecedit-plain{width:100%;min-height:200px;max-height:52vh;border:none;padding:12px 14px;box-sizing:border-box;font:inherit;font-size:14px;line-height:1.6;outline:none;resize:vertical;color:#111827}
+        /* link mini-modal (sits above ecModal 2000 / ecModal2 2600) */
+        .eclink-ov{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;z-index:5200}
+        .eclink-ov.open{display:block}
+        .eclink{position:fixed;z-index:5300;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.3);width:min(460px,94vw);padding:0;display:none}
+        .eclink.open{display:block}
+        .eclink .eclink-h{padding:13px 16px;border-bottom:1px solid #e5e7eb;font-weight:600;font-size:15px;display:flex;justify-content:space-between;align-items:center}
+        .eclink .eclink-b{padding:14px 16px}
+        .eclink .eclink-b label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.3px;color:#6b7280;margin:10px 0 3px}
+        .eclink .eclink-b label:first-child{margin-top:0}
+        .eclink .eclink-b input,.eclink .eclink-b select{width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;box-sizing:border-box}
+        .eclink .eclink-f{padding:12px 16px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;gap:8px}
     </style>
 </head>
 <body>
@@ -119,6 +146,7 @@ ec_ensure_schema(ec_db()); // idempotent: adds newer contact fields / categories
                 <div class="ec-tab" data-tab="contacts">Contacts</div>
                 <div class="ec-tab" data-tab="audiences">Audiences</div>
                 <div class="ec-tab" data-tab="templates">Templates</div>
+                <div class="ec-tab" data-tab="signatures">Signatures</div>
                 <div class="ec-tab" data-tab="campaigns">Campaigns</div>
                 <div class="ec-tab" data-tab="sending">Sending</div>
                 <div class="ec-tab" data-tab="reports">Reports</div>
@@ -166,6 +194,13 @@ ec_ensure_schema(ec_db()); // idempotent: adds newer contact fields / categories
                 <div class="ec-card">
                     <div class="ec-toolbar"><button class="ec-btn sm" onclick="tNew()"><i class="fas fa-plus"></i> New template</button></div>
                     <div id="tTable"></div>
+                </div>
+            </div>
+
+            <div class="ec-pane" data-pane="signatures">
+                <div class="ec-card">
+                    <div class="ec-toolbar"><button class="ec-btn sm" onclick="sgNew()"><i class="fas fa-plus"></i> New signature</button><span class="ec-hint">Reusable sign-offs. A plain-text template inserts the signature's plain version; an HTML template inserts its HTML.</span></div>
+                    <div id="sgTable"></div>
                 </div>
             </div>
 
@@ -342,10 +377,24 @@ ec_ensure_schema(ec_db()); // idempotent: adds newer contact fields / categories
     <div class="ec-overlay" id="ecModal"><div class="ec-modal"><div class="ec-mh"><h2 id="ecModalTitle"></h2><button class="closex" onclick="ecClose()">&times;</button></div><div class="ec-mb" id="ecModalBody"></div><div class="ec-mf" id="ecModalFoot"></div></div></div>
     <div class="ec-overlay2" id="ecModal2"><div class="ec-modal2"><div class="ec-mh"><h2 id="ecM2Title"></h2><button class="closex" onclick="ecClose2()">&times;</button></div><div class="ec-mb" id="ecM2Body"></div><div class="ec-mf" id="ecM2Foot"></div></div></div>
     <div class="ctp-overlay" id="ctpOverlay"></div>
+    <!-- Insert-link mini modal for the template HTML editor -->
+    <div class="eclink-ov" id="elOv" onclick="elClose()"></div>
+    <div class="eclink" id="elModal">
+        <div class="eclink-h"><span>Insert link</span><button class="closex" type="button" onclick="elClose()">&times;</button></div>
+        <div class="eclink-b">
+            <label>Link text</label><input type="text" id="elText" placeholder="Text to display">
+            <label>URL</label><input type="text" id="elUrl" placeholder="https://example.com">
+            <label>Title (optional)</label><input type="text" id="elTitle" placeholder="Tooltip">
+            <label>Open in</label><select id="elTarget"><option value="_blank">New tab</option><option value="">Same tab</option></select>
+        </div>
+        <div class="eclink-f"><button class="ec-btn light" type="button" onclick="elClose()">Cancel</button><button class="ec-btn" type="button" onclick="elInsert()">Insert link</button></div>
+    </div>
 
 <script>
-const EC = { contacts:'ajax/ec_contacts.php', audiences:'ajax/ec_audiences.php', templates:'ajax/ec_templates.php', campaigns:'ajax/ec_campaigns.php', settings:'ajax/ec_settings.php', profiles:'ajax/ec_profiles.php', categories:'ajax/ec_categories.php', responses:'ajax/ec_responses.php' };
+const EC = { contacts:'ajax/ec_contacts.php', audiences:'ajax/ec_audiences.php', templates:'ajax/ec_templates.php', campaigns:'ajax/ec_campaigns.php', settings:'ajax/ec_settings.php', profiles:'ajax/ec_profiles.php', categories:'ajax/ec_categories.php', responses:'ajax/ec_responses.php', signatures:'ajax/ec_signatures.php' };
 const EC_ME = <?php echo json_encode($_SESSION['ten_email'] ?? ''); ?>;
+const EC_MERGE = <?php echo json_encode(ec_merge_fields()); ?>; // [{token,label,col}] most-likely first
+EC.signaturesCache = [];
 function toast(m,i){ Swal.fire({toast:true,position:'top-end',timer:2600,showConfirmButton:false,icon:i||'success',title:m}); }
 function esc(s){ return $('<div>').text(s==null?'':s).html(); }
 function post(url,data){ return $.post(url,data,null,'json'); }
@@ -361,7 +410,7 @@ document.querySelectorAll('.ec-tab').forEach(t=>t.addEventListener('click',funct
     document.querySelectorAll('.ec-pane').forEach(x=>x.classList.remove('active'));
     this.classList.add('active');
     document.querySelector('.ec-pane[data-pane="'+this.dataset.tab+'"]').classList.add('active');
-    const f={dashboard:dashLoad,contacts:cLoad,audiences:aLoad,templates:tLoad,campaigns:kLoad,sending:pLoad,reports:rInit,responses:respLoad,settings:sLoad}[this.dataset.tab];
+    const f={dashboard:dashLoad,contacts:cLoad,audiences:aLoad,templates:tLoad,signatures:sgLoad,campaigns:kLoad,sending:pLoad,reports:rInit,responses:respLoad,settings:sLoad}[this.dataset.tab];
     if(f) f();
 }));
 
@@ -621,16 +670,158 @@ function amManual(){ post(EC.contacts,Object.assign({action:'add',audience_id:aC
 function aRemove(cid){ post(EC.audiences,{action:'remove_member',audience_id:aCurrent,contact_id:cid}).done(()=>{aMembers();aLoad();}); }
 
 /* ---------- Templates ---------- */
-function tLoad(){ post(EC.templates,{action:'list'}).done(function(r){ if(!r.success){toast(r.message,'error');return;} let h='<table class="ec-tbl"><thead><tr><th>Name</th><th>Subject</th><th>From</th><th></th></tr></thead><tbody>'; r.rows.forEach(t=>h+='<tr><td>'+esc(t.name)+'</td><td>'+esc(t.subject)+'</td><td>'+esc(t.from_email||'')+'</td><td><button class="ec-btn light sm" onclick="tEdit('+t.id+')">Edit</button> <button class="ec-btn danger sm" onclick="tDel('+t.id+')">Delete</button></td></tr>'); h+='</tbody></table>'; document.getElementById('tTable').innerHTML=h; }); }
+function tLoad(){ post(EC.templates,{action:'list'}).done(function(r){ if(!r.success){toast(r.message,'error');return;} let h='<table class="ec-tbl"><thead><tr><th>Name</th><th>Subject</th><th>Format</th><th>From</th><th></th></tr></thead><tbody>'; r.rows.forEach(t=>h+='<tr><td>'+esc(t.name)+'</td><td>'+esc(t.subject)+'</td><td>'+(t.is_plain==1?'Plain text':'HTML')+'</td><td>'+esc(t.from_email||'')+'</td><td><button class="ec-btn light sm" onclick="tEdit('+t.id+')">Edit</button> <button class="ec-btn danger sm" onclick="tDel('+t.id+')">Delete</button></td></tr>'); h+='</tbody></table>'; document.getElementById('tTable').innerHTML=h; }); }
+/* ============================================================================
+ * Shared rich editor — used by BOTH the Template editor and the Signature editor
+ * (only one modal is open at a time, so they reuse the same element ids). It gives
+ * an HTML/plain format chooser, an article-style toolbar with a Source toggle, an
+ * "Insert field" merge-tag dropdown, an "Insert signature" dropdown (templates only)
+ * and an insert-link mini-modal.
+ * ==========================================================================*/
+var tSrcMode=false;   // editor showing raw HTML source?
+var elRange=null;     // saved editor selection for link insertion
+var ecReqUnsub=true;  // does the current editor require {{unsubscribe_url}}? (templates yes, signatures no)
+var _tDefaultHtml='<p>Hello {{first_name}},</p><p></p><p><a href="{{unsubscribe_url}}">Unsubscribe</a></p>';
+// Insert-controls strip (merge fields + optional signature picker) targeting 'html' or 'text'.
+// Merge fields are recipient data, so they only belong in templates — not signatures (which
+// are the sender's own sign-off). Returns '' when neither control is wanted.
+function ecInsertStrip(target,includeMerge,includeSig){
+    if(!includeMerge && !includeSig) return '';
+    var mergeOpts='<option value="">Insert field ▾</option>'+EC_MERGE.map(function(f){return '<option value="'+f.token+'">'+esc(f.label)+'</option>';}).join('');
+    return '<div class="ecedit-tb">'+
+        (includeMerge?'<select class="ecedit-sel ecMergeSel" title="Insert a contact field" onchange="ecInsField(this,\''+target+'\')">'+mergeOpts+'</select>':'')+
+        (includeSig?'<select class="ecedit-sel ecSigSel" title="Insert a signature" onchange="ecInsSig(this,\''+target+'\')"><option value="">Insert signature ▾</option></select>':'')+
+    '</div>';
+}
+// The reusable editor markup. opts:{includeMerge,includeSig,requireUnsub}
+function ecEditorBlock(opts){ opts=opts||{}; var incM=!!opts.includeMerge, incS=!!opts.includeSig;
+    return '<div class="ec-fg"><label>Email format</label><div class="ecfmt">'+
+            '<label><input type="radio" name="ecFmt" value="html" onchange="ecFmtToggle()"> HTML <span class="ec-hint">(formatting, links, images)</span></label>'+
+            '<label><input type="radio" name="ecFmt" value="plain" onchange="ecFmtToggle()"> Plain text <span class="ec-hint">(no formatting — most inbox-friendly)</span></label>'+
+        '</div></div>'+
+        '<div class="ec-fg" id="ecHtmlBlock"><label id="ecHtmlLbl">HTML body *</label>'+
+            '<div class="ecedit">'+
+                ecInsertStrip('html',incM,incS)+
+                '<div class="ecedit-tb">'+
+                    '<button type="button" data-cmd="bold" title="Bold"><i class="fas fa-bold"></i></button>'+
+                    '<button type="button" data-cmd="italic" title="Italic"><i class="fas fa-italic"></i></button>'+
+                    '<button type="button" data-cmd="underline" title="Underline"><i class="fas fa-underline"></i></button>'+
+                    '<span class="ecedit-sep"></span>'+
+                    '<button type="button" data-cmd="formatBlock" data-val="&lt;h2&gt;" title="Heading"><i class="fas fa-heading"></i></button>'+
+                    '<button type="button" data-cmd="insertUnorderedList" title="Bulleted list"><i class="fas fa-list-ul"></i></button>'+
+                    '<button type="button" data-cmd="insertOrderedList" title="Numbered list"><i class="fas fa-list-ol"></i></button>'+
+                    '<span class="ecedit-sep"></span>'+
+                    '<button type="button" id="ecLinkBtn" title="Insert link"><i class="fas fa-link"></i></button>'+
+                    '<button type="button" data-cmd="unlink" title="Remove link"><i class="fas fa-unlink"></i></button>'+
+                    '<span class="ecedit-sep"></span>'+
+                    '<button type="button" id="ecSrcBtn" title="View HTML source"><i class="fas fa-code"></i></button>'+
+                '</div>'+
+                '<div class="ecedit-area" id="ecBody" contenteditable="true"></div>'+
+                '<textarea class="ecedit-src" id="ecSrc" spellcheck="false"></textarea>'+
+            '</div></div>'+
+        '<div class="ec-fg" id="ecTextBlock"><label id="ecTextLbl"></label>'+
+            '<div class="ecedit">'+ecInsertStrip('text',incM,incS)+'<textarea class="ecedit-plain" id="ecText"></textarea></div>'+
+        '</div>'; }
+// Wire the editor after ecModal has injected the markup. data has {id,is_plain,html_body,text_body,_defaultHtml}.
+function ecEditorInit(data){ data=data||{};
+    tSrcMode=false;
+    var body=document.getElementById('ecBody'); if(body){ body.innerHTML=(data.html_body&&data.html_body.trim())?data.html_body:(data.id?'':(data._defaultHtml||'')); body.style.display=''; }
+    var src=document.getElementById('ecSrc'); if(src){ src.style.display='none'; src.value=''; }
+    var txt=document.getElementById('ecText'); if(txt) txt.value=data.text_body||'';
+    var sb=document.getElementById('ecSrcBtn'); if(sb) sb.classList.remove('on');
+    var plain=(data.is_plain==1); var r=document.querySelector('input[name="ecFmt"][value="'+(plain?'plain':'html')+'"]'); if(r) r.checked=true;
+    document.querySelectorAll('.ecedit-tb button[data-cmd]').forEach(function(b){ b.addEventListener('mousedown',function(e){ e.preventDefault(); }); b.addEventListener('click',function(){ ecCmd(b.getAttribute('data-cmd'), b.getAttribute('data-val')); }); });
+    var lk=document.getElementById('ecLinkBtn'); if(lk) lk.addEventListener('click',elOpen);
+    if(sb) sb.addEventListener('click',ecSrcToggle);
+    ecFmtToggle();
+    // Load signatures for the "insert signature" dropdown(s), if present.
+    if(document.querySelector('.ecSigSel')){ ecFillSigSelects(); post(EC.signatures,{action:'list'}).done(function(rr){ EC.signaturesCache=rr.rows||[]; ecFillSigSelects(); }); }
+}
+function ecFillSigSelects(){ var opts='<option value="">Insert signature ▾</option>'+(EC.signaturesCache||[]).map(function(s){return '<option value="'+s.id+'">'+esc(s.name)+(s.is_plain==1?' (plain)':'')+'</option>';}).join(''); document.querySelectorAll('.ecSigSel').forEach(function(sel){ sel.innerHTML=opts; }); }
+function ecFmtToggle(){ var plain=(document.querySelector('input[name="ecFmt"]:checked')||{}).value==='plain';
+    var hb=document.getElementById('ecHtmlBlock'), lbl=document.getElementById('ecTextLbl');
+    if(hb) hb.style.display=plain?'none':'';
+    var noun=ecReqUnsub?'message':'signature';
+    if(lbl) lbl.innerHTML = plain
+        ? 'Plain-text '+noun+' * <span class="ec-hint">'+(ecReqUnsub?'merge fields work here — must include {{unsubscribe_url}}':'the plain-text version')+'</span>'
+        : 'Plain text <span class="ec-hint">(optional alternative — auto-generated if left blank; used when this is placed in a plain-text email)</span>';
+}
+function ecCmd(cmd,val){ var b=document.getElementById('ecBody'); if(!b) return; b.focus(); try{ document.execCommand(cmd,false,val||null); }catch(e){} }
+function ecSrcToggle(){ var b=document.getElementById('ecBody'), s=document.getElementById('ecSrc'), btn=document.getElementById('ecSrcBtn'); if(!b||!s) return;
+    if(tSrcMode){ b.innerHTML=s.value; s.style.display='none'; b.style.display=''; if(btn) btn.classList.remove('on'); }
+    else { s.value=b.innerHTML; b.style.display='none'; s.style.display='block'; if(btn) btn.classList.add('on'); }
+    tSrcMode=!tSrcMode;
+}
+function ecHtmlValue(){ if(tSrcMode){ var s=document.getElementById('ecSrc'); return s?s.value:''; } var b=document.getElementById('ecBody'); return b?b.innerHTML:''; }
+function ecTextValue(){ var t=document.getElementById('ecText'); return t?t.value:''; }
+function ecIsPlain(){ return ((document.querySelector('input[name="ecFmt"]:checked')||{}).value==='plain')?1:0; }
+/* ---- insert merge field / signature ---- */
+function ecStripTags(h){ var d=document.createElement('div'); d.innerHTML=h||''; return d.textContent||d.innerText||''; }
+function ecNl2br(s){ return esc(s).replace(/\n/g,'<br>'); }
+function ecInsertAtCaret(ta,text){ ta.focus(); var s=ta.selectionStart||0,e=ta.selectionEnd||0,v=ta.value; ta.value=v.slice(0,s)+text+v.slice(e); var p=s+text.length; ta.selectionStart=ta.selectionEnd=p; }
+function ecInsertInto(target,payload,isHtml){
+    if(target==='html' && !tSrcMode){ var b=document.getElementById('ecBody'); if(!b) return; b.focus(); try{ document.execCommand(isHtml?'insertHTML':'insertText',false,payload); }catch(e){} }
+    else { var ta=(target==='text')?document.getElementById('ecText'):document.getElementById('ecSrc'); if(ta) ecInsertAtCaret(ta,payload); }
+}
+function ecInsField(sel,target){ var tok=sel.value; sel.selectedIndex=0; if(tok) ecInsertInto(target,tok,false); }
+function ecInsSig(sel,target){ var id=sel.value; sel.selectedIndex=0; if(!id) return;
+    var sig=(EC.signaturesCache||[]).find(function(x){return String(x.id)===String(id);}); if(!sig){ toast('Signature not loaded yet — try again','error'); return; }
+    if(target==='text'){ // plain destination: always use the plain-text version
+        var txt=(sig.text_body&&sig.text_body.trim())?sig.text_body:ecStripTags(sig.html_body||'');
+        ecInsertInto('text','\n'+txt+'\n',false);
+    } else { // html destination
+        var html=(sig.is_plain==1)?('<p>'+ecNl2br(sig.text_body||'')+'</p>'):(sig.html_body||('<p>'+ecNl2br(sig.text_body||'')+'</p>'));
+        ecInsertInto('html','<br>'+html,true);
+    }
+}
+/* ---- insert-link mini modal (targets the HTML editor) ---- */
+function elOpen(){ var b=document.getElementById('ecBody'); if(!b) return; b.focus();
+    var sel=window.getSelection(); elRange=(sel&&sel.rangeCount&&b.contains(sel.getRangeAt(0).commonAncestorContainer))?sel.getRangeAt(0):null;
+    var a=elAnchorInSelection();
+    document.getElementById('elText').value=a?a.textContent:(elRange?elRange.toString():'');
+    document.getElementById('elUrl').value=a?a.getAttribute('href')||'':'';
+    document.getElementById('elTitle').value=a?a.getAttribute('title')||'':'';
+    document.getElementById('elTarget').value=a?(a.getAttribute('target')||''):'_blank';
+    document.getElementById('elOv').classList.add('open'); document.getElementById('elModal').classList.add('open');
+    setTimeout(function(){ document.getElementById('elUrl').focus(); },60);
+}
+function elClose(){ document.getElementById('elOv').classList.remove('open'); document.getElementById('elModal').classList.remove('open'); }
+function elAnchorInSelection(){ var n=elRange?elRange.commonAncestorContainer:null; while(n&&n.nodeName){ if(n.nodeName==='A') return n; n=n.parentNode; if(n&&n.id==='ecBody') break; } return null; }
+function elInsert(){ var url=(document.getElementById('elUrl').value||'').trim(), text=(document.getElementById('elText').value||'').trim(), title=(document.getElementById('elTitle').value||'').trim(), target=document.getElementById('elTarget').value;
+    if(!url){ toast('Enter a URL','error'); return; }
+    if(!text) text=url;
+    var b=document.getElementById('ecBody'); b.focus();
+    var sel=window.getSelection(); sel.removeAllRanges(); if(elRange) sel.addRange(elRange);
+    var existing=elAnchorInSelection();
+    if(existing){ existing.setAttribute('href',url); existing.textContent=text; if(title) existing.setAttribute('title',title); else existing.removeAttribute('title'); if(target){ existing.setAttribute('target',target); existing.setAttribute('rel','noopener noreferrer'); } else { existing.removeAttribute('target'); existing.removeAttribute('rel'); } }
+    else {
+        var a=document.createElement('a'); a.setAttribute('href',url); if(title) a.setAttribute('title',title); if(target){ a.setAttribute('target',target); a.setAttribute('rel','noopener noreferrer'); } a.textContent=text;
+        if(elRange){ elRange.deleteContents(); elRange.insertNode(a); } else { b.appendChild(a); }
+    }
+    elClose();
+}
+/* ---- Template form (uses the shared editor) ---- */
 function tForm(t){ t=t||{}; return '<input type="hidden" id="tId" value="'+(t.id||'')+'">'+
     '<div class="ec-row"><div class="ec-fg"><label>Name *</label><input class="ec-in" id="tName" value="'+esc(t.name||'')+'"></div><div class="ec-fg"><label>Subject * <span class="ec-hint">merge fields work here too, e.g. {{company}} - The Munich Eye</span></label><input class="ec-in" id="tSubject" value="'+esc(t.subject||'')+'"></div></div>'+
     /* From/Reply-to are set by the sending profile (Sending tab), so they're hidden here to avoid confusion. */
     '<input type="hidden" id="tFromName" value=""><input type="hidden" id="tFromEmail" value=""><input type="hidden" id="tReplyTo" value="">'+
-    '<div class="ec-fg"><label>HTML body * <span class="ec-hint">merge: {{first_name}} {{company}} — must include {{unsubscribe_url}}</span></label><textarea class="ec-ta" id="tHtml" style="min-height:200px">'+esc(t.html_body||'<p>Hello {{first_name}},</p>\n\n<p>...</p>\n\n<p><a href="{{unsubscribe_url}}">Unsubscribe</a></p>')+'</textarea></div>'+
-    '<div class="ec-fg"><label>Plain text (optional — auto-generated if blank)</label><textarea class="ec-ta" id="tText">'+esc(t.text_body||'')+'</textarea></div>'; }
-function tNew(){ ecModal('New template',tForm(),'<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn light" onclick="tPreview()">Preview</button><button class="ec-btn light" onclick="tTestModal()">Send test</button><button class="ec-btn" onclick="tSave()">Save</button>'); }
-function tEdit(id){ post(EC.templates,{action:'get',id:id}).done(function(r){ if(r.success){ ecModal('Edit template',tForm(r.template),'<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn light" onclick="tPreview()">Preview</button><button class="ec-btn light" onclick="tTestModal()">Send test</button><button class="ec-btn" onclick="tSave()">Save</button>'); } }); }
-function tPayload(){ return {id:document.getElementById('tId').value,name:document.getElementById('tName').value,subject:document.getElementById('tSubject').value,from_name:document.getElementById('tFromName').value,from_email:document.getElementById('tFromEmail').value,reply_to:document.getElementById('tReplyTo').value,html_body:document.getElementById('tHtml').value,text_body:document.getElementById('tText').value}; }
+    ecEditorBlock({includeMerge:true,includeSig:true,requireUnsub:true}); }
+function tFoot(){ return '<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn light" onclick="tPreview()">Preview</button><button class="ec-btn light" onclick="tTestModal()">Send test</button><button class="ec-btn" onclick="tSave()">Save</button>'; }
+function tNew(){ ecReqUnsub=true; ecModal('New template',tForm(),tFoot()); ecEditorInit({_defaultHtml:_tDefaultHtml}); }
+function tEdit(id){ post(EC.templates,{action:'get',id:id}).done(function(r){ if(r.success){ ecReqUnsub=true; ecModal('Edit template',tForm(r.template),tFoot()); ecEditorInit(Object.assign({_defaultHtml:_tDefaultHtml},r.template)); } }); }
+function tPayload(){ return {id:document.getElementById('tId').value,name:document.getElementById('tName').value,subject:document.getElementById('tSubject').value,from_name:document.getElementById('tFromName').value,from_email:document.getElementById('tFromEmail').value,reply_to:document.getElementById('tReplyTo').value,is_plain:ecIsPlain(),html_body:ecHtmlValue(),text_body:ecTextValue()}; }
+/* ---- Signatures ---- */
+function sgLoad(){ post(EC.signatures,{action:'list'}).done(function(r){ if(!r.success){toast(r.message,'error');return;} EC.signaturesCache=r.rows||[]; let h='<table class="ec-tbl"><thead><tr><th>Name</th><th>Format</th><th></th></tr></thead><tbody>'; (r.rows||[]).forEach(function(s){ h+='<tr><td>'+esc(s.name)+'</td><td>'+(s.is_plain==1?'Plain text':'HTML')+'</td><td><button class="ec-btn light sm" onclick="sgEdit('+s.id+')">Edit</button> <button class="ec-btn danger sm" onclick="sgDel('+s.id+')">Delete</button></td></tr>'; }); h+='</tbody></table>'; if(!(r.rows||[]).length) h='<p class="ec-hint">No signatures yet. Create one, then insert it into a template with the toolbar\'s "Insert signature" dropdown.</p>'; document.getElementById('sgTable').innerHTML=h; }); }
+function sgForm(s){ s=s||{}; return '<input type="hidden" id="sgId" value="'+(s.id||'')+'">'+
+    '<div class="ec-fg"><label>Name *</label><input class="ec-in" id="sgName" value="'+esc(s.name||'')+'"></div>'+
+    ecEditorBlock({includeMerge:false,includeSig:false,requireUnsub:false}); }
+function sgFoot(){ return '<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn light" onclick="sgPreview()">Preview</button><button class="ec-btn" onclick="sgSave()">Save</button>'; }
+function sgNew(){ ecReqUnsub=false; ecModal('New signature',sgForm(),sgFoot()); ecEditorInit({}); }
+function sgEdit(id){ post(EC.signatures,{action:'get',id:id}).done(function(r){ if(r.success){ ecReqUnsub=false; ecModal('Edit signature',sgForm(r.signature),sgFoot()); ecEditorInit(r.signature); } }); }
+function sgPayload(){ return {id:document.getElementById('sgId').value,name:document.getElementById('sgName').value,is_plain:ecIsPlain(),html_body:ecHtmlValue(),text_body:ecTextValue()}; }
+function sgSave(){ post(EC.signatures,Object.assign({action:'save'},sgPayload())).done(function(r){ if(r.success){ecClose();toast('Saved');sgLoad();}else toast(r.message,'error'); }); }
+function sgDel(id){ Swal.fire({title:'Delete signature?',icon:'warning',showCancelButton:true,confirmButtonColor:'#dc2626'}).then(x=>{ if(x.isConfirmed) post(EC.signatures,{action:'delete',id:id}).done(()=>{toast('Deleted');sgLoad();}); }); }
+function sgPreview(){ var w=window.open('','_blank'); if(ecIsPlain()) w.document.write('<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px">'+esc(ecTextValue())+'</pre>'); else w.document.write(ecHtmlValue()); }
 function tSave(){ post(EC.templates,Object.assign({action:'save'},tPayload())).done(function(r){ if(r.success){ecClose();toast('Saved');tLoad();}else toast(r.message,'error'); }); }
 function tDel(id){ Swal.fire({title:'Delete template?',icon:'warning',showCancelButton:true,confirmButtonColor:'#dc2626'}).then(x=>{ if(x.isConfirmed) post(EC.templates,{action:'delete',id:id}).done(()=>{toast('Deleted');tLoad();}); }); }
 function tPreview(){ post(EC.templates,Object.assign({action:'preview'},tPayload())).done(function(r){ if(r.success){ const w=window.open('','_blank'); w.document.write('<h3 style="font-family:sans-serif">Subject: '+esc(r.subject)+'</h3><hr>'+r.html); } }); }
@@ -690,10 +881,10 @@ function kForm(c,vars){ c=c||{}; vars=vars&&vars.length?vars:[{template_id:'',we
         '<div class="ec-row"><div class="ec-fg"><label>Per-domain limit / run <span class="ec-hint">(0=none)</span></label><input class="ec-in" id="kPerDomain" value="'+(c.per_domain_limit||0)+'"></div><div class="ec-fg"><label>Daily cap <span class="ec-hint">(0=none)</span></label><input class="ec-in" id="kDaily" value="'+(c.daily_cap||0)+'"></div></div>'+
         '<div class="ec-row"><div class="ec-fg"><label>Schedule start <span class="ec-hint">(blank=now)</span></label><input class="ec-in" id="kSched" type="datetime-local"></div><div class="ec-fg"><label><input type="checkbox" id="kWarm" '+(c.warmup_enabled?'checked':'')+'> Warm-up ramp &nbsp; <input type="checkbox" id="kAB" '+(c.ab_enabled?'checked':'')+'> A/B</label></div></div>'+
         '<div class="ec-fg" style="border:1px solid var(--ten-border,#e2e2e2);border-radius:8px;padding:10px 12px;margin:4px 0">'+
-          '<div style="font-weight:600;margin-bottom:6px">Tracking &amp; format <span class="ec-hint">(all off by default)</span></div>'+
+          '<div style="font-weight:600;margin-bottom:2px">Tracking</div>'+
+          '<div class="ec-hint" id="kFmtHint" style="margin:0 0 8px"></div>'+
           '<label style="display:block;margin:6px 0"><input type="checkbox" id="kTrackOpens" '+(c.track_opens?'checked':'')+'> <b>Track opens</b> <span class="ec-hint">— adds a tiny invisible image so you can see who opened. Off = better privacy &amp; deliverability.</span></label>'+
           '<label style="display:block;margin:6px 0"><input type="checkbox" id="kTrackClicks" '+(c.track_clicks?'checked':'')+'> <b>Track clicks on the links in this email</b> <span class="ec-hint">— rewrites every link so clicks are counted; recipients pass through our server first. Off = links stay exactly as you wrote them.</span></label>'+
-          '<label style="display:block;margin:6px 0"><input type="checkbox" id="kPlainText" '+(c.plain_text?'checked':'')+'> <b>Send as plain text only</b> <span class="ec-hint">— no formatting or images, the most inbox-friendly format. Turns off open &amp; click tracking.</span></label>'+
         '</div>'+
         '<div id="kVars">'+vh+'</div><button class="ec-btn light sm" onclick="kAddVar()">+ Add A/B variant</button>',
         '<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn" onclick="kSave()">Save</button>');
@@ -701,15 +892,23 @@ function kForm(c,vars){ c=c||{}; vars=vars&&vars.length?vars:[{template_id:'',we
     var ka=document.getElementById('kAud'); if(ka && c.audience_id) ka.value=String(c.audience_id);
     var kp=document.getElementById('kProfile'); if(kp && c.sending_profile_id) kp.value=String(c.sending_profile_id);
     document.querySelectorAll('.kVarTpl').forEach(function(sel,i){ if(vars[i] && vars[i].template_id) sel.value=String(vars[i].template_id); });
-    var kpt=document.getElementById('kPlainText'); if(kpt){ kpt.addEventListener('change',kPlainSync); kPlainSync(); }
+    // Tracking defaults follow the chosen template's format (HTML on, plain off). On edit,
+    // respect the saved values; on a new campaign (or when the template changes), re-default.
+    document.querySelectorAll('.kVarTpl').forEach(function(sel){ sel.addEventListener('change',function(){ kTrackSync(true); }); });
+    kTrackSync(!c.id);
 }
-// Plain text can't carry a pixel or rewritten links — grey out & clear the tracking boxes when it's on.
-function kPlainSync(){ var pt=document.getElementById('kPlainText'), to=document.getElementById('kTrackOpens'), tc=document.getElementById('kTrackClicks'); if(!pt||!to||!tc) return;
-    if(pt.checked){ to.checked=false; tc.checked=false; } to.disabled=pt.checked; tc.disabled=pt.checked;
-    to.closest('label').style.opacity=tc.closest('label').style.opacity=pt.checked?'0.5':''; }
-function kAddVar(){ const i=document.querySelectorAll('.kVarTpl').length; const tplOpts='<option value="">— template —</option>'+_tpls.map(o=>'<option value="'+o.id+'">'+esc(o.name)+'</option>').join(''); const div=document.createElement('div'); div.className='ec-row'; div.style.alignItems='end'; div.innerHTML='<div class="ec-fg"><label>Variant '+String.fromCharCode(65+i)+' template</label><select class="ec-sel kVarTpl">'+tplOpts+'</select></div><div class="ec-fg"><label>Weight</label><input class="ec-in kVarW" value="1"></div>'; document.getElementById('kVars').appendChild(div); }
+// Is the currently-selected (first variant) template plain text? true/false, or null if none picked.
+function kSelPlain(){ var sel=document.querySelector('.kVarTpl'); if(!sel||!sel.value) return null; var t=_tpls.find(function(x){return String(x.id)===String(sel.value);}); return t?(t.is_plain==1):null; }
+// Sync the tracking boxes to the selected template. Plain text => tracking unavailable; HTML =>
+// available, and defaulted ON when applyDefault (new campaign or a fresh template choice).
+function kTrackSync(applyDefault){ var to=document.getElementById('kTrackOpens'), tc=document.getElementById('kTrackClicks'), hint=document.getElementById('kFmtHint'); if(!to||!tc) return;
+    var plain=kSelPlain();
+    if(plain===true){ to.checked=false; tc.checked=false; to.disabled=tc.disabled=true; to.closest('label').style.opacity=tc.closest('label').style.opacity='0.5'; if(hint) hint.textContent='This template is plain text — tracking is off (a text email can carry neither a tracking pixel nor rewritten links).'; }
+    else { to.disabled=tc.disabled=false; to.closest('label').style.opacity=tc.closest('label').style.opacity=''; if(applyDefault && plain===false){ to.checked=true; tc.checked=true; } if(hint) hint.textContent=(plain===false?'This template is HTML — tracking is on by default; untick to turn it off.':'Pick a template below to set the email format.'); }
+}
+function kAddVar(){ const i=document.querySelectorAll('.kVarTpl').length; const tplOpts='<option value="">— template —</option>'+_tpls.map(o=>'<option value="'+o.id+'">'+esc(o.name)+'</option>').join(''); const div=document.createElement('div'); div.className='ec-row'; div.style.alignItems='end'; div.innerHTML='<div class="ec-fg"><label>Variant '+String.fromCharCode(65+i)+' template</label><select class="ec-sel kVarTpl">'+tplOpts+'</select></div><div class="ec-fg"><label>Weight</label><input class="ec-in kVarW" value="1"></div>'; document.getElementById('kVars').appendChild(div); document.querySelector('#kVars .ec-row:last-child .kVarTpl').addEventListener('change',function(){ kTrackSync(true); }); }
 function kSave(){ const vars=[]; document.querySelectorAll('.kVarTpl').forEach((el,i)=>{ if(el.value) vars.push({label:String.fromCharCode(65+i),template_id:el.value,weight:document.querySelectorAll('.kVarW')[i].value||1}); }); if(!vars.length){toast('Add at least one template variant','error');return;}
-    post(EC.campaigns,{action:'save',id:document.getElementById('kId').value,name:document.getElementById('kName').value,audience_id:document.getElementById('kAud').value,sending_profile_id:document.getElementById('kProfile').value,from_name:document.getElementById('kFromName').value,from_email:document.getElementById('kFromEmail').value,reply_to:document.getElementById('kReplyTo').value,batch_size:document.getElementById('kBatch').value,batch_interval_min:document.getElementById('kInterval').value,per_domain_limit:document.getElementById('kPerDomain').value,daily_cap:document.getElementById('kDaily').value,warmup_enabled:document.getElementById('kWarm').checked?1:0,ab_enabled:document.getElementById('kAB').checked?1:0,track_opens:document.getElementById('kTrackOpens').checked?1:0,track_clicks:document.getElementById('kTrackClicks').checked?1:0,plain_text:document.getElementById('kPlainText').checked?1:0,scheduled_at:document.getElementById('kSched').value,variants:JSON.stringify(vars)}).done(function(r){ if(r.success){ecClose();toast('Saved');kLoad();}else toast(r.message,'error'); }); }
+    post(EC.campaigns,{action:'save',id:document.getElementById('kId').value,name:document.getElementById('kName').value,audience_id:document.getElementById('kAud').value,sending_profile_id:document.getElementById('kProfile').value,from_name:document.getElementById('kFromName').value,from_email:document.getElementById('kFromEmail').value,reply_to:document.getElementById('kReplyTo').value,batch_size:document.getElementById('kBatch').value,batch_interval_min:document.getElementById('kInterval').value,per_domain_limit:document.getElementById('kPerDomain').value,daily_cap:document.getElementById('kDaily').value,warmup_enabled:document.getElementById('kWarm').checked?1:0,ab_enabled:document.getElementById('kAB').checked?1:0,track_opens:document.getElementById('kTrackOpens').checked?1:0,track_clicks:document.getElementById('kTrackClicks').checked?1:0,scheduled_at:document.getElementById('kSched').value,variants:JSON.stringify(vars)}).done(function(r){ if(r.success){ecClose();toast('Saved');kLoad();}else toast(r.message,'error'); }); }
 function kReview(id){ post(EC.campaigns,{action:'materialise',id:id}).done(function(m){ post(EC.campaigns,{action:'preview_count',id:id}).done(function(p){
     ecModal('Review & launch','<p>Materialised <b>'+(m.materialised||0)+'</b> new recipients this run.</p><p>Total queued to send (after suppression &amp; dedup): confirm below.</p><p class="ec-hint">Suppressed and already-contacted addresses are excluded automatically.</p>',
     '<button class="ec-btn light" onclick="ecClose()">Close</button><button class="ec-btn" onclick="kLaunch('+id+')">Launch now</button>'); }); }); }
