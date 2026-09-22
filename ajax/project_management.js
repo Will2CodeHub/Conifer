@@ -1959,3 +1959,9 @@ if (originalEditTask) {
     };
 }
 
+
+// Deep link from the header bell / reminder emails: ?open_project=<id> opens that project's detail modal.
+document.addEventListener('DOMContentLoaded', function () {
+    var pid = parseInt(new URLSearchParams(window.location.search).get('open_project'), 10);
+    if (pid > 0 && typeof openProjectDetailModal === 'function') openProjectDetailModal(pid);
+});
