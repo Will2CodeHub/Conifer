@@ -187,9 +187,13 @@ function scraper_curate_rank(int $pubSectionId, int $topN): array {
     $focus = $isWorld
         ? "Choose the biggest, most significant international news stories of broad interest to a global English-speaking audience."
         : "STRONGLY prioritise LOCAL and national news for {$region} and its readers — politics, economy, society, culture, sport and events happening in or directly affecting {$region}. Only include an international/world story if it is genuinely major AND clearly relevant to {$region}; prefer a local story over a generic world story.";
-    $system = "You are the news editor of a local English-language newspaper covering {$region}. {$focus} Drop trivia, near-duplicates and clickbait. Return ONLY JSON.";
-    $user = "From these " . count($rows) . " collated headlines (id: headline), choose the TOP " . min($topN, count($rows)) . " for this publication's readers. "
-          . "The headlines may be in ANY language — translate each chosen one into natural English. "
+    $system = "You are the news editor of a local English-language newspaper covering {$region}. {$focus} "
+        . "Drop trivia and clickbait. CRUCIAL: pick DISTINCT stories only — never choose two headlines about the same "
+        . "event, incident or topic; if several cover the same story, keep the single best one and drop the rest. "
+        . "Return ONLY JSON.";
+    $user = "From these " . count($rows) . " collated headlines (id: headline), choose the TOP " . min($topN, count($rows)) . " for this publication's readers, each about a DIFFERENT story (no two on the same topic). "
+          . "The headlines may be in ANY language: translate each chosen one into a natural English news headline. "
+          . "Headline style (strict): sentence case, NO colon-and-label prefix (no \"Word:\"), no colons, no em/en dashes (— –), no plus signs (+), no ALL-CAPS, no clickbait. "
           . "Return JSON {\"top\":[{\"id\":<id>,\"title\":\"<the headline in ENGLISH>\",\"reason\":\"<max 12 words why>\"}]}, best first.\n\n" . $lines;
     $decoded = null;
     try {
@@ -224,6 +228,21 @@ function scraper_precompute_section(int $pubSectionId): array {
     if (!$section || (int)$section['is_active'] !== 1) return ['skipped' => 'inactive', 'more' => false];
     $ai = scraper_translation_ai($section); // cheap model for bulk title/summary translation
 
+    // The cron and the Curate screen can both drive this; a per-section lock stops them
+    // paying to translate the same rows twice. Held on its own connection for the
+    // whole pass (MySQL drops it automatically if the request dies).
+    $lockConn = getDBConnection();
+    $got = $lockConn->query("SELECT GET_LOCK('scraper_precompute_" . $pubSectionId . "', 0) g")->fetch_assoc();
+    if ((int)($got['g'] ?? 0) !== 1) { $lockConn->close(); return ['busy' => true, 'translated' => 0, 'ranked' => 0, 'more' => true]; }
+    try {
+        return scraper_precompute_section_locked($pubSectionId, $section, $ai);
+    } finally {
+        $lockConn->close();
+    }
+}
+
+/** One precompute pass for a section; caller holds the section's precompute lock. */
+function scraper_precompute_section_locked(int $pubSectionId, array $section, array $ai): array {
     // 1) Translate a bounded batch of untranslated 'new' items to English. Capped so a
     //    single run always finishes well within the HTTP/CLI budget; remaining items are
     //    picked up on the next run (the section keeps matching until fully translated).
@@ -271,6 +290,17 @@ function scraper_precompute_section(int $pubSectionId): array {
     }
     $up->close(); $conn->close();
     return ['translated' => $translated, 'ranked' => $ranked, 'more' => false];
+}
+
+/** How many 'new' items in a section still lack an English translation. */
+function scraper_untranslated_count(int $pubSectionId): int {
+    $conn = getDBConnection();
+    $n = (int)$conn->query("SELECT COUNT(*) c FROM ten_scraper_items
+                            WHERE pub_section_id=" . (int)$pubSectionId . " AND status='new'
+                              AND (title_translated IS NULL OR title_translated=''
+                                   OR translated_lang IS NULL OR translated_lang<>'English')")->fetch_assoc()['c'];
+    $conn->close();
+    return $n;
 }
 
 /**
@@ -454,11 +484,14 @@ function scraper_dedup_curate_rows(array $rows): array {
     $kept = [];
     $keptTokens = $covered; // new rows dedup against today's covered topics too
     foreach ($rows as $r) {
-        $tok = scraper_title_tokens((string)($r['title_original'] ?? $r['title'] ?? ''));
+        // Dedup on the ENGLISH (translated) headline so the same story reported by two
+        // outlets — often in different source languages or wordings — still collapses.
+        // Fall back to the original title only when no translation exists yet.
+        $tok = scraper_title_tokens((string)($r['title'] ?? $r['title_original'] ?? ''));
         if (($r['status'] ?? '') === 'new') {
             $dup = false;
             foreach ($keptTokens as $c) {
-                if (scraper_titles_similar($tok, $c) >= 0.5) { $dup = true; break; }
+                if (scraper_titles_similar($tok, $c) >= 0.4) { $dup = true; break; }
             }
             if ($dup) continue;
         }

@@ -97,15 +97,18 @@ try {
             $batch=max(1,(int)($_POST['batch_size']??50)); $interval=max(0,(int)($_POST['batch_interval_min']??10));
             $perDomain=max(0,(int)($_POST['per_domain_limit']??0)); $dailyCap=max(0,(int)($_POST['daily_cap']??0));
             $warmup=(int)(!empty($_POST['warmup_enabled'])); $ab=(int)(!empty($_POST['ab_enabled']));
-            // Tracking + format controls (all default off). Plain text forces tracking off:
-            // a text-only email can carry neither a pixel nor rewritten links.
-            $plainText=(int)(!empty($_POST['plain_text']));
-            $trackOpens=$plainText?0:(int)(!empty($_POST['track_opens']));
-            $trackClicks=$plainText?0:(int)(!empty($_POST['track_clicks']));
             $sched=trim($_POST['scheduled_at']??''); $schedSql = $sched!=='' ? "'".$c->real_escape_string(date('Y-m-d H:i:s',strtotime($sched)))."'" : "NULL";
             $variants = json_decode($_POST['variants']??'[]', true);
             if(!is_array($variants) || !$variants) throw new Exception('At least one variant (template) is required');
             foreach($variants as $v){ if((int)($v['template_id']??0)<=0) throw new Exception('Each variant needs a template'); }
+            // Format is decided by the TEMPLATE now (no per-campaign plain-text toggle). Mirror
+            // the first variant's template is_plain onto the campaign so the sender + reports stay
+            // consistent. Plain text forces tracking off (can't carry a pixel or rewritten links).
+            $firstTpl=(int)($variants[0]['template_id']??0);
+            $plainText=0;
+            if($firstTpl>0){ $tr=$c->query("SELECT is_plain FROM ten_ec_templates WHERE id=$firstTpl")->fetch_assoc(); $plainText=(int)($tr['is_plain']??0); }
+            $trackOpens=$plainText?0:(int)(!empty($_POST['track_opens']));
+            $trackClicks=$plainText?0:(int)(!empty($_POST['track_clicks']));
 
             if($id>0){
                 $st=$c->prepare("UPDATE ten_ec_campaigns SET name=?,audience_id=?,sending_profile_id=?,from_name=?,from_email=?,reply_to=?,batch_size=?,batch_interval_min=?,per_domain_limit=?,daily_cap=?,warmup_enabled=?,ab_enabled=?,track_opens=?,track_clicks=?,plain_text=?,scheduled_at=".$schedSql." WHERE id=?");

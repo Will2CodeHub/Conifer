@@ -1904,7 +1904,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                 if (window.tenInsertArticleImage) {
                     window.tenInsertArticleImage(image_link, image_attribution, { atCursor: true });
                 } else {
-                    insertHTMLAtCursor('<img src="' + image_link + '" alt="" />', $('.editor'));
+                    insertHTMLAtCursor('<img src="' + image_link + '" alt="' + window.tenEscHtml(window.tenArticleAltText(image_attribution)) + '" />', $('.editor'));
                 }
                 $('.overlay, #modal_image_insert').fadeOut();
             });
@@ -2040,6 +2040,17 @@ document.getElementById('modal_publish_now').addEventListener('change', function
             // removes its bottom credit. No attribution => plain <img>, no credit line.
             function tenEscHtml(s){ return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
             function tenImgId(){ return 'ten-img-' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+            // Alt text for inserted images = the article topic (its title), so every image is
+            // described for accessibility and SEO instead of shipping an empty alt="". Falls
+            // back to any caption/attribution supplied with the image.
+            function tenArticleAltText(fallback){
+                var el = document.getElementById('article_title') || document.getElementById('modal_title');
+                var t = (el && el.value ? el.value : '').trim();
+                if (!t && fallback) t = String(fallback).trim();
+                return t;
+            }
+            window.tenArticleAltText = tenArticleAltText;
+            window.tenEscHtml = tenEscHtml;
             window.tenInsertArticleImage = function(url, attribution, opts) {
                 opts = opts || {};
                 var editor = document.getElementById('article_text');
@@ -2047,7 +2058,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                 var cap = (attribution == null ? '' : String(attribution)).trim();
                 var id = cap ? tenImgId() : '';
                 var idAttr = id ? ' data-ten-img="' + tenEscHtml(id) + '"' : '';
-                var imgHtml = '<img src="' + tenEscHtml(url) + '" alt=""' + idAttr + ' />';
+                var imgHtml = '<img src="' + tenEscHtml(url) + '" alt="' + tenEscHtml(tenArticleAltText(cap)) + '"' + idAttr + ' />';
                 // Place the image at the cursor (library insert) or at the top (search paths).
                 if (opts.atCursor) {
                     insertHTMLAtCursor(imgHtml, $(editor));
@@ -2114,9 +2125,15 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                                 imgElement.style.maxWidth = "200px";
                                 
                                 imgElement.addEventListener("click", () => {
-                                    const editor = $('.editor');
-                                    const imgHtml = `<img src="${image.largeImageURL}" alt="">`;
-                                    insertHTMLAtCursor(imgHtml, editor);
+                                    // Route through the shared inserter so the image gets alt text
+                                    // from the article topic (Pixabay tags are the fallback caption).
+                                    if (window.tenInsertArticleImage) {
+                                        window.tenInsertArticleImage(image.largeImageURL, '', { atCursor: true });
+                                    } else {
+                                        const editor = $('.editor');
+                                        const altTxt = window.tenEscHtml(window.tenArticleAltText(image.tags));
+                                        insertHTMLAtCursor(`<img src="${image.largeImageURL}" alt="${altTxt}">`, editor);
+                                    }
                                     $('.overlay, #modal_pixabay').fadeOut();
                                 });
                                 

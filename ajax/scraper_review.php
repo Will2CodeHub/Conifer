@@ -22,7 +22,7 @@ $action = $_POST['action'] ?? $_GET['action'] ?? '';
 
 // Publication/section scoping: non-admin editorial users may only act on the
 // publications (and, for Section Editors, sections) they're assigned to.
-$sectionScopedActions = ['list', 'history', 'promote', 'curate_items', 'curate_action', 'curate_published_today'];
+$sectionScopedActions = ['list', 'history', 'promote', 'curate_items', 'curate_action', 'curate_published_today', 'curate_precompute'];
 if (in_array($action, $sectionScopedActions, true)) {
     $psid = (int)($_POST['pub_section_id'] ?? $_GET['pub_section_id'] ?? 0);
     if (!scraper_user_can_access_section($psid)) {
@@ -116,7 +116,16 @@ try {
             $pubSectionId = (int)($_POST['pub_section_id'] ?? $_GET['pub_section_id'] ?? 0);
             $mode = ($_POST['mode'] ?? $_GET['mode'] ?? 'all') === 'curated' ? 'curated' : 'all';
             $date = trim($_POST['date'] ?? $_GET['date'] ?? '');
-            echo json_encode(['success' => true, 'items' => scraper_curate_items($pubSectionId, $mode, $date), 'mode' => $mode]);
+            echo json_encode(['success' => true, 'items' => scraper_curate_items($pubSectionId, $mode, $date), 'mode' => $mode,
+                              'untranslated' => $date === '' ? scraper_untranslated_count($pubSectionId) : 0]);
+            break;
+
+        case 'curate_precompute':
+            // On-demand translate + rank pass for one section (the screen loops this after a
+            // manual "Run now" instead of waiting for the 15-minute precompute cron).
+            $pubSectionId = (int)($_POST['pub_section_id'] ?? 0);
+            $r = scraper_precompute_section($pubSectionId);
+            echo json_encode(['success' => true] + $r + ['untranslated' => scraper_untranslated_count($pubSectionId)]);
             break;
 
         case 'curate_action':

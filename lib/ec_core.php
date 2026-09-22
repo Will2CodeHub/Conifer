@@ -52,6 +52,31 @@ function ec_decrypt(string $stored): string {
 }
 
 /**
+ * Merge fields available to templates/signatures, ordered most-likely first. Each entry:
+ * token (the {{placeholder}}), label (human name for the picker), col (ten_ec_contacts
+ * column it resolves from). ec_render() and the sender build their maps from this, and the
+ * editor's "insert field" dropdown is populated from it — one source of truth.
+ */
+function ec_merge_fields(): array {
+    return [
+        ['token'=>'{{first_name}}','label'=>'First name','col'=>'first_name'],
+        ['token'=>'{{last_name}}', 'label'=>'Last name', 'col'=>'last_name'],
+        ['token'=>'{{company}}',   'label'=>'Company',   'col'=>'company'],
+        ['token'=>'{{city}}',      'label'=>'City',      'col'=>'city'],
+        ['token'=>'{{country}}',   'label'=>'Country',   'col'=>'country'],
+        ['token'=>'{{email}}',     'label'=>'Email',     'col'=>'email'],
+        ['token'=>'{{job_title}}', 'label'=>'Job title', 'col'=>'job_title'],
+        ['token'=>'{{phone}}',     'label'=>'Phone',     'col'=>'phone'],
+        ['token'=>'{{website}}',   'label'=>'Website',   'col'=>'website'],
+        ['token'=>'{{industry}}',  'label'=>'Industry',  'col'=>'industry'],
+        ['token'=>'{{address}}',   'label'=>'Address',   'col'=>'address'],
+        ['token'=>'{{postcode}}',  'label'=>'Postcode',  'col'=>'postcode'],
+        ['token'=>'{{region}}',    'label'=>'Region',    'col'=>'region'],
+        ['token'=>'{{category}}',  'label'=>'Category',  'col'=>'category'],
+    ];
+}
+
+/**
  * Merge {{fields}} into any string (subject OR body) for one contact.
  * Works identically on the subject line and the HTML/text body.
  * After substituting the known fields, any leftover {{...}} placeholder (an
@@ -59,14 +84,10 @@ function ec_decrypt(string $stored): string {
  * braces never reach a recipient.
  */
 function ec_render(string $body, array $contact, string $unsubUrl): string {
-    $map = [
-        '{{first_name}}' => $contact['first_name'] ?? '',
-        '{{last_name}}'  => $contact['last_name'] ?? '',
-        '{{company}}'    => $contact['company'] ?? '',
-        '{{email}}'      => $contact['email'] ?? '',
-        '{{city}}'       => $contact['city'] ?? '',
-        '{{unsubscribe_url}}' => $unsubUrl,
-    ];
+    $map = ['{{unsubscribe_url}}' => $unsubUrl];
+    foreach (ec_merge_fields() as $f) {
+        $map[$f['token']] = (string)($contact[$f['col']] ?? '');
+    }
     $out = strtr($body, $map);
     // Remove any remaining unresolved placeholders like {{ something }}.
     $out = preg_replace('/\{\{\s*[\w .-]+\s*\}\}/', '', $out);
@@ -220,6 +241,25 @@ function ec_ensure_schema(mysqli $c): void {
 
     $sa = $c->query("SHOW COLUMNS FROM ten_ec_recipients LIKE 'send_attempts'");
     if (!$sa || $sa->num_rows === 0) @$c->query("ALTER TABLE ten_ec_recipients ADD COLUMN send_attempts INT NOT NULL DEFAULT 0");
+
+    // Template format flag: 0 = HTML (rich editor), 1 = plain text only. This is where
+    // the HTML-vs-plain decision now lives (campaigns inherit it); the sender reads it
+    // per template and sets the MIME headers accordingly.
+    $ip = $c->query("SHOW COLUMNS FROM ten_ec_templates LIKE 'is_plain'");
+    if (!$ip || $ip->num_rows === 0) @$c->query("ALTER TABLE ten_ec_templates ADD COLUMN is_plain TINYINT(1) NOT NULL DEFAULT 0");
+
+    // Reusable e-mail signatures (HTML or plain, same as templates). A plain-text template
+    // inserts the signature's plain-text version; an HTML template inserts its HTML.
+    @$c->query("CREATE TABLE IF NOT EXISTS ten_ec_signatures (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        is_plain TINYINT(1) NOT NULL DEFAULT 0,
+        html_body MEDIUMTEXT NULL,
+        text_body MEDIUMTEXT NULL,
+        created_by INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
     // Captured replies + bounces (content), populated by the IMAP poller.
     @$c->query("CREATE TABLE IF NOT EXISTS ten_ec_responses (
