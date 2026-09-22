@@ -163,6 +163,13 @@ function getTrafficStats() {
         }
     }
     
+    // Last-31-days daily series for the traffic-over-time chart. This is independent of
+    // the selected period (which drives the summary cards and the other charts) — the
+    // chart always shows the most recent 31 days of real visits.
+    if (is_array($stats)) {
+        $stats['daily_series'] = getDailySeries($siteKey, 31);
+    }
+
     echo ts_json([
         'success' => true,
         'site_key' => $siteKey,
@@ -170,6 +177,50 @@ function getTrafficStats() {
         'stats' => $stats,
         'data_source' => $dataSource
     ]);
+}
+
+/**
+ * Per-day real-visitor counts for the last $days days (ending today), with any missing
+ * days filled as zero. Powers the "Traffic — last 31 days" chart on the statistics page.
+ */
+function getDailySeries($siteKey, $days = 31) {
+    $conn = getDBConnection();
+    $end   = strtotime('today');
+    $start = strtotime('-' . ($days - 1) . ' days', $end);
+    $startDate = date('Y-m-d', $start);
+    $endDate   = date('Y-m-d', $end);
+
+    $map = [];
+    $stmt = $conn->prepare("
+        SELECT stat_date, human_visits, total_visits
+        FROM ten_traffic_stats
+        WHERE site_key = ?
+        AND stat_date BETWEEN ? AND ?
+    ");
+    if ($stmt) {
+        $stmt->bind_param("sss", $siteKey, $startDate, $endDate);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        while ($res && ($row = $res->fetch_assoc())) {
+            // Prefer real (human) visits; fall back to total where human isn't recorded.
+            $val = $row['human_visits'];
+            if ($val === null || $val === '') { $val = $row['total_visits']; }
+            $map[$row['stat_date']] = (int) $val;
+        }
+        $stmt->close();
+    }
+
+    $series = [];
+    for ($i = 0; $i < $days; $i++) {
+        $ts = strtotime("+$i days", $start);
+        $d  = date('Y-m-d', $ts);
+        $series[] = [
+            'date'   => $d,
+            'label'  => date('j M', $ts),
+            'visits' => $map[$d] ?? 0,
+        ];
+    }
+    return $series;
 }
 
 /**

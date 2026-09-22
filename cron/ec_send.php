@@ -46,7 +46,10 @@ while ($camp = $camps->fetch_assoc()) {
     if ($dailyAllow <= 0) { $log[] = "camp $cid: daily cap reached"; continue; }
 
     $limit = min($batch, $dailyAllow);
-    $recips = $c->query("SELECT r.*, ct.email, ct.first_name, ct.last_name, ct.company, ct.city
+    // Select every merge-field column (ct.* would clobber r.id, so name them explicitly).
+    $recips = $c->query("SELECT r.*, ct.email, ct.first_name, ct.last_name, ct.company, ct.city,
+                                ct.country, ct.job_title, ct.phone, ct.website, ct.industry,
+                                ct.address, ct.postcode, ct.region, ct.category
                          FROM ten_ec_recipients r JOIN ten_ec_contacts ct ON ct.id=r.contact_id
                          WHERE r.campaign_id=$cid AND r.status='queued' AND (r.send_after IS NULL OR r.send_after<=NOW())
                          ORDER BY r.send_after ASC, r.id ASC LIMIT $limit");
@@ -77,12 +80,13 @@ while ($camp = $camps->fetch_assoc()) {
         $token=$r['token'];
         $trackBase = ec_track_base();
         $unsub = $trackBase . '/u.php?r=' . rawurlencode($token);
-        $contact = ['first_name'=>$r['first_name'],'last_name'=>$r['last_name'],'company'=>$r['company'],'email'=>$email,'city'=>$r['city']];
+        $contact = ['email'=>$email];
+        foreach (ec_merge_fields() as $mf) { $contact[$mf['col']] = $r[$mf['col']] ?? ''; }
         $subject = ec_render($tpl['subject_override'] ?: $tpl['subject'], $contact, $unsub);
         $text = ec_render($tpl['text_body'] ?: strip_tags($tpl['html_body']), $contact, $unsub);
 
-        // Per-campaign tracking + format flags (all default OFF).
-        $plainOnly  = !empty($camp['plain_text']);
+        // Format comes from the TEMPLATE (its is_plain flag); tracking stays per-campaign.
+        $plainOnly  = !empty($tpl['is_plain']);
         $trackClicks = !$plainOnly && !empty($camp['track_clicks']); // plain text can't carry rewritten links
         $trackOpens  = !$plainOnly && !empty($camp['track_opens']);  // plain text can't carry a pixel
         if ($plainOnly) {

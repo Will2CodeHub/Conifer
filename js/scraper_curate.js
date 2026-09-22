@@ -193,7 +193,41 @@
         post({ action: "curate_items", pub_section_id: cur.sectionId, mode: cur.mode }).then(function (j) {
             if (!j.success) { body.innerHTML = "<p class='scraper-placeholder'>Failed: " + esc(j.message || "") + "</p>"; return; }
             renderList(j.items || []);
+            if (j.untranslated > 0) translatePending(cur.sectionId, j.untranslated);
         }).catch(function (e) { body.innerHTML = "<p class='scraper-placeholder'>Error: " + esc(e.message) + "</p>"; });
+    }
+
+    /* ---- catch-up translation: new items (e.g. after "Run now") arrive untranslated;
+       drive precompute passes from here instead of waiting for the 15-min cron ---- */
+    var translating = {};
+    function translatePending(sid, count) {
+        if (translating[sid]) return;
+        translating[sid] = true;
+        var stalls = 0;
+        function banner(msg) {
+            if (cur.sectionId !== sid) return;
+            var b = el("scCurTrBanner");
+            if (!b) {
+                b = document.createElement("div");
+                b.id = "scCurTrBanner";
+                b.className = "scraper-placeholder";
+                b.style.cssText = "margin:0 0 10px;padding:8px 12px;border-radius:8px;background:#fff7e6;border:1px solid #f5d28a;color:#8a5a00;";
+                el("scCurateBody").insertBefore(b, el("scCurateBody").firstChild);
+            }
+            b.innerHTML = msg;
+        }
+        function done() { translating[sid] = false; if (cur.sectionId === sid && cur.mode !== "published") loadItems(); }
+        banner("<span class='sc-spinner'></span>Translating " + count + " new stor" + (count === 1 ? "y" : "ies") + " to English…");
+        (function pass() {
+            post({ action: "curate_precompute", pub_section_id: sid }).then(function (r) {
+                if (!r.success) { translating[sid] = false; banner("⚠ Translation failed: " + esc(r.message || "unknown error")); return; }
+                if (!r.more) { done(); return; }
+                if (!r.busy && !r.translated) stalls++; else stalls = 0;
+                if (stalls >= 2) { translating[sid] = false; banner("⚠ Translation is not making progress (AI call failing?) — " + r.untranslated + " stories still in the original language."); return; }
+                banner("<span class='sc-spinner'></span>Translating… " + r.untranslated + " left" + (r.busy ? " (the scheduled job is working on this section)" : ""));
+                setTimeout(pass, r.busy ? 5000 : 200);
+            }).catch(function (e) { translating[sid] = false; banner("⚠ Translation error: " + esc(e.message)); });
+        })();
     }
 
     function stateBadge(r) {

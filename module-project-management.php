@@ -1184,6 +1184,7 @@ $currentPage = 'project-management';
                 <button class="project-detail-tab" onclick="switchProjectTab('gantt')">Gantt</button>
                 <button class="project-detail-tab" onclick="switchProjectTab('kanban')">Kanban</button>
                 <button class="project-detail-tab" onclick="switchProjectTab('activity')">Activity</button>
+                <button class="project-detail-tab" onclick="switchProjectTab('notes')">Notes</button>
             </div>
             
             <div id="project-overview-tab" class="project-tab-content active">
@@ -1294,9 +1295,12 @@ $currentPage = 'project-management';
                 
                 <div id="project-activity-list"></div>
             </div>
+
+            <!-- Notes tab (project notes + conversations); populated by js/project_notes.js -->
+            <div id="project-notes-tab" class="project-tab-content"></div>
         </div>
     </div>
-    
+
     <!-- Task Modal -->
     <div class="modal" id="taskModal">
         <div class="modal-content">
@@ -1469,6 +1473,7 @@ $currentPage = 'project-management';
     </div>
     
     <script src="/management/ajax/project_management.js?v=<?php echo time(); ?>"></script>
+    <script src="/management/js/project_notes.js?v=<?php echo time(); ?>"></script>
     <script>
         const projectsData = <?php echo json_encode($projects); ?>;
         
