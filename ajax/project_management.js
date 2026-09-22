@@ -151,6 +151,8 @@ function switchProjectTab(tabName) {
         loadProjectGantt(currentProjectId);
         loadProjectActivity(currentProjectId);
         loadProjectActivity(currentProjectId);
+    } else if (tabName === 'notes') {
+        if (window.ProjectNotes) window.ProjectNotes.load(currentProjectId);
     }
 }
 
