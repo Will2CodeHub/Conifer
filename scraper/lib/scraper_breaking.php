@@ -41,6 +41,7 @@ function scraper_ai_rewrite_breaking(string $provider, string $model, string $so
         . "4. NO DIRECT QUOTATIONS. This is critical: do NOT reproduce ANY quoted speech, interview answers, or statements from the source. Never put quotation marks around anything a person said. Paraphrase every statement entirely in your own words (e.g. write 'a resident said the compensation fell short' — never quote their exact words). Reproducing another outlet's interview quotes is not allowed.\n"
         . "5. If the source is short, your rewrite MUST be short too — never pad. Target 120-320 words and never longer than the source.\n"
         . "6. Neutral and factual, no opinion. The body must OPEN with a paragraph, never a heading. Do not use quotation marks around speech anywhere in the article.\n"
+        . "6b. Write the \"title\" as a plain declarative headline in sentence case: no colon-and-label prefixes (no \"Word:\" style), no colons at all, no em/en dashes (— –) and no plus signs (+). Do NOT use em/en dashes or the \"+\" sign anywhere in the body either.\n"
         . "7. Also judge newsworthiness. Set \"is_current_hard_news\" to true ONLY if this is a SERIOUS, CURRENT international/world news event happening now or just now — politics, government, conflict/war, disaster, economy, security, diplomacy, major world developments. Set it to FALSE for anniversaries, retrospectives, 'X years after' pieces, features, analysis, human-interest, lifestyle, sport, entertainment, celebrity, or purely local stories with no global significance.\n"
         . "Return ONLY a JSON object: {\"title\":\"...\",\"body_html\":\"<p>...</p><p>...</p>\",\"meta_title\":\"...\",\"meta_description\":\"...\",\"meta_keywords\":\"...\",\"is_current_hard_news\":true|false}. No commentary, no code fences.";
     $user = "SOURCE HEADLINE: " . $sourceTitle . "\n\nSOURCE ARTICLE:\n" . mb_substr($sourceText, 0, 9000);
@@ -52,11 +53,12 @@ function scraper_ai_rewrite_breaking(string $provider, string $model, string $so
     $body = preg_replace('/^\s*<h[1-6][^>]*>(.*?)<\/h[1-6]>/is', '<p>$1</p>', $body, 1); // never open with a heading
     $body = preg_replace('#<a\b[^>]*>(.*?)</a>#is', '$1', $body);                          // no inline links
     $body = preg_replace('/<p(?![^>]*style=)(\s[^>]*)?>/i', '<p style="margin:0 0 1em;"$1>', $body);
+    $body = scraper_clean_prose($body); // strip em/en dashes and "+" from the body
     return [
-        'title'            => trim((string)($decoded['title'] ?? $sourceTitle)),
+        'title'            => scraper_clean_title((string)($decoded['title'] ?? $sourceTitle)),
         'body_html'        => $body,
-        'meta_title'       => substr(trim((string)($decoded['meta_title'] ?? $decoded['title'] ?? '')), 0, 200),
-        'meta_description' => substr(trim((string)($decoded['meta_description'] ?? '')), 0, 500),
+        'meta_title'       => substr(scraper_clean_title((string)($decoded['meta_title'] ?? $decoded['title'] ?? '')), 0, 200),
+        'meta_description' => substr(scraper_clean_prose((string)($decoded['meta_description'] ?? '')), 0, 500),
         'meta_keywords'    => substr(trim((string)($decoded['meta_keywords'] ?? '')), 0, 500),
         'is_current_hard_news' => filter_var($decoded['is_current_hard_news'] ?? true, FILTER_VALIDATE_BOOLEAN),
     ];
