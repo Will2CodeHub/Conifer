@@ -60,11 +60,35 @@ function ec_store_response(mysqli $c, ?int $rid, ?int $campaignId, string $email
     $st->execute(); $st->close();
 }
 
+/** Fallback attribution: the most recent SENT recipient whose contact email matches
+ *  the reply's sender. Used when In-Reply-To/References can't be matched (e.g. the
+ *  reply client changed/omitted the header, or the sent Message-ID was rewritten). */
+function ec_reply_fallback_row(mysqli $c, string $email){
+    $email = trim($email);
+    if ($email === '') return null;
+    $e = $c->real_escape_string(strtolower($email));
+    return $c->query("SELECT r.id, ct.email, r.campaign_id, r.replied_at
+        FROM ten_ec_recipients r JOIN ten_ec_contacts ct ON ct.id=r.contact_id
+        WHERE LOWER(ct.email)='$e' AND r.status IN('sent','bounced')
+        ORDER BY r.sent_at DESC, r.id DESC LIMIT 1")->fetch_assoc();
+}
+/** Record a matched reply against a recipient (store response + mark replied + suppress). */
+function ec_apply_reply(mysqli $c, array $row, string $subj, string $body, ?string $uid): void {
+    $rid=(int)$row['id'];
+    ec_store_response($c,$rid,(int)$row['campaign_id'],$row['email'],'reply',$subj,$body,null,$uid);
+    if(empty($row['replied_at'])){
+        $c->query("UPDATE ten_ec_recipients SET replied_at=NOW() WHERE id=$rid");
+        $c->query("INSERT INTO ten_ec_events (recipient_id,type) VALUES ($rid,'reply')");
+        ec_suppress($row['email'],'do_not_contact',(int)$row['campaign_id']);
+    }
+}
+
 /** Process reply messages in an open mailbox. */
 function ec_poll_replies($mbx, mysqli $c): int {
     $ids = imap_search($mbx, 'UNSEEN') ?: []; $n=0;
     foreach ($ids as $num) {
         $raw = imap_fetchheader($mbx, $num);
+        $uid = ec_msg_uid($raw);
         $mids = [];
         if (preg_match('/In-Reply-To:\s*(<[^>]+>)/i', $raw, $m)) $mids[] = $m[1];
         if (preg_match('/References:\s*(.+)/i', $raw, $m) && preg_match_all('/<[^>]+>/', $m[1], $mm)) $mids = array_merge($mids, $mm[0]);
@@ -72,15 +96,15 @@ function ec_poll_replies($mbx, mysqli $c): int {
         foreach (array_unique($mids) as $mid) {
             $mide=$c->real_escape_string(trim($mid));
             $row=$c->query("SELECT r.id, ct.email, r.campaign_id, r.replied_at FROM ten_ec_recipients r JOIN ten_ec_contacts ct ON ct.id=r.contact_id WHERE r.message_id='$mide' LIMIT 1")->fetch_assoc();
-            if($row){ $rid=(int)$row['id']; $matched=true;
-                [$subj,$body]=ec_imap_message($mbx,$num);
-                ec_store_response($c,$rid,(int)$row['campaign_id'],$row['email'],'reply',$subj,$body,null,$uid);
-                if(empty($row['replied_at'])){ $c->query("UPDATE ten_ec_recipients SET replied_at=NOW() WHERE id=$rid"); $c->query("INSERT INTO ten_ec_events (recipient_id,type) VALUES ($rid,'reply')"); ec_suppress($row['email'],'do_not_contact',(int)$row['campaign_id']); }
-                $n++; break;
-            }
+            if($row){ $matched=true; [$subj,$body]=ec_imap_message($mbx,$num); ec_apply_reply($c,$row,$subj,$body,$uid); $n++; break; }
         }
-        // Store replies we can't attribute to a campaign too, so every reply is visible.
-        if(!$matched){ [$subj,$body]=ec_imap_message($mbx,$num); ec_store_response($c,null,null,ec_imap_from($mbx,$num),'reply',$subj,$body,null,$uid); }
+        // Header match failed → try to attribute by the sender's email; else store unattributed.
+        if(!$matched){
+            $from=ec_imap_from($mbx,$num); [$subj,$body]=ec_imap_message($mbx,$num);
+            $fb=ec_reply_fallback_row($c,$from);
+            if($fb){ ec_apply_reply($c,$fb,$subj,$body,$uid); $n++; }
+            else ec_store_response($c,null,null,$from,'reply',$subj,$body,null,$uid);
+        }
         imap_setflag_full($mbx, (string)$num, "\\Seen");
     }
     return $n;
@@ -144,13 +168,14 @@ function ec_poll_all($mbx, mysqli $c): int {
             $matched=false;
             foreach(array_unique($mids) as $mid){ $mide=$c->real_escape_string(trim($mid));
                 $row=$c->query("SELECT r.id,ct.email,r.campaign_id,r.replied_at FROM ten_ec_recipients r JOIN ten_ec_contacts ct ON ct.id=r.contact_id WHERE r.message_id='$mide' LIMIT 1")->fetch_assoc();
-                if($row){ $rid=(int)$row['id']; $matched=true; [$subj,$body]=ec_imap_message($mbx,$num);
-                    ec_store_response($c,$rid,(int)$row['campaign_id'],$row['email'],'reply',$subj,$body,null,$uid);
-                    if(empty($row['replied_at'])){ $c->query("UPDATE ten_ec_recipients SET replied_at=NOW() WHERE id=$rid"); $c->query("INSERT INTO ten_ec_events (recipient_id,type) VALUES ($rid,'reply')"); ec_suppress($row['email'],'do_not_contact',(int)$row['campaign_id']); }
-                    $n++; break;
-                }
+                if($row){ $matched=true; [$subj,$body]=ec_imap_message($mbx,$num); ec_apply_reply($c,$row,$subj,$body,$uid); $n++; break; }
             }
-            if(!$matched){ [$subj,$body]=ec_imap_message($mbx,$num); ec_store_response($c,null,null,ec_imap_from($mbx,$num),'reply',$subj,$body,null,$uid); }
+            if(!$matched){
+                $from=ec_imap_from($mbx,$num); [$subj,$body]=ec_imap_message($mbx,$num);
+                $fb=ec_reply_fallback_row($c,$from);
+                if($fb){ ec_apply_reply($c,$fb,$subj,$body,$uid); $n++; }
+                else ec_store_response($c,null,null,$from,'reply',$subj,$body,null,$uid);
+            }
         }
         imap_setflag_full($mbx,(string)$num,"\\Seen");
     }
