@@ -57,6 +57,9 @@ while ($camp = $camps->fetch_assoc()) {
     $sent=0;$failed=0;$skipped=0;
     while ($r = $recips->fetch_assoc()) {
         $rid=(int)$r['id']; $email=$r['email'];
+        // never email a contact with no address (emailless contacts are kept for
+        // manual follow-up; materialise already excludes them — this is a guard).
+        if ($email === null || trim($email) === '') { $c->query("UPDATE ten_ec_recipients SET status='skipped', error='no email' WHERE id=$rid"); $skipped++; continue; }
         // per-domain throttle within this run
         if ($perDomain > 0) {
             $dom = strtolower(substr(strrchr($email,'@'),1));
@@ -127,6 +130,17 @@ while ($camp = $camps->fetch_assoc()) {
         if ($res['ok']) {
             $mid=$c->real_escape_string($res['message_id']);
             $c->query("UPDATE ten_ec_recipients SET status='sent', sent_at=NOW(), message_id='$mid', error=NULL WHERE id=$rid");
+            // Permanent history snapshot — survives campaign deletion & template edits.
+            ec_record_sent($c, [
+                'contact_id'    => (int)$r['contact_id'],
+                'email'         => $email,
+                'campaign_id'   => $cid,
+                'campaign_name' => $camp['name'] ?? '',
+                'subject'       => $subject,
+                'body'          => ($plainOnly ? $text : ($html !== '' ? $html : $text)),
+                'is_plain'      => $plainOnly ? 1 : 0,
+                'from_email'    => $fromEmail,
+            ]);
             $c->query("INSERT INTO ten_ec_events (recipient_id,type) VALUES ($rid,'sent')");
             if ($perDomain>0){ $dom=strtolower(substr(strrchr($email,'@'),1)); $domainCount[$dom]++; }
             $sent++;

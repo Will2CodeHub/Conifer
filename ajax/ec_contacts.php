@@ -135,7 +135,9 @@ try {
                 if ($v !== '') $conds[] = "ct.$col LIKE '%".$c->real_escape_string($v)."%'";
             }
             if ($excludeSuppressed) $conds[]="NOT EXISTS (SELECT 1 FROM ten_ec_suppression s WHERE s.email=ct.email)";
-            if ($excludeContacted) $conds[]="NOT EXISTS (SELECT 1 FROM ten_ec_recipients r WHERE r.contact_id=ct.id AND r.status IN('sent','bounced'))";
+            if ($excludeContacted) $conds[]=ec_contacted_not_exists(); // live queue + permanent send log
+            if (!empty($_POST['no_email'])) $conds[]="(ct.email IS NULL OR ct.email='')"; // "Missing email" view
+            if (!empty($_POST['has_email'])) $conds[]="(ct.email IS NOT NULL AND ct.email<>'')"; // sendable-only (audience preview)
             $where = $conds ? ('WHERE '.implode(' AND ',$conds)) : '';
             // Sorting (whitelisted column + direction).
             $sortCol = in_array($_POST['sort'] ?? '', $filterable, true) ? $_POST['sort'] : '';
@@ -145,7 +147,7 @@ try {
             $rows = [];
             $res = $c->query("SELECT ct.id,ct.email,ct.first_name,ct.last_name,ct.company,ct.job_title,ct.contact_type,
                 ct.industry,ct.category,ct.website,ct.address,ct.city,ct.postcode,ct.region,ct.country,ct.phone,ct.source,ct.status,
-                (SELECT COUNT(*) FROM ten_ec_recipients r WHERE r.contact_id=ct.id AND r.status='sent') AS times_sent,
+                (SELECT COUNT(*) FROM ten_ec_sent_log sl WHERE sl.contact_id=ct.id) AS times_sent,
                 EXISTS(SELECT 1 FROM ten_ec_suppression s WHERE s.email=ct.email) AS suppressed
                 FROM ten_ec_contacts ct $where ORDER BY $orderBy LIMIT $limit OFFSET $offset");
             while ($x = $res->fetch_assoc()) $rows[] = $x;
@@ -157,7 +159,7 @@ try {
             $text = $_POST['data'] ?? '';
             $source = preg_replace('/[^a-z_]/','', strtolower($_POST['source'] ?? 'csv')) ?: 'csv';
             $consent = trim($_POST['consent_basis'] ?? '');
-            $type = trim($_POST['contact_type'] ?? '');
+            $category = trim($_POST['category'] ?? ''); // default Category applied to rows without one
             $aid = (int)($_POST['audience_id'] ?? 0); // optionally add imported contacts to an audience
             $rows = ec_parse_csv($text);
             if (!$rows) throw new Exception('No rows with an email column found');
@@ -168,7 +170,7 @@ try {
                 if (!filter_var($email, FILTER_VALIDATE_EMAIL)) { $invalid++; continue; }
                 if (ec_is_suppressed($email)) { $skipped++; continue; }
                 $r['email']        = $email;
-                $r['contact_type'] = trim($r['contact_type'] ?? '') ?: $type;
+                $r['category']     = trim($r['category'] ?? '') ?: $category;
                 $r['source']       = $source;
                 $r['consent_basis']= $consent;
                 $res = ec_upsert_contact($c, $r);
@@ -176,7 +178,88 @@ try {
                 if ($link && $res['id']>0) { $link->bind_param('ii',$aid,$res['id']); $link->execute(); $added += $c->affected_rows; }
             }
             if ($link) $link->close();
+            if ($category !== '') ec_vocab_absorb($c, 'category', $category);
             $resp = ['success'=>true,'new'=>$new,'updated'=>$updated,'skipped_suppressed'=>$skipped,'invalid'=>$invalid,'total_rows'=>count($rows),'added_to_audience'=>$added];
+            break;
+        }
+
+        /* ---- Import a JSON scrape (e.g. insurance_brokers.json) ----
+         * Accepts an uploaded .json file (multipart 'file') or pasted JSON text
+         * ('data'): an array of objects with keys like name/email/phone/website/
+         * full_address/verified_country/place_id. Rows WITH a valid email upsert by
+         * email; rows WITHOUT one are stored emailless (dedup by company+phone) so
+         * they can be found and completed later. Suppressed emails are skipped. */
+        case 'import_json': {
+            @set_time_limit(0);
+            @ini_set('memory_limit', '512M');
+            $json = '';
+            if (!empty($_FILES['file']['name'])) {
+                if (($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+                    $errs = [
+                        UPLOAD_ERR_INI_SIZE => 'File is larger than the server upload limit (upload_max_filesize). Raise it in php.ini or paste the JSON instead.',
+                        UPLOAD_ERR_FORM_SIZE => 'File is too large.',
+                        UPLOAD_ERR_PARTIAL => 'The upload was interrupted — please retry.',
+                        UPLOAD_ERR_NO_TMP_DIR => 'Server has no temp folder for uploads.',
+                        UPLOAD_ERR_CANT_WRITE => 'Server could not write the uploaded file.',
+                    ];
+                    throw new Exception($errs[$_FILES['file']['error']] ?? ('Upload failed (code '.$_FILES['file']['error'].').'));
+                }
+                $json = (string)file_get_contents($_FILES['file']['tmp_name']);
+            } else {
+                $json = (string)($_POST['data'] ?? '');
+            }
+            $json = trim($json);
+            if ($json === '') throw new Exception('No JSON provided — upload a .json file or paste the JSON.');
+            $rows = json_decode($json, true);
+            if (json_last_error() !== JSON_ERROR_NONE) throw new Exception('Invalid JSON: '.json_last_error_msg());
+            if (!is_array($rows)) throw new Exception('Expected a JSON array of contact objects.');
+
+            $category = trim($_POST['category'] ?? '') ?: 'Insurance Brokers';
+            $source   = preg_replace('/[^a-z0-9_]/', '', strtolower($_POST['source'] ?? 'insurance_brokers_json')) ?: 'insurance_brokers_json';
+            $consent  = trim($_POST['consent_basis'] ?? '') ?: 'Public/online business directory (Google Maps)';
+            $aid      = (int)($_POST['audience_id'] ?? 0);
+
+            $new=0;$updated=0;$withEmail=0;$withoutEmail=0;$skippedSupp=0;$skippedEmpty=0;$added=0;
+            $countriesSeen=[];
+            $link = $aid>0 ? $c->prepare("INSERT IGNORE INTO ten_ec_audience_members (audience_id,contact_id) VALUES (?,?)") : null;
+            foreach ($rows as $row) {
+                if (!is_array($row)) continue;
+                $email = ec_clean_email((string)($row['email'] ?? ''));
+                if ($email !== '' && ec_is_suppressed($email)) { $skippedSupp++; continue; }
+                $country = trim((string)($row['verified_country'] ?? '')) ?: trim((string)($row['country'] ?? ''));
+                if ($country !== '') $countriesSeen[$country] = true;
+                $addr = ec_parse_broker_address((string)($row['full_address'] ?? ''), $country);
+                $company = trim((string)($row['name'] ?? ''));
+                // An emailless row with no company name is not worth storing.
+                if ($email === '' && $company === '') { $skippedEmpty++; continue; }
+                $d = [
+                    'email'         => $email,
+                    'company'       => $company,
+                    'phone'         => ec_clean_phone((string)($row['phone'] ?? '')),
+                    'website'       => trim((string)($row['website'] ?? '')),
+                    'address'       => $addr['address'],
+                    'city'          => $addr['city'],
+                    'postcode'      => $addr['postcode'],
+                    'region'        => '',
+                    'country'       => $country,
+                    'category'      => $category,
+                    'source'        => $source,
+                    'consent_basis' => $consent,
+                    'source_ref'    => trim((string)($row['place_id'] ?? '')),
+                ];
+                $res = ec_upsert_contact_json($c, $d);
+                if ($res['inserted']) $new++; else $updated++;
+                if ($res['has_email']) $withEmail++; else $withoutEmail++;
+                // Only email-bearing contacts join an audience (emailless are never sendable).
+                if ($link && $res['has_email'] && $res['id']>0) { $link->bind_param('ii',$aid,$res['id']); $link->execute(); $added += $c->affected_rows; }
+            }
+            if ($link) $link->close();
+            // Absorb the imported category + countries into the managed pick-lists.
+            ec_vocab_absorb($c, 'category', $category);
+            foreach (array_keys($countriesSeen) as $cy) ec_vocab_absorb($c, 'country', $cy);
+            $resp = ['success'=>true,'total_rows'=>count($rows),'new'=>$new,'updated'=>$updated,
+                     'with_email'=>$withEmail,'without_email'=>$withoutEmail,
+                     'skipped_suppressed'=>$skippedSupp,'skipped_empty'=>$skippedEmpty,'added_to_audience'=>$added];
             break;
         }
 
@@ -190,6 +273,7 @@ try {
             $res = ec_upsert_contact($c, $d);
             $aid = (int)($_POST['audience_id'] ?? 0);
             if ($aid>0 && $res['id']>0) $c->query("INSERT IGNORE INTO ten_ec_audience_members (audience_id,contact_id) VALUES ($aid,".$res['id'].")");
+            foreach (['type'=>'contact_type','industry'=>'industry','country'=>'country','category'=>'category'] as $k=>$pk) ec_vocab_absorb($c,$k,$_POST[$pk]??'');
             $resp=['success'=>true,'id'=>$res['id']];
             break;
         }
@@ -236,13 +320,33 @@ try {
         }
 
         case 'history': {
+            // Full send history for one contact, from the permanent log (survives
+            // campaign deletion). Also brings in live opens/clicks/replies per send
+            // where the campaign still exists, so nothing is lost but detail is shown.
             $id=(int)($_POST['id']??0);
+            $limit=min(200,max(10,(int)($_POST['limit']??50))); $offset=max(0,(int)($_POST['offset']??0));
+            $total=(int)$c->query("SELECT COUNT(*) n FROM ten_ec_sent_log WHERE contact_id=$id")->fetch_assoc()['n'];
             $rows=[];
-            $res=$c->query("SELECT e.type,e.url,e.created_at,r.campaign_id FROM ten_ec_events e
-                            JOIN ten_ec_recipients r ON r.id=e.recipient_id
-                            WHERE r.contact_id=$id ORDER BY e.id DESC LIMIT 100");
+            $res=$c->query("SELECT sl.id, sl.campaign_id, sl.campaign_name, sl.subject, sl.from_email,
+                                   sl.is_plain, sl.sent_at, sl.unsubscribed_at,
+                                   (sl.campaign_id IS NOT NULL AND EXISTS(SELECT 1 FROM ten_ec_campaigns k WHERE k.id=sl.campaign_id)) AS campaign_live
+                            FROM ten_ec_sent_log sl WHERE sl.contact_id=$id ORDER BY sl.sent_at DESC, sl.id DESC LIMIT $limit OFFSET $offset");
             while($res && $x=$res->fetch_assoc()) $rows[]=$x;
-            $resp=['success'=>true,'rows'=>$rows];
+            // Is this contact currently suppressed, and why?
+            $supp=null; $em=$c->query("SELECT email FROM ten_ec_contacts WHERE id=$id")->fetch_assoc();
+            if ($em && !empty($em['email'])) {
+                $sr=$c->query("SELECT reason,created_at FROM ten_ec_suppression WHERE email='".$c->real_escape_string($em['email'])."'");
+                $supp=$sr?$sr->fetch_assoc():null;
+            }
+            $resp=['success'=>true,'rows'=>$rows,'total'=>$total,'suppression'=>$supp];
+            break;
+        }
+        case 'sent_view': {
+            // One stored email (subject + rendered body) exactly as it was sent.
+            $id=(int)($_POST['id']??0);
+            $row=$c->query("SELECT id,contact_id,email,campaign_id,campaign_name,subject,body,is_plain,from_email,sent_at,unsubscribed_at
+                            FROM ten_ec_sent_log WHERE id=$id")->fetch_assoc();
+            $resp=['success'=>(bool)$row,'sent'=>$row,'message'=>$row?'':'Not found'];
             break;
         }
 

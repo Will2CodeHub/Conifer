@@ -16,10 +16,8 @@ $resp = ['success'=>false,'message'=>''];
 function ec_filter_fields(array $p): array {
     return [
         'q' => trim($p['q'] ?? ''),
-        'type' => trim($p['type'] ?? ''),
-        'country' => trim($p['country'] ?? ''),
-        'industry' => trim($p['industry'] ?? ''),
         'category' => trim($p['category'] ?? ''),
+        'country' => trim($p['country'] ?? ''),
         'exclude_contacted' => !empty($p['exclude_contacted']) ? 1 : 0,
     ];
 }
@@ -32,7 +30,8 @@ try {
                 (SELECT COUNT(*) FROM ten_ec_audience_members m WHERE m.audience_id=a.id) AS members,
                 (SELECT COUNT(*) FROM ten_ec_audience_members m JOIN ten_ec_contacts ct ON ct.id=m.contact_id
                    LEFT JOIN ten_ec_suppression s ON s.email=ct.email
-                   WHERE m.audience_id=a.id AND s.id IS NULL) AS sendable
+                   WHERE m.audience_id=a.id AND s.id IS NULL
+                     AND ct.email IS NOT NULL AND ct.email<>'') AS sendable
                 FROM ten_ec_audiences a ORDER BY a.id DESC");
             while($res && $x=$res->fetch_assoc()) $rows[]=$x;
             $resp=['success'=>true,'rows'=>$rows];
@@ -49,6 +48,41 @@ try {
             $st=$c->prepare("INSERT INTO ten_ec_audiences (name,description,filter_json,created_by) VALUES (?,?,?,?)");
             $st->bind_param('sssi',$name,$desc,$filterJson,$uid); $st->execute(); $id=(int)$c->insert_id; $st->close();
             $resp=['success'=>true,'id'=>$id];
+            break;
+        }
+        case 'get': {
+            // One audience's details + saved filter + live counts (for the editor).
+            $id=(int)($_POST['id']??0); if($id<=0) throw new Exception('id required');
+            $a=$c->query("SELECT id,name,description,filter_json,created_at FROM ten_ec_audiences WHERE id=$id")->fetch_assoc();
+            if(!$a) throw new Exception('Audience not found');
+            $a['filter']=$a['filter_json']?(json_decode($a['filter_json'],true)?:[]):[];
+            $a['members']=(int)$c->query("SELECT COUNT(*) n FROM ten_ec_audience_members WHERE audience_id=$id")->fetch_assoc()['n'];
+            $a['sendable']=(int)$c->query("SELECT COUNT(*) n FROM ten_ec_audience_members m JOIN ten_ec_contacts ct ON ct.id=m.contact_id
+                LEFT JOIN ten_ec_suppression s ON s.email=ct.email
+                WHERE m.audience_id=$id AND s.id IS NULL AND ct.email IS NOT NULL AND ct.email<>''")->fetch_assoc()['n'];
+            $resp=['success'=>true,'audience'=>$a];
+            break;
+        }
+        case 'update': {
+            // Save the editor's Details + Targeting criteria. save_filter=1 stores the
+            // criteria so Refresh can pull in newly-matching contacts later; save_filter=0
+            // (with clear_filter) drops any saved filter.
+            $id=(int)($_POST['id']??0); if($id<=0) throw new Exception('id required');
+            $name=trim($_POST['name']??''); if($name==='') throw new Exception('Name required');
+            $desc=trim($_POST['description']??'');
+            if (!empty($_POST['save_filter'])) {
+                $filterJson=json_encode(ec_filter_fields($_POST));
+                $st=$c->prepare("UPDATE ten_ec_audiences SET name=?,description=?,filter_json=? WHERE id=?");
+                $st->bind_param('sssi',$name,$desc,$filterJson,$id);
+            } elseif (!empty($_POST['clear_filter'])) {
+                $st=$c->prepare("UPDATE ten_ec_audiences SET name=?,description=?,filter_json=NULL WHERE id=?");
+                $st->bind_param('ssi',$name,$desc,$id);
+            } else {
+                $st=$c->prepare("UPDATE ten_ec_audiences SET name=?,description=? WHERE id=?");
+                $st->bind_param('ssi',$name,$desc,$id);
+            }
+            $st->execute(); $st->close();
+            $resp=['success'=>true];
             break;
         }
         case 'refresh': {
@@ -101,12 +135,15 @@ try {
         case 'members': {
             $aid=(int)($_POST['audience_id']??0);
             $limit=min(200,max(10,(int)($_POST['limit']??50))); $offset=max(0,(int)($_POST['offset']??0));
+            $total=(int)$c->query("SELECT COUNT(*) n FROM ten_ec_audience_members WHERE audience_id=$aid")->fetch_assoc()['n'];
             $rows=[];
-            $res=$c->query("SELECT ct.id,ct.email,ct.first_name,ct.last_name,ct.company,ct.status
+            $res=$c->query("SELECT ct.id,ct.email,ct.first_name,ct.last_name,ct.company,ct.status,
+                            (ct.email IS NULL OR ct.email='') AS emailless,
+                            EXISTS(SELECT 1 FROM ten_ec_suppression s WHERE s.email=ct.email) AS suppressed
                             FROM ten_ec_audience_members m JOIN ten_ec_contacts ct ON ct.id=m.contact_id
                             WHERE m.audience_id=$aid ORDER BY ct.id DESC LIMIT $limit OFFSET $offset");
             while($res && $x=$res->fetch_assoc()) $rows[]=$x;
-            $resp=['success'=>true,'rows'=>$rows];
+            $resp=['success'=>true,'rows'=>$rows,'total'=>$total];
             break;
         }
         case 'remove_member': {

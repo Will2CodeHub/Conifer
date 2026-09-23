@@ -28,7 +28,8 @@ function ec_materialise(mysqli $c, int $id): int {
         JOIN ten_ec_contacts ct ON ct.id=m.contact_id
         LEFT JOIN ten_ec_suppression s ON s.email=ct.email
         LEFT JOIN ten_ec_recipients r ON r.campaign_id=$id AND r.contact_id=ct.id
-        WHERE m.audience_id=$aid AND s.id IS NULL AND r.id IS NULL");
+        WHERE m.audience_id=$aid AND s.id IS NULL AND r.id IS NULL
+          AND ct.email IS NOT NULL AND ct.email<>''");
     $ins=$c->prepare("INSERT IGNORE INTO ten_ec_recipients (campaign_id,contact_id,variant_id,token,status,send_after) VALUES (?,?,?,?, 'queued', ?)");
     $n=0;
     while($x=$res->fetch_assoc()){
@@ -133,7 +134,8 @@ try {
                 JOIN ten_ec_contacts ct ON ct.id=m.contact_id
                 LEFT JOIN ten_ec_suppression s ON s.email=ct.email
                 LEFT JOIN ten_ec_recipients r ON r.campaign_id=$id AND r.contact_id=ct.id
-                WHERE m.audience_id=$aid AND s.id IS NULL AND r.id IS NULL")->fetch_assoc()['n'];
+                WHERE m.audience_id=$aid AND s.id IS NULL AND r.id IS NULL
+                  AND ct.email IS NOT NULL AND ct.email<>''")->fetch_assoc()['n'];
             $already=(int)$c->query("SELECT COUNT(*) n FROM ten_ec_recipients WHERE campaign_id=$id")->fetch_assoc()['n'];
             $resp=['success'=>true,'will_send'=>$n,'already_materialised'=>$already];
             break;
@@ -193,7 +195,11 @@ try {
             $row=$c->query("SELECT status FROM ten_ec_campaigns WHERE id=$id")->fetch_assoc();
             if(!$row) throw new Exception('Campaign not found');
             if($row['status']==='sending') throw new Exception('Pause or cancel the campaign before deleting it.');
-            // Cascade: tracking events -> recipients -> A/B variants -> campaign.
+            // Preserve the permanent send history: keep every ten_ec_sent_log row
+            // (what was sent to whom) and just detach it from the now-deleted campaign
+            // — the campaign_name snapshot stays, so history & never-email-twice survive.
+            $c->query("UPDATE ten_ec_sent_log SET campaign_id=NULL WHERE campaign_id=$id");
+            // Cascade the live working data: tracking events -> recipients -> A/B variants -> campaign.
             $c->query("DELETE FROM ten_ec_events WHERE recipient_id IN (SELECT id FROM (SELECT id FROM ten_ec_recipients WHERE campaign_id=$id) t)");
             $c->query("DELETE FROM ten_ec_recipients WHERE campaign_id=$id");
             $c->query("DELETE FROM ten_ec_campaign_variants WHERE campaign_id=$id");
@@ -272,6 +278,43 @@ try {
             $n=(int)$c->affected_rows;
             if($n>0) $c->query("UPDATE ten_ec_campaigns SET status='sending', started_at=COALESCE(started_at,NOW()), completed_at=NULL WHERE id=$id");
             $resp=['success'=>true,'requeued'=>$n];
+            break;
+        }
+        /* ---- Permanent send history (per campaign) ----
+         * Reads ten_ec_sent_log, which is kept even after a campaign is deleted.
+         * 'sent_history' lists every campaign that has ever sent (live or deleted);
+         * 'sent_list' returns the per-recipient sends for one of them. Deleted
+         * campaigns have campaign_id=NULL, so they are grouped/looked up by name. */
+        case 'sent_history': {
+            $rows=[];
+            $res=$c->query("SELECT sl.campaign_id, sl.campaign_name,
+                                   COUNT(*) AS sent,
+                                   COUNT(DISTINCT sl.contact_id) AS contacts,
+                                   COUNT(sl.unsubscribed_at) AS unsubscribed,
+                                   MIN(sl.sent_at) AS first_sent, MAX(sl.sent_at) AS last_sent,
+                                   (sl.campaign_id IS NOT NULL AND EXISTS(SELECT 1 FROM ten_ec_campaigns k WHERE k.id=sl.campaign_id)) AS live
+                            FROM ten_ec_sent_log sl
+                            GROUP BY sl.campaign_id, sl.campaign_name
+                            ORDER BY last_sent DESC");
+            while($res && $x=$res->fetch_assoc()) $rows[]=$x;
+            $resp=['success'=>true,'rows'=>$rows];
+            break;
+        }
+        case 'sent_list': {
+            $cid=(int)($_POST['campaign_id']??0);
+            $name=trim($_POST['campaign_name']??'');
+            $limit=min(500,max(10,(int)($_POST['limit']??200))); $offset=max(0,(int)($_POST['offset']??0));
+            if ($cid>0) { $where="sl.campaign_id=$cid"; }
+            elseif ($name!=='') { $where="sl.campaign_id IS NULL AND sl.campaign_name='".$c->real_escape_string($name)."'"; }
+            else throw new Exception('campaign_id or campaign_name required');
+            $total=(int)$c->query("SELECT COUNT(*) n FROM ten_ec_sent_log sl WHERE $where")->fetch_assoc()['n'];
+            $rows=[];
+            $res=$c->query("SELECT sl.id, sl.contact_id, sl.email, sl.subject, sl.is_plain, sl.sent_at, sl.unsubscribed_at,
+                                   ct.first_name, ct.last_name, ct.company
+                            FROM ten_ec_sent_log sl LEFT JOIN ten_ec_contacts ct ON ct.id=sl.contact_id
+                            WHERE $where ORDER BY sl.sent_at DESC, sl.id DESC LIMIT $limit OFFSET $offset");
+            while($res && $x=$res->fetch_assoc()) $rows[]=$x;
+            $resp=['success'=>true,'total'=>$total,'rows'=>$rows];
             break;
         }
         default: throw new Exception('Unknown action: '.$action);

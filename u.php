@@ -13,6 +13,9 @@ if ($token !== '' && $token !== 'SAMPLE' && $token !== 'TEST') {
         ec_suppress($email, 'unsubscribe', $cid);
         $c->query("UPDATE ten_ec_recipients SET unsubscribed_at=NOW() WHERE id=$rid");
         $c->query("INSERT INTO ten_ec_events (recipient_id,type) VALUES ($rid,'unsubscribe')");
+        // Stamp the permanent history so it shows they opted out (survives deletion).
+        $st2=$c->prepare("UPDATE ten_ec_sent_log SET unsubscribed_at=NOW() WHERE email=? AND unsubscribed_at IS NULL");
+        $st2->bind_param('s',$email); $st2->execute(); $st2->close();
         $done = true;
     }
 }
