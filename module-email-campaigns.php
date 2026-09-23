@@ -904,9 +904,48 @@ function ecEditorBlock(opts){ opts=opts||{}; var incM=!!opts.includeMerge, incS=
             '<div class="ecedit">'+ecInsertStrip('text',incM,incS)+'<textarea class="ecedit-plain" id="ecText"></textarea></div>'+
         '</div>'; }
 // Wire the editor after ecModal has injected the markup. data has {id,is_plain,html_body,text_body,_defaultHtml}.
+/* ---- Paste / output sanitiser for the email editor ----
+ * Keeps only a small whitelist of tags, drops ALL attributes (except href on links),
+ * and unwraps div/span/font/etc. So pasted or hand-entered HTML can only ever produce
+ * plain text with basic structure — no inline styles, classes, ids, divs or spans. */
+var EC_ALLOWED={P:'p',H1:'h2',H2:'h2',H3:'h3',H4:'h3',H5:'h3',H6:'h3',STRONG:'strong',B:'strong',EM:'em',I:'em',U:'u',A:'a',UL:'ul',OL:'ol',LI:'li',BR:'br'};
+var EC_BLOCK_TO_P={DIV:1,SECTION:1,ARTICLE:1,BLOCKQUOTE:1,PRE:1};
+var EC_DROP={SCRIPT:1,STYLE:1,HEAD:1,META:1,LINK:1,TITLE:1,IMG:1,SVG:1,IFRAME:1,OBJECT:1,VIDEO:1,AUDIO:1,TABLE:1,THEAD:1,TBODY:1,TR:1,TD:1,TH:1};
+function ecSanitizeHtml(html){
+    var tmp=document.createElement('div'); tmp.innerHTML=String(html==null?'':html);
+    function walk(src,dst){
+        Array.prototype.slice.call(src.childNodes).forEach(function(n){
+            if(n.nodeType===3){ dst.appendChild(document.createTextNode(n.nodeValue)); return; }
+            if(n.nodeType!==1) return; // comments and other nodes are dropped
+            var tag=n.nodeName;
+            if(EC_DROP[tag]) return; // dropped entirely, including contents
+            if(EC_ALLOWED[tag]){
+                if(EC_ALLOWED[tag]==='a'){ var href=(n.getAttribute('href')||'').trim();
+                    if(!/^(https?:|mailto:|\{\{)/i.test(href)){ walk(n,dst); return; } // bad/no href → unwrap
+                    var a=document.createElement('a'); a.setAttribute('href',href); walk(n,a); dst.appendChild(a); return; }
+                var el=document.createElement(EC_ALLOWED[tag]); walk(n,el); dst.appendChild(el);
+            } else if(EC_BLOCK_TO_P[tag]){
+                var p=document.createElement('p'); walk(n,p);
+                if((p.textContent||'').trim()!=='' || p.querySelector('a,strong,em,u,br')) dst.appendChild(p); else walk(n,dst);
+            } else { walk(n,dst); } // unknown (span, font, …) → unwrap, keep children
+        });
+    }
+    var out=document.createElement('div'); walk(tmp,out);
+    // Re-parse so the browser flattens any invalid nesting (e.g. <p> inside <p>).
+    var norm=document.createElement('div'); norm.innerHTML=out.innerHTML; return norm.innerHTML;
+}
+function ecTextToHtml(text){ text=String(text==null?'':text);
+    var esc=function(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+    return text.replace(/\r\n/g,'\n').split(/\n{2,}/).map(function(p){ return '<p>'+esc(p).replace(/\n/g,'<br>')+'</p>'; }).join('');
+}
+function ecOnPaste(e){ e.preventDefault(); var cd=e.clipboardData||window.clipboardData; if(!cd) return;
+    var html=cd.getData?cd.getData('text/html'):''; var text=cd.getData?cd.getData('text/plain'):'';
+    var clean=(html&&html.trim())?ecSanitizeHtml(html):ecTextToHtml(text);
+    try{ document.execCommand('insertHTML',false,clean); }catch(_){ }
+}
 function ecEditorInit(data){ data=data||{};
     tSrcMode=false;
-    var body=document.getElementById('ecBody'); if(body){ body.innerHTML=(data.html_body&&data.html_body.trim())?data.html_body:(data.id?'':(data._defaultHtml||'')); body.style.display=''; }
+    var body=document.getElementById('ecBody'); if(body){ body.innerHTML=(data.html_body&&data.html_body.trim())?data.html_body:(data.id?'':(data._defaultHtml||'')); body.style.display=''; if(!body._ecPasteBound){ body._ecPasteBound=true; body.addEventListener('paste', ecOnPaste); } }
     var src=document.getElementById('ecSrc'); if(src){ src.style.display='none'; src.value=''; }
     var txt=document.getElementById('ecText'); if(txt) txt.value=data.text_body||'';
     var sb=document.getElementById('ecSrcBtn'); if(sb) sb.classList.remove('on');
@@ -914,6 +953,7 @@ function ecEditorInit(data){ data=data||{};
     document.querySelectorAll('.ecedit-tb button[data-cmd]').forEach(function(b){ b.addEventListener('mousedown',function(e){ e.preventDefault(); }); b.addEventListener('click',function(){ ecCmd(b.getAttribute('data-cmd'), b.getAttribute('data-val')); }); });
     var lk=document.getElementById('ecLinkBtn'); if(lk) lk.addEventListener('click',elOpen);
     if(sb) sb.addEventListener('click',ecSrcToggle);
+    try{ document.execCommand('styleWithCSS',false,false); }catch(_){ } // bold/italic → <b>/<i>, not styled spans
     ecFmtToggle();
     // Load signatures for the "insert signature" dropdown(s), if present.
     if(document.querySelector('.ecSigSel')){ ecFillSigSelects(); post(EC.signatures,{action:'list'}).done(function(rr){ EC.signaturesCache=rr.rows||[]; ecFillSigSelects(); }); }
@@ -929,11 +969,12 @@ function ecFmtToggle(){ var plain=(document.querySelector('input[name="ecFmt"]:c
 }
 function ecCmd(cmd,val){ var b=document.getElementById('ecBody'); if(!b) return; b.focus(); try{ document.execCommand(cmd,false,val||null); }catch(e){} }
 function ecSrcToggle(){ var b=document.getElementById('ecBody'), s=document.getElementById('ecSrc'), btn=document.getElementById('ecSrcBtn'); if(!b||!s) return;
-    if(tSrcMode){ b.innerHTML=s.value; s.style.display='none'; b.style.display=''; if(btn) btn.classList.remove('on'); }
-    else { s.value=b.innerHTML; b.style.display='none'; s.style.display='block'; if(btn) btn.classList.add('on'); }
+    if(tSrcMode){ b.innerHTML=ecSanitizeHtml(s.value); s.style.display='none'; b.style.display=''; if(btn) btn.classList.remove('on'); }
+    else { s.value=ecSanitizeHtml(b.innerHTML); b.style.display='none'; s.style.display='block'; if(btn) btn.classList.add('on'); }
     tSrcMode=!tSrcMode;
 }
-function ecHtmlValue(){ if(tSrcMode){ var s=document.getElementById('ecSrc'); return s?s.value:''; } var b=document.getElementById('ecBody'); return b?b.innerHTML:''; }
+// Always sanitise on read, so what is saved/sent contains only whitelisted tags (no attributes bar href).
+function ecHtmlValue(){ var raw; if(tSrcMode){ var s=document.getElementById('ecSrc'); raw=s?s.value:''; } else { var b=document.getElementById('ecBody'); raw=b?b.innerHTML:''; } return ecSanitizeHtml(raw); }
 function ecTextValue(){ var t=document.getElementById('ecText'); return t?t.value:''; }
 function ecIsPlain(){ return ((document.querySelector('input[name="ecFmt"]:checked')||{}).value==='plain')?1:0; }
 /* ---- insert merge field / signature ---- */
