@@ -1501,6 +1501,49 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                 document.execCommand('insertOrderedList', false, null);
             });
 
+            // ---- Paste sanitiser: strip pasted formatting down to basic tags ----
+            // Content pasted from Word / Google Docs / the web / AI tools arrives full of
+            // <span>, inline styles, classes and <div>s. Keep only plain structure so the
+            // article body stays clean. Only href on links is kept; everything else loses
+            // its attributes. Images/links added via the toolbar are unaffected (they are
+            // inserted directly, not pasted). Bound once via delegation so it also covers
+            // the cloned editors used by the edit modals.
+            (function(){
+                if (window._tenArticlePasteBound) return; window._tenArticlePasteBound = true;
+                var ALLOWED={P:'p',H1:'h2',H2:'h2',H3:'h3',H4:'h3',H5:'h3',H6:'h3',STRONG:'strong',B:'strong',EM:'em',I:'em',U:'u',A:'a',UL:'ul',OL:'ol',LI:'li',BR:'br'};
+                var BLOCK_TO_P={DIV:1,SECTION:1,ARTICLE:1,BLOCKQUOTE:1,PRE:1};
+                var DROP={SCRIPT:1,STYLE:1,HEAD:1,META:1,LINK:1,TITLE:1,SVG:1,IFRAME:1,OBJECT:1,VIDEO:1,AUDIO:1,TABLE:1,THEAD:1,TBODY:1,TR:1,TD:1,TH:1,FIGURE:1,FIGCAPTION:1};
+                function sanitize(html){
+                    var tmp=document.createElement('div'); tmp.innerHTML=String(html==null?'':html);
+                    function walk(src,dst){ Array.prototype.slice.call(src.childNodes).forEach(function(n){
+                        if(n.nodeType===3){ dst.appendChild(document.createTextNode(n.nodeValue)); return; }
+                        if(n.nodeType!==1) return; var tag=n.nodeName; if(DROP[tag]) return;
+                        if(tag==='IMG'){ var isrc=(n.getAttribute('src')||'').trim(); if(!/^(https?:|data:image\/)/i.test(isrc)) return;
+                            var im=document.createElement('img'); im.setAttribute('src',isrc); var ialt=(n.getAttribute('alt')||'').trim(); if(ialt) im.setAttribute('alt',ialt); dst.appendChild(im); return; }
+                        if(ALLOWED[tag]){ if(ALLOWED[tag]==='a'){ var href=(n.getAttribute('href')||'').trim();
+                                if(!/^(https?:|mailto:)/i.test(href)){ walk(n,dst); return; }
+                                var a=document.createElement('a'); a.setAttribute('href',href); walk(n,a); dst.appendChild(a); return; }
+                            var el=document.createElement(ALLOWED[tag]); walk(n,el); dst.appendChild(el);
+                        } else if(BLOCK_TO_P[tag]){ var p=document.createElement('p'); walk(n,p);
+                            if((p.textContent||'').trim()!=='' || p.querySelector('a,strong,em,u,br')) dst.appendChild(p); else walk(n,dst);
+                        } else { walk(n,dst); } }); }
+                    var out=document.createElement('div'); walk(tmp,out);
+                    var norm=document.createElement('div'); norm.innerHTML=out.innerHTML; return norm.innerHTML;
+                }
+                function textToHtml(t){ t=String(t==null?'':t); var e=function(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');};
+                    return t.replace(/\r\n/g,'\n').split(/\n{2,}/).map(function(p){return '<p>'+e(p).replace(/\n/g,'<br>')+'</p>';}).join(''); }
+                document.addEventListener('paste', function(ev){
+                    var tgt=ev.target; var ed=(tgt && tgt.closest)?tgt.closest('.editor[contenteditable="true"], #article_text'):null;
+                    if(!ed) return;
+                    ev.preventDefault();
+                    var cd=ev.clipboardData||window.clipboardData; if(!cd) return;
+                    var html=cd.getData?cd.getData('text/html'):''; var text=cd.getData?cd.getData('text/plain'):'';
+                    var clean=(html&&html.trim())?sanitize(html):textToHtml(text);
+                    try{ document.execCommand('insertHTML',false,clean); }catch(_){ }
+                }, true);
+                try{ document.execCommand('styleWithCSS',false,false); }catch(_){ } // bold/italic → <b>/<i>
+            })();
+
             // Add link functionality
             $('#add-link').click(function () {
                 saveSelection();
@@ -2098,6 +2141,23 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                 });
             };
 
+            // Applied at save/publish so the STORED article body is clean regardless of how
+            // content got in: unwrap <span>/<font>, strip inline styles from every element
+            // (including images), and remove stray class/id — while preserving the tool's own
+            // image structures (figure.ten-article-image, img[data-ten-img], p.ten-image-credit)
+            // and all links, images and their src/href/alt/data-* attributes.
+            window.tenStripFormatting = function(html){
+                var d=document.createElement('div'); d.innerHTML=String(html==null?'':html);
+                d.querySelectorAll('span,font').forEach(function(el){ var p=el.parentNode; if(!p) return; while(el.firstChild) p.insertBefore(el.firstChild, el); p.removeChild(el); });
+                Array.prototype.slice.call(d.querySelectorAll('*')).forEach(function(el){
+                    el.removeAttribute('style');
+                    var tag=el.tagName;
+                    var keep = (tag==='FIGURE') || (tag==='IMG') || (tag==='P' && el.classList && el.classList.contains('ten-image-credit'));
+                    if(!keep){ el.removeAttribute('class'); el.removeAttribute('id'); }
+                });
+                return d.innerHTML;
+            };
+
             // Pixabay integration
             const gallery = document.getElementById('modalBody');
             const apiKey = '<?php echo $apiKey; ?>';
@@ -2273,6 +2333,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
 
                 if (window.tenCleanupArticleImages) window.tenCleanupArticleImages(document.getElementById('article_text'));
                 var article_text = $("#article_text").html();
+                if (window.tenStripFormatting) article_text = window.tenStripFormatting(article_text);
                 if (!article_text || !article_text.trim()) { Swal.fire('Error', 'Please add some article content', 'error'); return; }
 
                 var selectedPubs = [];
@@ -3884,6 +3945,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                 }
             });
             articleHtml = tempDiv.innerHTML;
+            if (window.tenStripFormatting) articleHtml = window.tenStripFormatting(articleHtml);
         })();
 
         // chosen publications
