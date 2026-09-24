@@ -372,6 +372,12 @@ if (isset($_GET['change_language'])) {
     background: #fffbeb; color: #854d0e; font-weight: 700; font-size: 13px; cursor: pointer;
 }
 .hdr-new-note:hover { background: #fef3c7; }
+.hdr-pop-foot { padding: 10px 16px; border-top: 1px solid #f1f5f9; text-align: center; }
+.hdr-all-notes {
+    display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600;
+    color: #3c4f6d; text-decoration: none;
+}
+.hdr-all-notes:hover { text-decoration: underline; }
 .hdr-dl-row {
     display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-radius: 8px; cursor: pointer;
 }

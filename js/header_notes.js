@@ -128,7 +128,9 @@
                     '<div class="pn-views" id="hdrPageViews" style="margin:0 0 6px;"></div>' + pageHtml +
                     '<button class="hdr-new-note" id="hdrNewNote"><i class="fas fa-plus"></i> New note on this page</button></div>' +
                 '<div class="hdr-pop-sec"><div class="hdr-pop-label">Deadlines (' + d.deadlines.length + ')</div>' +
-                    (dl || '<div class="hdr-pop-empty">No notes with a deadline.</div>') + '</div>';
+                    (dl || '<div class="hdr-pop-empty">No notes with a deadline.</div>') + '</div>' +
+                '<div class="hdr-pop-foot"><a href="/management/module-notes.php" class="hdr-all-notes">' +
+                    '<i class="fas fa-list"></i> See all notes</a></div>';
 
             ProjectNotes.renderViews(el('hdrPageViews'), d.page_counts, pageView, function (v) { pageView = v; renderNotesPanel(); });
             ProjectNotes.bindCards(pop, renderNotesPanel);

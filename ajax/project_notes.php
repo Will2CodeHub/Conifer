@@ -92,6 +92,22 @@ function notes_project_name($c, $projectId) {
     return $cache[$pid];
 }
 
+/** Users a note is shared with (its assignees), for the overview list. */
+function notes_share_list($c, $noteId) {
+    $out = [];
+    $st = $c->prepare("SELECT s.user_id, s.permission, u.full_name
+                       FROM ten_note_shares s JOIN ten_users u ON u.id = s.user_id
+                       WHERE s.note_id = ? ORDER BY u.full_name");
+    $st->bind_param("i", $noteId);
+    $st->execute();
+    $r = $st->get_result();
+    while ($row = $r->fetch_assoc()) {
+        $out[] = ['user_id' => (int) $row['user_id'], 'name' => $row['full_name'], 'permission' => $row['permission']];
+    }
+    $st->close();
+    return $out;
+}
+
 /** Is this an active management user? (share target for project-less notes) */
 function notes_is_active_user($c, $userId) {
     $userId = (int) $userId;
@@ -238,6 +254,60 @@ try {
             while ($row = $res->fetch_assoc()) { $notes[] = notes_present_note($c, $row, $me); }
             $st->close();
             $resp = ['success' => true, 'notes' => $notes, 'counts' => notes_view_counts($c, "n.project_id = " . (int) $projectId, $me)];
+            break;
+        }
+
+        // ── All notes across projects + pages (the Notes overview page) ───────
+        // Paginated + searchable. Visible = mine / shared-to-me / admin-sees-all.
+        case 'all': {
+            $q = trim((string) ($_POST['q'] ?? $_GET['q'] ?? ''));
+            $view = $_POST['view'] ?? $_GET['view'] ?? 'all';
+            $projectId = (int) ($_POST['project_id'] ?? $_GET['project_id'] ?? 0);
+            $page = max(1, (int) ($_POST['page'] ?? $_GET['page'] ?? 1));
+            $perPage = (int) ($_POST['per_page'] ?? $_GET['per_page'] ?? 25);
+            if ($perPage < 1 || $perPage > 100) { $perPage = 25; }
+            $offset = ($page - 1) * $perPage;
+            $admin = isAdmin() ? 1 : 0;
+            $statusCond = notes_view_sql($view);
+
+            // WHERE built on alias n, evaluated after the shares LEFT JOIN below.
+            $where = "$statusCond AND (n.author_id = ? OR s.id IS NOT NULL OR ? = 1)";
+            $wtypes = "ii"; $wparams = [$me, $admin];
+            if ($q !== '') {
+                $where .= " AND (n.title LIKE ? OR n.body LIKE ? OR n.page_label LIKE ?)";
+                $like = '%' . $q . '%'; $wtypes .= "sss"; array_push($wparams, $like, $like, $like);
+            }
+            if ($projectId > 0) { $where .= " AND n.project_id = ?"; $wtypes .= "i"; $wparams[] = $projectId; }
+
+            $join = "LEFT JOIN ten_note_shares s ON s.note_id = n.id AND s.user_id = ?";
+
+            // Total (the JOIN's user_id is the first bound param, before the WHERE params).
+            $cst = $c->prepare("SELECT COUNT(DISTINCT n.id) c FROM ten_project_notes n $join WHERE $where");
+            $cparams = array_merge([$me], $wparams);
+            $cst->bind_param("i" . $wtypes, ...$cparams);
+            $cst->execute();
+            $total = (int) $cst->get_result()->fetch_assoc()['c'];
+            $cst->close();
+
+            $sql = "SELECT n.* FROM ten_project_notes n $join WHERE $where
+                    GROUP BY n.id
+                    ORDER BY FIELD(n.status,'in_progress','active','on_hold','completed','archived','deleted'),
+                             (n.deadline IS NULL), n.deadline, n.created_at DESC
+                    LIMIT ? OFFSET ?";
+            $st = $c->prepare($sql);
+            $pparams = array_merge([$me], $wparams, [$perPage, $offset]);
+            $st->bind_param("i" . $wtypes . "ii", ...$pparams);
+            $st->execute();
+            $res = $st->get_result();
+            $notes = [];
+            while ($row = $res->fetch_assoc()) {
+                $n = notes_present_note($c, $row, $me);
+                $n['shares'] = notes_share_list($c, (int) $row['id']);
+                $notes[] = $n;
+            }
+            $st->close();
+            $resp = ['success' => true, 'notes' => $notes, 'total' => $total,
+                     'page' => $page, 'per_page' => $perPage, 'pages' => (int) ceil($total / max(1, $perPage))];
             break;
         }
 
