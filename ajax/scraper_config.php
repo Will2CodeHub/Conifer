@@ -172,7 +172,8 @@ try {
                 (string)($_POST['provider'] ?? 'anthropic'),
                 (string)($_POST['model'] ?? 'claude-sonnet-5'),
                 (string)($_POST['translation_provider'] ?? 'anthropic'),
-                (string)($_POST['translation_model'] ?? 'claude-haiku-4-5')
+                (string)($_POST['translation_model'] ?? 'claude-haiku-4-5'),
+                (string)($_POST['curate_prompt'] ?? '')
             );
             echo json_encode(['success' => $ok]);
             break;

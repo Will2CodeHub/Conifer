@@ -167,18 +167,19 @@ function scraper_create_section(array $d): int {
     $journalistId  = isset($d['journalist_id']) && $d['journalist_id'] !== '' ? (int)$d['journalist_id'] : null;
     $aiProvider    = isset($d['ai_provider']) && $d['ai_provider'] !== '' ? (string)$d['ai_provider'] : null;
     $aiModel       = isset($d['ai_model']) && $d['ai_model'] !== '' ? (string)$d['ai_model'] : null;
+    $curatePrompt  = isset($d['curate_prompt']) && $d['curate_prompt'] !== '' ? (string)$d['curate_prompt'] : null;
     $autoPublish   = !empty($d['auto_publish']) ? 1 : 0;
 
     $stmt = $conn->prepare(
         "INSERT INTO ten_scraper_pub_sections
          (project_id, publication_key, ten_section, daily_count, cron_schedule,
-          vpn_profile_id, journalist_id, ai_provider, ai_model, prompt, auto_publish)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+          vpn_profile_id, journalist_id, ai_provider, ai_model, prompt, curate_prompt, auto_publish)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
     );
     $stmt->bind_param(
-        'issisiisssi',
+        'issisiissssi',
         $projectId, $publication, $section, $dailyCount, $cron,
-        $vpnProfileId, $journalistId, $aiProvider, $aiModel, $prompt, $autoPublish
+        $vpnProfileId, $journalistId, $aiProvider, $aiModel, $prompt, $curatePrompt, $autoPublish
     );
     $stmt->execute();
     $id = $stmt->insert_id;
@@ -196,19 +197,20 @@ function scraper_update_section(int $id, array $d): bool {
     $aiProvider    = isset($d['ai_provider']) && $d['ai_provider'] !== '' ? (string)$d['ai_provider'] : null;
     $aiModel       = isset($d['ai_model']) && $d['ai_model'] !== '' ? (string)$d['ai_model'] : null;
     $prompt        = isset($d['prompt']) ? (string)$d['prompt'] : null;
+    $curatePrompt  = array_key_exists('curate_prompt', $d) ? ($d['curate_prompt'] !== '' ? (string)$d['curate_prompt'] : null) : null;
     $autoPublish   = !empty($d['auto_publish']) ? 1 : 0;
     $isActive      = isset($d['is_active']) ? (int)!empty($d['is_active']) : 1;
 
     $stmt = $conn->prepare(
         "UPDATE ten_scraper_pub_sections
          SET daily_count=?, cron_schedule=?, vpn_profile_id=?, journalist_id=?,
-             ai_provider=?, ai_model=?, prompt=?, auto_publish=?, is_active=?
+             ai_provider=?, ai_model=?, prompt=?, curate_prompt=?, auto_publish=?, is_active=?
          WHERE id=?"
     );
     $stmt->bind_param(
-        'isiisssiii',
+        'isiissssiii',
         $dailyCount, $cron, $vpnProfileId, $journalistId,
-        $aiProvider, $aiModel, $prompt, $autoPublish, $isActive, $id
+        $aiProvider, $aiModel, $prompt, $curatePrompt, $autoPublish, $isActive, $id
     );
     $ok = $stmt->execute();
     $stmt->close();
@@ -429,7 +431,7 @@ function scraper_delete_vpn_profile(int $id): bool {
 
 function scraper_get_project(int $id): ?array {
     $conn = getDBConnection();
-    $stmt = $conn->prepare("SELECT id, name, type, default_ai_provider, default_ai_model, default_prompt, translation_provider, translation_model FROM ten_scraper_projects WHERE id = ?");
+    $stmt = $conn->prepare("SELECT id, name, type, default_ai_provider, default_ai_model, default_prompt, default_curate_prompt, translation_provider, translation_model FROM ten_scraper_projects WHERE id = ?");
     $stmt->bind_param('i', $id);
     $stmt->execute();
     $row = $stmt->get_result()->fetch_assoc();
@@ -438,16 +440,16 @@ function scraper_get_project(int $id): ?array {
     return $row ?: null;
 }
 
-function scraper_update_project_settings(int $id, string $prompt, string $provider, string $model, string $translationProvider, string $translationModel): bool {
+function scraper_update_project_settings(int $id, string $prompt, string $provider, string $model, string $translationProvider, string $translationModel, string $curatePrompt = ''): bool {
     $conn = getDBConnection();
     $provider = $provider === 'openai' ? 'openai' : 'anthropic';
     $translationProvider = $translationProvider === 'openai' ? 'openai' : 'anthropic';
     $stmt = $conn->prepare(
         "UPDATE ten_scraper_projects
-         SET default_prompt=?, default_ai_provider=?, default_ai_model=?, translation_provider=?, translation_model=?
+         SET default_prompt=?, default_curate_prompt=?, default_ai_provider=?, default_ai_model=?, translation_provider=?, translation_model=?
          WHERE id=?"
     );
-    $stmt->bind_param('sssssi', $prompt, $provider, $model, $translationProvider, $translationModel, $id);
+    $stmt->bind_param('ssssssi', $prompt, $curatePrompt, $provider, $model, $translationProvider, $translationModel, $id);
     $ok = $stmt->execute();
     $stmt->close();
     $conn->close();

@@ -251,7 +251,8 @@
                 '<div class="sc-field"><label>VPN egress</label><select id="f_vpn"><option value="">— none —</option>' + optionList(refs.vpn_profiles, s.vpn_profile_id || "", "id", "name") + "</select></div>" +
             "</div>" +
             '<div class="sc-field"><label><input type="checkbox" id="f_auto" ' + (parseInt(s.auto_publish, 10) === 1 ? "checked" : "") + '> Auto-publish (promote inserts as published instead of draft)</label></div>' +
-            (isEdit ? '<div class="sc-field"><label>Section prompt</label><textarea id="f_prompt">' + esc(s.prompt || "") + "</textarea></div>"
+            (isEdit ? '<div class="sc-field"><label>Section prompt <span style="font-weight:400;color:#6b7280;">— article writing</span></label><textarea id="f_prompt">' + esc(s.prompt || "") + "</textarea></div>" +
+                      '<div class="sc-field"><label>Curation prompt <span style="font-weight:400;color:#6b7280;">— which stories get picked; blank = project default</span></label><textarea id="f_curate" placeholder="Leave blank to use the project default curation prompt.">' + esc(s.curate_prompt || "") + "</textarea></div>"
                     : '<p class="scraper-placeholder">The section prompt starts as a copy of the project prompt; edit it after creating.</p>') +
             '<div class="sc-modal-actions">' +
                 '<button class="sc-btn secondary" id="f_cancel">Cancel</button>' +
@@ -283,6 +284,7 @@
             if (isEdit) {
                 data.id = s.id;
                 data.prompt = document.getElementById("f_prompt").value;
+                data.curate_prompt = document.getElementById("f_curate").value;
                 call = api("section", "update", data);
             } else {
                 data.project_id = PROJECT_ID;
@@ -465,7 +467,8 @@
                     '<div class="sc-field"><label>Translation provider</label><select id="p_tprovider">' + providerOptions(tprovider) + "</select></div>" +
                     '<div class="sc-field"><label>Translation model</label><select id="p_tmodel">' + modelOptions(tprovider, tmodel) + "</select></div>" +
                 "</div>" +
-                '<div class="sc-field"><label>Article prompt template</label><textarea id="p_prompt">' + esc(p.default_prompt || "") + "</textarea></div>" +
+                '<div class="sc-field"><label>Article prompt template <span style="font-weight:400;color:#6b7280;">— how each article is written</span></label><textarea id="p_prompt">' + esc(p.default_prompt || "") + "</textarea></div>" +
+                '<div class="sc-field"><label>Default curation prompt <span style="font-weight:400;color:#6b7280;">— which stories the AI picks (per-section overrides this)</span></label><textarea id="p_curate" placeholder="Leave blank to use the built-in default curation brief.">' + esc(p.default_curate_prompt || "") + "</textarea></div>" +
                 '<div class="sc-modal-actions"><button class="sc-btn secondary" id="p_cancel">Cancel</button><button class="sc-btn" id="p_save">Save</button></div>'
             );
             document.getElementById("p_cancel").addEventListener("click", closeModal);
@@ -480,7 +483,8 @@
                     model: document.getElementById("p_model").value,
                     translation_provider: tprovSel.value,
                     translation_model: document.getElementById("p_tmodel").value,
-                    prompt: document.getElementById("p_prompt").value
+                    prompt: document.getElementById("p_prompt").value,
+                    curate_prompt: document.getElementById("p_curate").value
                 }).then(function () { closeModal(); }).catch(alertErr);
             });
         }).catch(alertErr);

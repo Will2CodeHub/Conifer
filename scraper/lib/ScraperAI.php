@@ -199,16 +199,25 @@ function scraper_ai_translate(string $provider, string $model, string $targetLan
 
     $out = [];
     // Translate in small batches so each response fits well within the token limit.
+    // Each chunk is isolated: a single chunk that fails to parse (or times out) must
+    // NOT discard the translations already gathered from earlier chunks, and must not
+    // abort the whole pass — otherwise one bad item can permanently wedge a section
+    // (ranking is gated on 100% translation upstream). Failed chunks simply return no
+    // rows for their ids; the caller applies a fallback so those items never block.
     foreach (array_chunk($items, 20) as $chunk) {
         $input = [];
         foreach ($chunk as $it) {
             $input[] = ['id' => (int)$it['id'], 'title' => (string)$it['title'], 'summary' => (string)$it['summary']];
         }
         $user = json_encode(['items' => $input], JSON_UNESCAPED_UNICODE);
-        $text = scraper_ai_raw($provider, $model, $system, $user, 8000, true);
-        $decoded = scraper_ai_decode_json($text);
+        try {
+            $text = scraper_ai_raw($provider, $model, $system, $user, 8000, true);
+            $decoded = scraper_ai_decode_json($text);
+        } catch (Throwable $e) {
+            continue; // network/API error on this chunk — leave its ids untranslated
+        }
         if (!$decoded || !isset($decoded['items']) || !is_array($decoded['items'])) {
-            throw new RuntimeException('Translator returned unexpected output: ' . substr($text, 0, 200));
+            continue; // unparseable response for this chunk — skip it, keep the rest
         }
         foreach ($decoded['items'] as $row) {
             if (isset($row['id'])) {

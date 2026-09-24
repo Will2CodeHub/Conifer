@@ -49,6 +49,38 @@ function scraper_user_can_access_section(int $pubSectionId): bool {
     return true;
 }
 
+/**
+ * Built-in default editorial brief for AI curation ranking. Used when neither the
+ * section nor the project defines one. {region} is substituted at run time. Only the
+ * editorial judgement lives here — the JSON output contract and headline formatting
+ * rules stay fixed in scraper_curate_rank() so an edited brief can never break parsing.
+ */
+const SCRAPER_DEFAULT_CURATE_BRIEF =
+    "You are the news editor of an English-language newspaper covering {region}. "
+    . "Prioritise the stories most significant and relevant to {region} and its readers — "
+    . "politics, economy, society, culture, sport and major events happening in or directly "
+    . "affecting {region}. For a local or national title, strongly prefer local and national "
+    . "stories, and include an international or world story only when it is genuinely major and "
+    . "clearly relevant to {region}; prefer a local story over a generic world story. Drop "
+    . "trivia and clickbait. CRUCIAL: pick DISTINCT stories only — never choose two headlines "
+    . "about the same event, incident or topic; if several cover the same story, keep the single "
+    . "best one and drop the rest.";
+
+/**
+ * Resolve the effective curation (ranking) brief for a section: the section's own
+ * curate_prompt, else the project's default_curate_prompt, else the built-in default.
+ * The {region} placeholder is left intact for the caller to substitute.
+ */
+function scraper_effective_curate_prompt(array $section): string {
+    $p = trim((string)($section['curate_prompt'] ?? ''));
+    if ($p === '') {
+        $project = scraper_get_project((int)$section['project_id']) ?: [];
+        $p = trim((string)($project['default_curate_prompt'] ?? ''));
+    }
+    if ($p === '') $p = SCRAPER_DEFAULT_CURATE_BRIEF;
+    return $p;
+}
+
 /** Resolve effective AI provider/model/prompt for a section (section overrides project). */
 function scraper_effective_ai(array $section): array {
     $project = scraper_get_project((int)$section['project_id']) ?: [];
@@ -183,14 +215,11 @@ function scraper_curate_rank(int $pubSectionId, int $topN): array {
     $ai = scraper_effective_ai($section);
     $pub = $section['publication_key'];
     $region = scraper_publication_region($pub);
-    $isWorld = (strtolower($pub) === 'ten');
-    $focus = $isWorld
-        ? "Choose the biggest, most significant international news stories of broad interest to a global English-speaking audience."
-        : "STRONGLY prioritise LOCAL and national news for {$region} and its readers — politics, economy, society, culture, sport and events happening in or directly affecting {$region}. Only include an international/world story if it is genuinely major AND clearly relevant to {$region}; prefer a local story over a generic world story.";
-    $system = "You are the news editor of a local English-language newspaper covering {$region}. {$focus} "
-        . "Drop trivia and clickbait. CRUCIAL: pick DISTINCT stories only — never choose two headlines about the same "
-        . "event, incident or topic; if several cover the same story, keep the single best one and drop the rest. "
-        . "Return ONLY JSON.";
+    // Editorial brief (editable per section/project); {region} filled here. The fixed
+    // JSON contract + headline rules below are NOT editable, so a bad brief can't break
+    // parsing.
+    $brief = str_replace('{region}', $region, scraper_effective_curate_prompt($section));
+    $system = $brief . " Return ONLY JSON.";
     $user = "From these " . count($rows) . " collated headlines (id: headline), choose the TOP " . min($topN, count($rows)) . " for this publication's readers, each about a DIFFERENT story (no two on the same topic). "
           . "The headlines may be in ANY language: translate each chosen one into a natural English news headline. "
           . "Headline style (strict): sentence case, NO colon-and-label prefix (no \"Word:\"), no colons, no em/en dashes (— –), no plus signs (+), no ALL-CAPS, no clickbait. "
@@ -259,14 +288,28 @@ function scraper_precompute_section_locked(int $pubSectionId, array $section, ar
         try {
             $tr = scraper_ai_translate($ai['provider'], $ai['model'], 'English', $payload);
         } catch (Throwable $e) { $tr = []; }
+        $up = $conn->prepare("UPDATE ten_scraper_items SET title_translated=?, summary_translated=?, translated_lang='English', translated_at=NOW() WHERE id=?");
+        foreach ($tr as $id => $t) {
+            $ti = (string)$t['title']; $su = (string)$t['summary']; $iid = (int)$id;
+            $up->bind_param('ssi', $ti, $su, $iid); $up->execute(); $translated++;
+        }
+        // Fallback so a section can never wedge permanently: ranking upstream waits for
+        // 100% translation, so any item the translator silently drops (a chunk that
+        // failed to parse, or content the model refused) would block the section for
+        // ever. When the pass produced at least one real translation, treat the
+        // omissions as unfixable and store their ORIGINAL text as the "translation" so
+        // they stop blocking. A total failure ($tr empty — API down/timeout) is left
+        // untouched to retry on the next pass rather than freezing bad translations in.
         if ($tr) {
-            $up = $conn->prepare("UPDATE ten_scraper_items SET title_translated=?, summary_translated=?, translated_lang='English', translated_at=NOW() WHERE id=?");
-            foreach ($tr as $id => $t) {
-                $ti = (string)$t['title']; $su = (string)$t['summary']; $iid = (int)$id;
+            foreach ($rows as $r) {
+                $iid = (int)$r['id'];
+                if (isset($tr[$iid])) continue;
+                $ti = scraper_clean_title((string)$r['title']);
+                $su = scraper_clean_prose((string)$r['summary']);
                 $up->bind_param('ssi', $ti, $su, $iid); $up->execute(); $translated++;
             }
-            $up->close();
         }
+        $up->close();
     }
     // Any untranslated left? If so, defer ranking until the section is fully translated.
     $remain = (int)$conn->query("SELECT COUNT(*) c FROM ten_scraper_items
