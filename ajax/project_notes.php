@@ -279,7 +279,26 @@ try {
             }
             if ($projectId > 0) { $where .= " AND n.project_id = ?"; $wtypes .= "i"; $wparams[] = $projectId; }
 
-            $join = "LEFT JOIN ten_note_shares s ON s.note_id = n.id AND s.user_id = ?";
+            // Joins: shares (visibility, has the only param) + project/author for name sorting.
+            $join = "LEFT JOIN ten_note_shares s ON s.note_id = n.id AND s.user_id = ?
+                     LEFT JOIN ten_projects p ON p.id = n.project_id
+                     LEFT JOIN ten_users au ON au.id = n.author_id";
+
+            // Sorting (whitelisted column + direction). Default = status priority then deadline.
+            $sortMap = [
+                'title' => 'n.title', 'page' => 'n.page_label', 'project' => 'p.project_name',
+                'author' => 'au.full_name', 'deadline' => 'n.deadline', 'reminder' => 'n.next_remind_at',
+                'status' => 'n.status', 'created' => 'n.created_at',
+            ];
+            $sortKey = (string) ($_POST['sort'] ?? $_GET['sort'] ?? '');
+            $dir = strtolower((string) ($_POST['dir'] ?? $_GET['dir'] ?? 'asc')) === 'desc' ? 'DESC' : 'ASC';
+            if (isset($sortMap[$sortKey])) {
+                $col = $sortMap[$sortKey];
+                $orderBy = "($col IS NULL), $col $dir, n.id DESC";
+            } else {
+                $orderBy = "FIELD(n.status,'in_progress','active','on_hold','completed','archived','deleted'),
+                            (n.deadline IS NULL), n.deadline, n.created_at DESC";
+            }
 
             // Total (the JOIN's user_id is the first bound param, before the WHERE params).
             $cst = $c->prepare("SELECT COUNT(DISTINCT n.id) c FROM ten_project_notes n $join WHERE $where");
@@ -291,8 +310,7 @@ try {
 
             $sql = "SELECT n.* FROM ten_project_notes n $join WHERE $where
                     GROUP BY n.id
-                    ORDER BY FIELD(n.status,'in_progress','active','on_hold','completed','archived','deleted'),
-                             (n.deadline IS NULL), n.deadline, n.created_at DESC
+                    ORDER BY $orderBy
                     LIMIT ? OFFSET ?";
             $st = $c->prepare($sql);
             $pparams = array_merge([$me], $wparams, [$perPage, $offset]);

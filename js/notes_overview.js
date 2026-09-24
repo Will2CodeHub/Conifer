@@ -5,8 +5,18 @@
 (function () {
     "use strict";
 
-    var state = { q: "", view: "all", project_id: 0, page: 1, per_page: 25, pages: 1, total: 0 };
+    var state = { q: "", view: "all", project_id: 0, page: 1, per_page: 25, pages: 1, total: 0, sort: "", dir: "asc" };
     var searchTimer = null;
+
+    // Friendly labels + icons for each status transition offered in the row menu.
+    var ACTION = {
+        active:      { label: "Reopen",          icon: "fa-rotate-left" },
+        in_progress: { label: "Mark in progress", icon: "fa-play" },
+        on_hold:     { label: "Put on hold",     icon: "fa-pause" },
+        completed:   { label: "Mark complete",   icon: "fa-check" },
+        archived:    { label: "Archive",         icon: "fa-box-archive" },
+        deleted:     { label: "Delete",          icon: "fa-trash", danger: true }
+    };
 
     function ready(fn) {
         if (window.ProjectNotes && document.getElementById("novRows")) { fn(); return; }
@@ -71,6 +81,17 @@
         var statusCell = '<span class="nov-pill nov-st-' + esc(n.status) + '">' + esc(STATUS_LABEL[n.status] || n.status) + "</span>";
         var createdCell = '<span class="nov-muted">' + fmtDate(n.created_at, false) + "</span>";
 
+        // Row actions: the status moves this user may make (archive/delete/complete/…).
+        var moves = (n.can_status || []).filter(function (s) { return ACTION[s]; });
+        var menuItems = moves.map(function (s) {
+            var a = ACTION[s];
+            return '<button data-act="' + s + '"' + (a.danger ? ' class="nov-danger"' : "") + '><i class="fas ' + a.icon + '"></i>' + a.label + "</button>";
+        }).join("");
+        var actionsCell = menuItems
+            ? '<button class="nov-kebab" title="Actions"><i class="fas fa-ellipsis-vertical"></i></button>' +
+              '<div class="nov-menu">' + menuItems + "</div>"
+            : "";
+
         return '<tr data-note="' + n.id + '">' +
             "<td>" + noteCell + "</td>" +
             "<td>" + pageCell + "</td>" +
@@ -81,23 +102,79 @@
             "<td>" + remindCell + "</td>" +
             "<td>" + statusCell + "</td>" +
             '<td class="nov-col-created">' + createdCell + "</td>" +
+            '<td class="nov-actions" data-note="' + n.id + '" data-title="' + esc(n.title || snippet || "this note") + '">' + actionsCell + "</td>" +
             "</tr>";
+    }
+
+    function closeMenus() {
+        document.querySelectorAll(".nov-menu.open").forEach(function (m) { m.classList.remove("open"); });
+    }
+
+    function doAction(noteId, toStatus, title) {
+        var run = function () {
+            ProjectNotes.api("set_status", { note_id: noteId, status: toStatus }).then(function (r) {
+                if (r && r.success) { load(); }
+                else if (window.Swal) { Swal.fire("Couldn't update", (r && r.message) || "Please try again.", "error"); }
+            });
+        };
+        if (toStatus === "deleted" && window.Swal) {
+            Swal.fire({
+                title: "Delete note?",
+                text: '“' + title + '” will be removed. You can restore it from the Deleted view.',
+                icon: "warning", showCancelButton: true, confirmButtonColor: "#b42318",
+                confirmButtonText: "Delete"
+            }).then(function (res) { if (res.isConfirmed) run(); });
+        } else {
+            run();
+        }
     }
 
     function render(d) {
         var body = document.getElementById("novRows");
         var notes = d.notes || [];
         if (!notes.length) {
-            body.innerHTML = '<tr><td colspan="9" class="nov-empty">' +
+            body.innerHTML = '<tr><td colspan="10" class="nov-empty">' +
                 (state.q ? "No notes match your search." : "No notes to show.") + "</td></tr>";
         } else {
             body.innerHTML = notes.map(rowHtml).join("");
             body.querySelectorAll("tr[data-note]").forEach(function (tr) {
-                tr.addEventListener("click", function () {
+                tr.addEventListener("click", function (e) {
+                    if (e.target.closest(".nov-actions")) { return; } // let the menu handle its own clicks
                     ProjectNotes.openThread(parseInt(tr.getAttribute("data-note"), 10), load);
                 });
             });
+            // Kebab menus
+            body.querySelectorAll(".nov-actions").forEach(function (cell) {
+                var kebab = cell.querySelector(".nov-kebab");
+                var menu = cell.querySelector(".nov-menu");
+                if (!kebab || !menu) { return; }
+                kebab.addEventListener("click", function (e) {
+                    e.stopPropagation();
+                    var wasOpen = menu.classList.contains("open");
+                    closeMenus();
+                    if (!wasOpen) { menu.classList.add("open"); }
+                });
+                menu.querySelectorAll("button[data-act]").forEach(function (b) {
+                    b.addEventListener("click", function (e) {
+                        e.stopPropagation();
+                        closeMenus();
+                        doAction(parseInt(cell.getAttribute("data-note"), 10), b.getAttribute("data-act"), cell.getAttribute("data-title") || "this note");
+                    });
+                });
+            });
         }
+        // Sort arrows on headers
+        document.querySelectorAll("th.nov-sort").forEach(function (th) {
+            var key = th.getAttribute("data-sort");
+            var old = th.querySelector(".nov-arrow");
+            if (old) { old.remove(); }
+            if (state.sort === key) {
+                var span = document.createElement("span");
+                span.className = "nov-arrow";
+                span.innerHTML = state.dir === "asc" ? "▲" : "▼";
+                th.appendChild(span);
+            }
+        });
         state.pages = d.pages || 1;
         state.total = d.total || 0;
         document.getElementById("novCount").textContent =
@@ -111,15 +188,15 @@
         var body = document.getElementById("novRows");
         ProjectNotes.api("all", {
             q: state.q, view: state.view, project_id: state.project_id,
-            page: state.page, per_page: state.per_page
+            page: state.page, per_page: state.per_page, sort: state.sort, dir: state.dir
         }).then(function (d) {
             if (!d || !d.success) {
-                body.innerHTML = '<tr><td colspan="9" class="nov-empty">' + esc((d && d.message) || "Could not load notes.") + "</td></tr>";
+                body.innerHTML = '<tr><td colspan="10" class="nov-empty">' + esc((d && d.message) || "Could not load notes.") + "</td></tr>";
                 return;
             }
             render(d);
         }).catch(function () {
-            body.innerHTML = '<tr><td colspan="9" class="nov-empty">Could not load notes.</td></tr>';
+            body.innerHTML = '<tr><td colspan="10" class="nov-empty">Could not load notes.</td></tr>';
         });
     }
 
@@ -158,6 +235,20 @@
         document.getElementById("novNext").addEventListener("click", function () {
             if (state.page < state.pages) { state.page++; load(); }
         });
+
+        // Sortable column headers: click to sort, click again to flip direction.
+        document.querySelectorAll("th.nov-sort").forEach(function (th) {
+            th.addEventListener("click", function () {
+                var key = th.getAttribute("data-sort");
+                if (state.sort === key) { state.dir = state.dir === "asc" ? "desc" : "asc"; }
+                else { state.sort = key; state.dir = "asc"; }
+                state.page = 1;
+                load();
+            });
+        });
+
+        // Close any open row menu when clicking elsewhere.
+        document.addEventListener("click", closeMenus);
 
         // Keep in sync when a note is changed from its opened thread.
         document.addEventListener("ten-notes-changed", load);

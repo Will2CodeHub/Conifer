@@ -51,6 +51,24 @@ $currentPage = 'notes';
     .nov-btn { padding:7px 12px; border:1px solid var(--nov-border); background:var(--nov-surface); border-radius:8px; font-size:13px; cursor:pointer; }
     .nov-btn[disabled] { opacity:.45; cursor:default; }
     .nov-empty { padding:36px 14px; text-align:center; color:var(--nov-muted); }
+    .nov-sort { cursor:pointer; user-select:none; }
+    .nov-sort:hover { color:var(--nov-ink); }
+    .nov-sort .nov-arrow { color:#3c4f6d; font-size:10px; margin-left:5px; }
+    /* Row actions */
+    .nov-col-actions { width:44px; }
+    .nov-actions { position:relative; text-align:right; }
+    .nov-kebab { border:none; background:none; color:#98a0ac; cursor:pointer; padding:4px 8px; border-radius:6px; font-size:15px; }
+    .nov-kebab:hover { background:#eef2f7; color:#475467; }
+    .nov-menu { position:absolute; right:8px; top:34px; z-index:20; background:#fff; border:1px solid var(--nov-border); border-radius:10px;
+        box-shadow:0 8px 24px rgba(16,24,40,.14); min-width:170px; padding:5px; display:none; }
+    .nov-menu.open { display:block; }
+    .nov-menu button { display:flex; align-items:center; gap:9px; width:100%; text-align:left; border:none; background:none; cursor:pointer;
+        padding:8px 10px; border-radius:7px; font-size:13px; color:#344054; }
+    .nov-menu button:hover { background:#f2f4f7; }
+    .nov-menu button.nov-danger { color:#b42318; }
+    .nov-menu button.nov-danger:hover { background:#fdeceb; }
+    .nov-menu i { width:15px; text-align:center; color:#98a0ac; }
+    .nov-menu button.nov-danger i { color:#b42318; }
     @media (max-width:900px){ .nov-col-project,.nov-col-created { display:none; } }
     </style>
 </head>
@@ -80,19 +98,20 @@ $currentPage = 'notes';
                 <table class="nov-table">
                     <thead>
                         <tr>
-                            <th>Note</th>
-                            <th>Page</th>
-                            <th class="nov-col-project">Project</th>
-                            <th>Author</th>
+                            <th class="nov-sort" data-sort="title">Note</th>
+                            <th class="nov-sort" data-sort="page">Page</th>
+                            <th class="nov-sort nov-col-project" data-sort="project">Project</th>
+                            <th class="nov-sort" data-sort="author">Author</th>
                             <th>Assigned to</th>
-                            <th>Deadline</th>
-                            <th>Next reminder</th>
-                            <th>Status</th>
-                            <th class="nov-col-created">Created</th>
+                            <th class="nov-sort" data-sort="deadline">Deadline</th>
+                            <th class="nov-sort" data-sort="reminder">Next reminder</th>
+                            <th class="nov-sort" data-sort="status">Status</th>
+                            <th class="nov-sort nov-col-created" data-sort="created">Created</th>
+                            <th class="nov-col-actions"></th>
                         </tr>
                     </thead>
                     <tbody id="novRows">
-                        <tr><td colspan="9" class="nov-empty">Loading notes…</td></tr>
+                        <tr><td colspan="10" class="nov-empty">Loading notes…</td></tr>
                     </tbody>
                 </table>
                 <div class="nov-foot">
