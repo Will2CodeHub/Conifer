@@ -18,10 +18,18 @@ function ec_materialise(mysqli $c, int $id): int {
     $camp=$c->query("SELECT * FROM ten_ec_campaigns WHERE id=$id")->fetch_assoc();
     if(!$camp) throw new Exception('Campaign not found');
     $aid=(int)$camp['audience_id'];
-    $vars=[]; $vr=$c->query("SELECT id,weight FROM ten_ec_campaign_variants WHERE campaign_id=$id ORDER BY id");
+    $vars=[]; $vr=$c->query("SELECT id,weight,template_id FROM ten_ec_campaign_variants WHERE campaign_id=$id ORDER BY id");
     while($vr && $x=$vr->fetch_assoc()) $vars[]=$x;
     if(!$vars) throw new Exception('No variants/templates configured');
     $pool=[]; foreach($vars as $v){ for($i=0;$i<max(1,(int)$v['weight']);$i++) $pool[]=(int)$v['id']; }
+    // A/B version tag: active only when this campaign uses ONE template that is A/B-enabled
+    // and the campaign opted into A/B. Then recipients alternate A,B,A,B (50/50); otherwise
+    // everyone gets Version 'A'. The tag lives on the recipient, so it survives template edits.
+    $abActive=false;
+    if(count($vars)===1 && !empty($camp['ab_enabled'])){
+        $tid=(int)($vars[0]['template_id']??0);
+        if($tid>0){ $tr=$c->query("SELECT ab_enabled FROM ten_ec_templates WHERE id=$tid")->fetch_assoc(); $abActive=!empty($tr['ab_enabled']); }
+    }
     $batch=max(1,(int)$camp['batch_size']); $interval=max(0,(int)$camp['batch_interval_min']);
     $start = !empty($camp['scheduled_at']) && strtotime($camp['scheduled_at'])>time() ? strtotime($camp['scheduled_at']) : time();
     $res=$c->query("SELECT ct.id FROM ten_ec_audience_members m
@@ -30,12 +38,13 @@ function ec_materialise(mysqli $c, int $id): int {
         LEFT JOIN ten_ec_recipients r ON r.campaign_id=$id AND r.contact_id=ct.id
         WHERE m.audience_id=$aid AND s.id IS NULL AND r.id IS NULL
           AND ct.email IS NOT NULL AND ct.email<>''");
-    $ins=$c->prepare("INSERT IGNORE INTO ten_ec_recipients (campaign_id,contact_id,variant_id,token,status,send_after) VALUES (?,?,?,?, 'queued', ?)");
+    $ins=$c->prepare("INSERT IGNORE INTO ten_ec_recipients (campaign_id,contact_id,variant_id,ab,token,status,send_after) VALUES (?,?,?,?,?, 'queued', ?)");
     $n=0;
     while($x=$res->fetch_assoc()){
         $cid=(int)$x['id']; $vid=$pool[$n % count($pool)]; $tok=ec_token(24);
+        $ab = $abActive ? ($n % 2 === 0 ? 'A' : 'B') : 'A';
         $sendAfter=date('Y-m-d H:i:s', $start + intdiv($n,$batch)*$interval*60);
-        $ins->bind_param('iiiss',$id,$cid,$vid,$tok,$sendAfter); $ins->execute();
+        $ins->bind_param('iiisss',$id,$cid,$vid,$ab,$tok,$sendAfter); $ins->execute();
         if($c->affected_rows===1) $n++;
     }
     $ins->close();
@@ -226,16 +235,32 @@ try {
             foreach(['open','click','reply','unsubscribe','bounce','visit'] as $t){
                 $funnel[$t]=(int)$c->query("SELECT COUNT(DISTINCT e.recipient_id) n FROM ten_ec_events e JOIN ten_ec_recipients r ON r.id=e.recipient_id WHERE r.campaign_id=$id AND e.type='$t'")->fetch_assoc()['n'];
             }
-            // per-variant
+            // A/B breakdown. New model: one template that is ab_enabled → group recipients by
+            // their version tag (Version A / Version B). Legacy multi-variant campaigns keep
+            // their per-variant breakdown.
             $variants=[];
-            $vr=$c->query("SELECT v.id,v.label,COUNT(r.id) recips,
-                SUM(r.status='sent') sent,
-                SUM(r.opened_at IS NOT NULL) opened,
-                SUM(r.first_click_at IS NOT NULL) clicked,
-                SUM(r.replied_at IS NOT NULL) replied
-                FROM ten_ec_campaign_variants v LEFT JOIN ten_ec_recipients r ON r.variant_id=v.id
-                WHERE v.campaign_id=$id GROUP BY v.id,v.label ORDER BY v.id");
-            while($vr && $x=$vr->fetch_assoc()) $variants[]=$x;
+            $abTpl=false;
+            $vg=$c->query("SELECT template_id FROM ten_ec_campaign_variants WHERE campaign_id=$id");
+            if($vg && $vg->num_rows===1){ $vv=$vg->fetch_assoc(); $tid=(int)$vv['template_id'];
+                if($tid>0){ $tt=$c->query("SELECT ab_enabled FROM ten_ec_templates WHERE id=$tid")->fetch_assoc(); $abTpl=!empty($tt['ab_enabled']); } }
+            if($abTpl){
+                $vr=$c->query("SELECT r.ab,COUNT(r.id) recips,
+                    SUM(r.status='sent') sent,
+                    SUM(r.opened_at IS NOT NULL) opened,
+                    SUM(r.first_click_at IS NOT NULL) clicked,
+                    SUM(r.replied_at IS NOT NULL) replied
+                    FROM ten_ec_recipients r WHERE r.campaign_id=$id GROUP BY r.ab ORDER BY r.ab");
+                while($vr && $x=$vr->fetch_assoc()){ $x['label']='Version '.$x['ab']; $variants[]=$x; }
+            } else {
+                $vr=$c->query("SELECT v.id,v.label,COUNT(r.id) recips,
+                    SUM(r.status='sent') sent,
+                    SUM(r.opened_at IS NOT NULL) opened,
+                    SUM(r.first_click_at IS NOT NULL) clicked,
+                    SUM(r.replied_at IS NOT NULL) replied
+                    FROM ten_ec_campaign_variants v LEFT JOIN ten_ec_recipients r ON r.variant_id=v.id
+                    WHERE v.campaign_id=$id GROUP BY v.id,v.label ORDER BY v.id");
+                while($vr && $x=$vr->fetch_assoc()) $variants[]=$x;
+            }
             // delivery status breakdown (sent/queued/failed/skipped/…) so a campaign that
             // sent nothing still reports WHY instead of showing a blank report.
             $byStatus=[];

@@ -459,6 +459,26 @@ function ec_ensure_schema(mysqli $c): void {
     $ip = $c->query("SHOW COLUMNS FROM ten_ec_templates LIKE 'is_plain'");
     if (!$ip || $ip->num_rows === 0) @$c->query("ALTER TABLE ten_ec_templates ADD COLUMN is_plain TINYINT(1) NOT NULL DEFAULT 0");
 
+    // Whether a visible unsubscribe link ({{unsubscribe_url}}) is required in the body.
+    // Default 1 (require it, the long-standing behaviour). When 0, the template may be
+    // saved and sent without a body link; the List-Unsubscribe header is still sent.
+    $ru = $c->query("SHOW COLUMNS FROM ten_ec_templates LIKE 'require_unsub'");
+    if (!$ru || $ru->num_rows === 0) @$c->query("ALTER TABLE ten_ec_templates ADD COLUMN require_unsub TINYINT(1) NOT NULL DEFAULT 1");
+
+    // A/B testing lives on the TEMPLATE: one template holds Version A (the existing
+    // subject/html_body/text_body) and an optional Version B in these *_b columns.
+    // A campaign that uses an ab_enabled template alternates the two versions across
+    // recipients (tagged on ten_ec_recipients.ab). Versions differ by subject+body only.
+    $ab = $c->query("SHOW COLUMNS FROM ten_ec_templates LIKE 'ab_enabled'");
+    if (!$ab || $ab->num_rows === 0) @$c->query("ALTER TABLE ten_ec_templates ADD COLUMN ab_enabled TINYINT(1) NOT NULL DEFAULT 0");
+    $sb = $c->query("SHOW COLUMNS FROM ten_ec_templates LIKE 'subject_b'");
+    if (!$sb || $sb->num_rows === 0) @$c->query("ALTER TABLE ten_ec_templates ADD COLUMN subject_b VARCHAR(500) NULL, ADD COLUMN html_body_b MEDIUMTEXT NULL, ADD COLUMN text_body_b MEDIUMTEXT NULL");
+
+    // Which template version a recipient gets ('A' or 'B'). Assigned once at materialise
+    // (round-robin when the template is A/B), so it survives template/campaign re-saves.
+    $rab = $c->query("SHOW COLUMNS FROM ten_ec_recipients LIKE 'ab'");
+    if (!$rab || $rab->num_rows === 0) @$c->query("ALTER TABLE ten_ec_recipients ADD COLUMN ab CHAR(1) NOT NULL DEFAULT 'A'");
+
     // Reusable e-mail signatures (HTML or plain, same as templates). A plain-text template
     // inserts the signature's plain-text version; an HTML template inserts its HTML.
     @$c->query("CREATE TABLE IF NOT EXISTS ten_ec_signatures (

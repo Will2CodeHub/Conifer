@@ -24,8 +24,9 @@ try {
     switch ($action) {
         case 'list': {
             $rows=[];
-            // is_plain drives the campaign form's tracking defaults (HTML on, plain off).
-            $res=$c->query("SELECT id,name,subject,from_name,from_email,reply_to,is_plain,updated_at FROM ten_ec_templates ORDER BY id DESC");
+            // is_plain drives the campaign form's tracking defaults (HTML on, plain off);
+            // ab_enabled tells the campaign form whether this template can A/B-test a send.
+            $res=$c->query("SELECT id,name,subject,from_name,from_email,reply_to,is_plain,ab_enabled,updated_at FROM ten_ec_templates ORDER BY id DESC");
             while($res && $x=$res->fetch_assoc()) $rows[]=$x;
             $resp=['success'=>true,'rows'=>$rows];
             break;
@@ -40,27 +41,47 @@ try {
             $id=(int)($_POST['id']??0);
             $name=trim($_POST['name']??''); $subject=trim($_POST['subject']??'');
             $isPlain=(int)(!empty($_POST['is_plain']));
+            // Require a visible unsubscribe link in the body? On by default; when off the
+            // template saves/sends without {{unsubscribe_url}} (the List-Unsubscribe header
+            // is still sent by the mailer either way).
+            $requireUnsub=(int)(!empty($_POST['require_unsub']));
             $html=$_POST['html_body']??''; $text=trim($_POST['text_body']??'');
+            // A/B: this template also carries an optional Version B (subject + body).
+            $abEnabled=(int)(!empty($_POST['ab_enabled']));
+            $subjectB=trim($_POST['subject_b']??''); $htmlB=$_POST['html_body_b']??''; $textB=trim($_POST['text_body_b']??'');
             $fromName=trim($_POST['from_name']??''); $fromEmail=trim($_POST['from_email']??''); $replyTo=trim($_POST['reply_to']??'');
             if($name===''||$subject==='') throw new Exception('Name and subject are required');
-            if($isPlain){
-                // Plain-text template: the plain body is the email; no HTML is stored/sent.
-                // The unsubscribe link must live in the plain text.
-                if($text==='') throw new Exception('Enter the plain-text message');
-                if(strpos($text,'{{unsubscribe_url}}')===false) throw new Exception('The message must include an unsubscribe link using {{unsubscribe_url}}');
-                $html='';
+            // Validate one version's body against the format + unsubscribe rules.
+            $vcheck = function(string $label, string &$h, string &$t) use ($isPlain,$requireUnsub) {
+                if($isPlain){
+                    if($t==='') throw new Exception('Enter the plain-text message'.$label);
+                    if($requireUnsub && strpos($t,'{{unsubscribe_url}}')===false) throw new Exception('The message'.$label.' must include an unsubscribe link using {{unsubscribe_url}} (or turn off the unsubscribe-link option)');
+                    $h='';
+                } else {
+                    if($requireUnsub && strpos($h,'{{unsubscribe_url}}')===false) throw new Exception('The HTML'.$label.' must include an unsubscribe link using {{unsubscribe_url}} (or turn off the unsubscribe-link option)');
+                    if($t==='') $t = trim(preg_replace('/\s+/',' ', strip_tags($h)));
+                }
+            };
+            $vcheck('', $html, $text);
+            if($abEnabled){
+                if($subjectB==='') throw new Exception('Version B needs a subject (or turn off A/B testing)');
+                // Version B body is OPTIONAL: leave it blank to reuse Version A's body and test
+                // the subject line only. Validate the B body only when one was actually entered.
+                $hasB = $isPlain ? ($textB!=='') : (trim(preg_replace('/\s+/',' ', strip_tags($htmlB)))!=='');
+                if($hasB){ $vcheck(' (Version B)', $htmlB, $textB); }
+                else { $htmlB=''; $textB=''; }
             } else {
-                if(strpos($html,'{{unsubscribe_url}}')===false) throw new Exception('The HTML must include an unsubscribe link using {{unsubscribe_url}}');
-                if($text==='') $text = trim(preg_replace('/\s+/',' ', strip_tags($html)));
+                // Not A/B: don't keep stale Version B content.
+                $subjectB=''; $htmlB=''; $textB='';
             }
             if($fromEmail!=='' && !filter_var($fromEmail,FILTER_VALIDATE_EMAIL)) throw new Exception('From email is invalid');
             if($id>0){
-                $st=$c->prepare("UPDATE ten_ec_templates SET name=?,subject=?,from_name=?,from_email=?,reply_to=?,html_body=?,text_body=?,is_plain=? WHERE id=?");
-                $st->bind_param('sssssssii',$name,$subject,$fromName,$fromEmail,$replyTo,$html,$text,$isPlain,$id); $st->execute(); $st->close();
+                $st=$c->prepare("UPDATE ten_ec_templates SET name=?,subject=?,from_name=?,from_email=?,reply_to=?,html_body=?,text_body=?,is_plain=?,require_unsub=?,ab_enabled=?,subject_b=?,html_body_b=?,text_body_b=? WHERE id=?");
+                $st->bind_param('sssssssiiisssi',$name,$subject,$fromName,$fromEmail,$replyTo,$html,$text,$isPlain,$requireUnsub,$abEnabled,$subjectB,$htmlB,$textB,$id); $st->execute(); $st->close();
             } else {
                 $uid=(int)($_SESSION['ten_user_id']??0);
-                $st=$c->prepare("INSERT INTO ten_ec_templates (name,subject,from_name,from_email,reply_to,html_body,text_body,is_plain,created_by) VALUES (?,?,?,?,?,?,?,?,?)");
-                $st->bind_param('sssssssii',$name,$subject,$fromName,$fromEmail,$replyTo,$html,$text,$isPlain,$uid); $st->execute(); $id=(int)$c->insert_id; $st->close();
+                $st=$c->prepare("INSERT INTO ten_ec_templates (name,subject,from_name,from_email,reply_to,html_body,text_body,is_plain,require_unsub,ab_enabled,subject_b,html_body_b,text_body_b,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+                $st->bind_param('sssssssiiisssi',$name,$subject,$fromName,$fromEmail,$replyTo,$html,$text,$isPlain,$requireUnsub,$abEnabled,$subjectB,$htmlB,$textB,$uid); $st->execute(); $id=(int)$c->insert_id; $st->close();
             }
             $resp=['success'=>true,'id'=>$id];
             break;

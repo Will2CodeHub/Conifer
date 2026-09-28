@@ -85,8 +85,14 @@ while ($camp = $camps->fetch_assoc()) {
         $unsub = $trackBase . '/u.php?r=' . rawurlencode($token);
         $contact = ['email'=>$email];
         foreach (ec_merge_fields() as $mf) { $contact[$mf['col']] = $r[$mf['col']] ?? ''; }
-        $subject = ec_render($tpl['subject_override'] ?: $tpl['subject'], $contact, $unsub);
-        $text = ec_render($tpl['text_body'] ?: strip_tags($tpl['html_body']), $contact, $unsub);
+        // A/B: use the template version this recipient was tagged with. Fall back to
+        // Version A wherever a Version B field is blank, so a half-filled B never sends empty.
+        $useB = (($r['ab'] ?? 'A') === 'B') && !empty($tpl['ab_enabled']);
+        $vSubject = ($useB && trim((string)($tpl['subject_b']   ?? '')) !== '') ? $tpl['subject_b']   : $tpl['subject'];
+        $vHtml    = ($useB && trim((string)($tpl['html_body_b'] ?? '')) !== '') ? $tpl['html_body_b'] : $tpl['html_body'];
+        $vText    = ($useB && trim((string)($tpl['text_body_b'] ?? '')) !== '') ? $tpl['text_body_b'] : $tpl['text_body'];
+        $subject = ec_render($tpl['subject_override'] ?: $vSubject, $contact, $unsub);
+        $text = ec_render($vText ?: strip_tags($vHtml), $contact, $unsub);
 
         // Format comes from the TEMPLATE (its is_plain flag); tracking stays per-campaign.
         $plainOnly  = !empty($tpl['is_plain']);
@@ -95,7 +101,7 @@ while ($camp = $camps->fetch_assoc()) {
         if ($plainOnly) {
             $html = '';
         } else {
-            $html = ec_render($tpl['html_body'], $contact, $unsub);
+            $html = ec_render($vHtml, $contact, $unsub);
             // Click tracking: rewrite links through /t/c.php. OFF => links stay exactly as written.
             if ($trackClicks) $html = ec_rewrite_links($html, $token, $trackBase, $siteHosts);
             // Open tracking: add the invisible pixel. OFF => no pixel.

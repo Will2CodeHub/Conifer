@@ -30,6 +30,7 @@ ec_ensure_schema(ec_db()); // idempotent: adds newer contact fields / categories
         .ec-tab{padding:10px 16px;font-size:14px;font-weight:600;color:#6b7280;cursor:pointer;border:1px solid transparent;border-bottom:none;border-radius:8px 8px 0 0}
         .ec-tab.active{color:#4f46e5;background:#fff;border-color:#e5e7eb}
         .ec-pane{display:none}.ec-pane.active{display:block}
+        #tVerTabs .ec-btn.active{background:#4f46e5;color:#fff;border-color:#4f46e5}
         .ec-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:24px;margin-bottom:20px;line-height:1.5}
         .ec-card > p{margin:0 0 16px;line-height:1.6}
         .ec-btn{background:#4f46e5;color:#fff;border:none;padding:9px 15px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:7px}
@@ -963,8 +964,11 @@ function ecFmtToggle(){ var plain=(document.querySelector('input[name="ecFmt"]:c
     var hb=document.getElementById('ecHtmlBlock'), lbl=document.getElementById('ecTextLbl');
     if(hb) hb.style.display=plain?'none':'';
     var noun=ecReqUnsub?'message':'signature';
+    // The unsubscribe link is required only for templates (ecReqUnsub) whose "Include
+    // unsubscribe link" checkbox is on. Signatures and opted-out templates don't need it.
+    var cb=document.getElementById('tRequireUnsub'); var mustUnsub=ecReqUnsub&&(!cb||cb.checked);
     if(lbl) lbl.innerHTML = plain
-        ? 'Plain-text '+noun+' * <span class="ec-hint">'+(ecReqUnsub?'merge fields work here — must include {{unsubscribe_url}}':'the plain-text version')+'</span>'
+        ? 'Plain-text '+noun+' * <span class="ec-hint">'+(mustUnsub?'merge fields work here — must include {{unsubscribe_url}}':(ecReqUnsub?'merge fields work here':'the plain-text version'))+'</span>'
         : 'Plain text <span class="ec-hint">(optional alternative — auto-generated if left blank; used when this is placed in a plain-text email)</span>';
 }
 function ecCmd(cmd,val){ var b=document.getElementById('ecBody'); if(!b) return; b.focus(); try{ document.execCommand(cmd,false,val||null); }catch(e){} }
@@ -1024,14 +1028,68 @@ function elInsert(){ var url=(document.getElementById('elUrl').value||'').trim()
 }
 /* ---- Template form (uses the shared editor) ---- */
 function tForm(t){ t=t||{}; return '<input type="hidden" id="tId" value="'+(t.id||'')+'">'+
-    '<div class="ec-row"><div class="ec-fg"><label>Name *</label><input class="ec-in" id="tName" value="'+esc(t.name||'')+'"></div><div class="ec-fg"><label>Subject * <span class="ec-hint">merge fields work here too, e.g. {{company}} - The Munich Eye</span></label><input class="ec-in" id="tSubject" value="'+esc(t.subject||'')+'"></div></div>'+
+    '<div class="ec-row"><div class="ec-fg"><label>Name *</label><input class="ec-in" id="tName" value="'+esc(t.name||'')+'"></div></div>'+
     /* From/Reply-to are set by the sending profile (Sending tab), so they're hidden here to avoid confusion. */
     '<input type="hidden" id="tFromName" value=""><input type="hidden" id="tFromEmail" value=""><input type="hidden" id="tReplyTo" value="">'+
+    '<div class="ec-fg"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">'+
+        '<input type="checkbox" id="tAbEnabled"'+(t.ab_enabled==1?' checked':'')+' onchange="tAbToggle()"> A/B test this template (two versions)'+
+    '</label><span class="ec-hint">Give the template a Version A and a Version B; a campaign that uses it sends them 50/50 so you can compare. Switch versions with the tabs below. Leave Version B\'s body blank to test just the subject line (it reuses Version A\'s body).</span></div>'+
+    '<div id="tVerTabs" style="display:none;margin:2px 0 10px">'+
+        '<button type="button" class="ec-btn light sm" id="tVerA" onclick="tVerTab(\'A\')">Version A</button> '+
+        '<button type="button" class="ec-btn light sm" id="tVerB" onclick="tVerTab(\'B\')">Version B</button> '+
+        '<span class="ec-hint" id="tVerNow"></span>'+
+    '</div>'+
+    '<div class="ec-row"><div class="ec-fg"><label>Subject * <span class="ec-hint">merge fields work here too, e.g. {{company}} - The Munich Eye</span></label><input class="ec-in" id="tSubject" value="'+esc(t.subject||'')+'"></div></div>'+
+    '<div class="ec-fg"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">'+
+        '<input type="checkbox" id="tRequireUnsub"'+(String(t.require_unsub)==='0'?'':' checked')+' onchange="tReqUnsubToggle()"> Include an unsubscribe link in the message body'+
+    '</label><span class="ec-hint">On (recommended): the body must contain {{unsubscribe_url}}. Off: save and send without a visible link &mdash; the one-click List-Unsubscribe email header is still sent either way.</span></div>'+
     ecEditorBlock({includeMerge:true,includeSig:true,requireUnsub:true}); }
+// Keep the shared editor's "must include {{unsubscribe_url}}" hint in step with the checkbox.
+function tReqUnsubToggle(){ ecFmtToggle(); }
 function tFoot(){ return '<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn light" onclick="tPreview()">Preview</button><button class="ec-btn light" onclick="tTestModal()">Send test</button><button class="ec-btn" onclick="tSave()">Save</button>'; }
-function tNew(){ ecReqUnsub=true; ecModal('New template',tForm(),tFoot()); ecEditorInit({_defaultHtml:_tDefaultHtml}); }
-function tEdit(id){ post(EC.templates,{action:'get',id:id}).done(function(r){ if(r.success){ ecReqUnsub=true; ecModal('Edit template',tForm(r.template),tFoot()); ecEditorInit(Object.assign({_defaultHtml:_tDefaultHtml},r.template)); } }); }
-function tPayload(){ return {id:document.getElementById('tId').value,name:document.getElementById('tName').value,subject:document.getElementById('tSubject').value,from_name:document.getElementById('tFromName').value,from_email:document.getElementById('tFromEmail').value,reply_to:document.getElementById('tReplyTo').value,is_plain:ecIsPlain(),html_body:ecHtmlValue(),text_body:ecTextValue()}; }
+/* ---- Template A/B versions ----
+ * The shared editor holds ONE subject+body at a time; we keep both versions in _tBuf and
+ * swap the editor between them on tab click. tPayload flushes the active tab first, then
+ * sends both A and B. Version A = the classic subject/html_body/text_body. */
+var _tVer='A';
+var _tBuf={A:{subject:'',html:'',text:''},B:{subject:'',html:'',text:''}};
+function tInit(t){ t=t||{};
+    _tVer='A';
+    _tBuf={A:{subject:t.subject||'',html:t.html_body||'',text:t.text_body||''},
+           B:{subject:t.subject_b||'',html:t.html_body_b||'',text:t.text_body_b||''}};
+    if(!t.id && !_tBuf.A.html) _tBuf.A.html=_tDefaultHtml; // fresh template starts with the default body
+    ecEditorInit(Object.assign({_defaultHtml:_tDefaultHtml},t)); // wires editor + loads Version A body/format
+    var subj=document.getElementById('tSubject'); if(subj) subj.value=_tBuf.A.subject;
+    tAbToggle();
+}
+// Save the editor's current content back into the active version's buffer.
+function tVerFlush(){ _tBuf[_tVer]={subject:(document.getElementById('tSubject')||{}).value||'',html:ecHtmlValue(),text:ecTextValue()}; }
+// Load a version buffer into the (already-wired) shared editor.
+function tLoadEditorBuf(buf){
+    if(tSrcMode){ tSrcMode=false; var s0=document.getElementById('ecSrc'),b0=document.getElementById('ecBody'),sb0=document.getElementById('ecSrcBtn'); if(s0)s0.style.display='none'; if(b0)b0.style.display=''; if(sb0)sb0.classList.remove('on'); }
+    var body=document.getElementById('ecBody'); if(body) body.innerHTML=(buf.html&&buf.html.trim())?buf.html:'';
+    var src=document.getElementById('ecSrc'); if(src) src.value='';
+    var txt=document.getElementById('ecText'); if(txt) txt.value=buf.text||'';
+    var subj=document.getElementById('tSubject'); if(subj) subj.value=buf.subject||'';
+}
+function tVerTab(ver){ if(ver===_tVer) return; tVerFlush(); _tVer=ver; tLoadEditorBuf(_tBuf[ver]); tVerHi(); }
+function tVerHi(){ var a=document.getElementById('tVerA'),b=document.getElementById('tVerB'),now=document.getElementById('tVerNow'),ab=document.getElementById('tAbEnabled');
+    if(a) a.classList.toggle('active',_tVer==='A'); if(b) b.classList.toggle('active',_tVer==='B');
+    if(now) now.textContent=(ab&&ab.checked)?('Editing Version '+_tVer):''; }
+// Show/hide the version tabs with the A/B checkbox; when turning A/B off, snap back to Version A.
+function tAbToggle(){ var on=document.getElementById('tAbEnabled'), bar=document.getElementById('tVerTabs'); var isOn=!!(on&&on.checked);
+    if(bar) bar.style.display=isOn?'':'none';
+    if(!isOn && _tVer!=='A'){ tVerFlush(); _tVer='A'; tLoadEditorBuf(_tBuf.A); }
+    tVerHi();
+}
+function tNew(){ ecReqUnsub=true; ecModal('New template',tForm(),tFoot()); tInit({}); }
+function tEdit(id){ post(EC.templates,{action:'get',id:id}).done(function(r){ if(r.success){ ecReqUnsub=true; ecModal('Edit template',tForm(r.template),tFoot()); tInit(r.template); } }); }
+// Full save payload: both versions + the A/B flag.
+function tPayload(){ tVerFlush(); var ab=document.getElementById('tAbEnabled');
+    return {id:document.getElementById('tId').value,name:document.getElementById('tName').value,from_name:'',from_email:'',reply_to:'',is_plain:ecIsPlain(),require_unsub:(document.getElementById('tRequireUnsub')&&document.getElementById('tRequireUnsub').checked)?1:0,ab_enabled:(ab&&ab.checked)?1:0,subject:_tBuf.A.subject,html_body:_tBuf.A.html,text_body:_tBuf.A.text,subject_b:_tBuf.B.subject,html_body_b:_tBuf.B.html,text_body_b:_tBuf.B.text}; }
+// Preview/test operate on the version currently open in the editor (its fields under the standard keys).
+function tPayloadCurrent(){ tVerFlush(); var v=_tBuf[_tVer];
+    return {name:document.getElementById('tName').value,from_name:'',from_email:'',reply_to:'',is_plain:ecIsPlain(),subject:v.subject,html_body:v.html,text_body:v.text}; }
 /* ---- Signatures ---- */
 function sgLoad(){ post(EC.signatures,{action:'list'}).done(function(r){ if(!r.success){toast(r.message,'error');return;} EC.signaturesCache=r.rows||[]; let h='<table class="ec-tbl"><thead><tr><th>Name</th><th>Format</th><th></th></tr></thead><tbody>'; (r.rows||[]).forEach(function(s){ h+='<tr><td>'+esc(s.name)+'</td><td>'+(s.is_plain==1?'Plain text':'HTML')+'</td><td><button class="ec-btn light sm" onclick="sgEdit('+s.id+')">Edit</button> <button class="ec-btn danger sm" onclick="sgDel('+s.id+')">Delete</button></td></tr>'; }); h+='</tbody></table>'; if(!(r.rows||[]).length) h='<p class="ec-hint">No signatures yet. Create one, then insert it into a template with the toolbar\'s "Insert signature" dropdown.</p>'; document.getElementById('sgTable').innerHTML=h; }); }
 function sgForm(s){ s=s||{}; return '<input type="hidden" id="sgId" value="'+(s.id||'')+'">'+
@@ -1046,7 +1104,7 @@ function sgDel(id){ Swal.fire({title:'Delete signature?',icon:'warning',showCanc
 function sgPreview(){ var w=window.open('','_blank'); if(ecIsPlain()) w.document.write('<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px">'+esc(ecTextValue())+'</pre>'); else w.document.write(ecHtmlValue()); }
 function tSave(){ post(EC.templates,Object.assign({action:'save'},tPayload())).done(function(r){ if(r.success){ecClose();toast('Saved');tLoad();}else toast(r.message,'error'); }); }
 function tDel(id){ Swal.fire({title:'Delete template?',icon:'warning',showCancelButton:true,confirmButtonColor:'#dc2626'}).then(x=>{ if(x.isConfirmed) post(EC.templates,{action:'delete',id:id}).done(()=>{toast('Deleted');tLoad();}); }); }
-function tPreview(){ post(EC.templates,Object.assign({action:'preview'},tPayload())).done(function(r){ if(r.success){ const w=window.open('','_blank'); w.document.write('<h3 style="font-family:sans-serif">Subject: '+esc(r.subject)+'</h3><hr>'+r.html); } }); }
+function tPreview(){ post(EC.templates,Object.assign({action:'preview'},tPayloadCurrent())).done(function(r){ if(r.success){ const w=window.open('','_blank'); w.document.write('<h3 style="font-family:sans-serif">Subject: '+esc(r.subject)+'</h3><hr>'+r.html); } }); }
 /* Send-test opens a second-layer modal above the still-open template editor, so
  * unsaved edits (read via tPayload) survive and are what gets sent. "Choose from
  * contacts" opens the full picker (top layer) and fills the address. */
@@ -1063,7 +1121,7 @@ function tTestModal(){ post(EC.profiles,{action:'list'}).done(function(r){
     ecModal2('Send test email', body, '<button class="ec-btn light" onclick="ecClose2()">Cancel</button><button class="ec-btn" onclick="tTestSend()">Send test</button>');
 }); }
 function ttPick(){ ctpOpen({multi:false,title:'Choose a contact to send the test to',onPick:function(c){ var f=document.getElementById('ttTo'); if(f) f.value=c.email; }}); }
-function tTestSend(){ var to=(document.getElementById('ttTo').value||'').trim(); if(!to){ toast('Enter an email address','error'); return; } var pf=document.getElementById('ttProfile'); post(EC.templates,Object.assign({action:'test_send',to:to,profile_id:(pf?pf.value:0)},tPayload())).done(function(r){ toast(r.message, r.success?'success':'error'); if(r.success) ecClose2(); }); }
+function tTestSend(){ var to=(document.getElementById('ttTo').value||'').trim(); if(!to){ toast('Enter an email address','error'); return; } var pf=document.getElementById('ttProfile'); post(EC.templates,Object.assign({action:'test_send',to:to,profile_id:(pf?pf.value:0)},tPayloadCurrent())).done(function(r){ toast(r.message, r.success?'success':'error'); if(r.success) ecClose2(); }); }
 
 /* ---------- Campaigns ---------- */
 /* Sent history: a searchable + sortable table of every campaign that has ever sent
@@ -1148,37 +1206,47 @@ let _tpls=[],_auds=[],_profs=[];
 function kNew(){ Promise.all([post(EC.audiences,{action:'list'}),post(EC.templates,{action:'list'}),post(EC.profiles,{action:'list'})]).then(function(a){ _auds=a[0].rows||[]; _tpls=a[1].rows||[]; _profs=a[2].rows||[]; kForm({}); }); }
 function kEdit(id){ Promise.all([post(EC.audiences,{action:'list'}),post(EC.templates,{action:'list'}),post(EC.profiles,{action:'list'}),post(EC.campaigns,{action:'get',id:id})]).then(function(a){ _auds=a[0].rows||[]; _tpls=a[1].rows||[]; _profs=a[2].rows||[]; kForm(a[3].campaign, a[3].variants); }); }
 function optList(arr,sel,val,txt){ return arr.map(o=>'<option value="'+o[val]+'"'+(String(o[val])===String(sel)?' selected':'')+'>'+esc(o[txt])+'</option>').join(''); }
-function kForm(c,vars){ c=c||{}; vars=vars&&vars.length?vars:[{template_id:'',weight:1}];
-    const tplOpts=id=>'<option value="">— template —</option>'+optList(_tpls,id,'id','name');
-    let vh=vars.map((v,i)=>'<div class="ec-row" style="align-items:end"><div class="ec-fg"><label>Variant '+String.fromCharCode(65+i)+' template</label><select class="ec-sel kVarTpl">'+tplOpts(v.template_id)+'</select></div><div class="ec-fg"><label>Weight</label><input class="ec-in kVarW" value="'+(v.weight||1)+'"></div></div>').join('');
+function kForm(c,vars){ c=c||{}; vars=vars&&vars.length?vars:[{template_id:''}];
+    var firstTpl=(vars[0]&&vars[0].template_id)?vars[0].template_id:'';
     ecModal(c.id?'Edit campaign':'New campaign',
         '<input type="hidden" id="kId" value="'+(c.id||'')+'">'+
         '<div class="ec-row"><div class="ec-fg"><label>Name *</label><input class="ec-in" id="kName" value="'+esc(c.name||'')+'"></div><div class="ec-fg"><label>Audience *</label><select class="ec-sel" id="kAud"><option value="">— audience —</option>'+optList(_auds,c.audience_id,'id','name')+'</select></div></div>'+
         '<div class="ec-fg"><label>Sending profile * <span class="ec-hint">(the From address + SMTP to send from; manage under the Sending tab)</span></label><select class="ec-sel" id="kProfile"><option value="">— use global default —</option>'+optList(_profs,c.sending_profile_id,'id','name')+'</select></div>'+
         /* From/Reply-to come from the sending profile, so they're hidden here to avoid confusion. */
         '<input type="hidden" id="kFromName" value=""><input type="hidden" id="kFromEmail" value=""><input type="hidden" id="kReplyTo" value="">'+
+        /* The email itself: one template. If it is an A/B template, an A/B-test toggle appears. */
+        '<div class="ec-row"><div class="ec-fg"><label>Email template *</label><select class="ec-sel" id="kTpl"><option value="">— template —</option>'+optList(_tpls,firstTpl,'id','name')+'</select></div></div>'+
+        '<label id="kAbWrap" style="display:none;margin:0 0 8px"><input type="checkbox" id="kAB"'+(c.ab_enabled?' checked':'')+'> <b>A/B test this send</b> <span class="ec-hint">— this template has a Version A and B; recipients get them 50/50 so you can compare which performs better.</span></label>'+
         '<div class="ec-row"><div class="ec-fg"><label>Batch size</label><input class="ec-in" id="kBatch" value="'+(c.batch_size||50)+'"></div><div class="ec-fg"><label>Interval between batches (min)</label><input class="ec-in" id="kInterval" value="'+(c.batch_interval_min||10)+'"></div></div>'+
         '<div class="ec-row"><div class="ec-fg"><label>Per-domain limit / run <span class="ec-hint">(0=none)</span></label><input class="ec-in" id="kPerDomain" value="'+(c.per_domain_limit||0)+'"></div><div class="ec-fg"><label>Daily cap <span class="ec-hint">(0=none)</span></label><input class="ec-in" id="kDaily" value="'+(c.daily_cap||0)+'"></div></div>'+
-        '<div class="ec-row"><div class="ec-fg"><label>Schedule start <span class="ec-hint">(blank=now)</span></label><input class="ec-in" id="kSched" type="datetime-local"></div><div class="ec-fg"><label><input type="checkbox" id="kWarm" '+(c.warmup_enabled?'checked':'')+'> Warm-up ramp &nbsp; <input type="checkbox" id="kAB" '+(c.ab_enabled?'checked':'')+'> A/B</label></div></div>'+
+        '<div class="ec-row"><div class="ec-fg"><label>Schedule start <span class="ec-hint">(blank=now)</span></label><input class="ec-in" id="kSched" type="datetime-local"></div><div class="ec-fg"><label><input type="checkbox" id="kWarm" '+(c.warmup_enabled?'checked':'')+'> Warm-up ramp</label></div></div>'+
         '<div class="ec-fg" style="border:1px solid var(--ten-border,#e2e2e2);border-radius:8px;padding:10px 12px;margin:4px 0">'+
           '<div style="font-weight:600;margin-bottom:2px">Tracking</div>'+
           '<div class="ec-hint" id="kFmtHint" style="margin:0 0 8px"></div>'+
           '<label style="display:block;margin:6px 0"><input type="checkbox" id="kTrackOpens" '+(c.track_opens?'checked':'')+'> <b>Track opens</b> <span class="ec-hint">— adds a tiny invisible image so you can see who opened. Off = better privacy &amp; deliverability.</span></label>'+
           '<label style="display:block;margin:6px 0"><input type="checkbox" id="kTrackClicks" '+(c.track_clicks?'checked':'')+'> <b>Track clicks on the links in this email</b> <span class="ec-hint">— rewrites every link so clicks are counted; recipients pass through our server first. Off = links stay exactly as you wrote them.</span></label>'+
         '</div>'+
-        '<div id="kVars">'+vh+'</div><button class="ec-btn light sm" onclick="kAddVar()">+ Add A/B variant</button>',
+        '',
         '<button class="ec-btn light" onclick="ecClose()">Cancel</button><button class="ec-btn" onclick="kSave()">Save</button>');
     // Set dropdown values explicitly — reliable preselection on edit (inline `selected` can miss).
     var ka=document.getElementById('kAud'); if(ka && c.audience_id) ka.value=String(c.audience_id);
     var kp=document.getElementById('kProfile'); if(kp && c.sending_profile_id) kp.value=String(c.sending_profile_id);
-    document.querySelectorAll('.kVarTpl').forEach(function(sel,i){ if(vars[i] && vars[i].template_id) sel.value=String(vars[i].template_id); });
-    // Tracking defaults follow the chosen template's format (HTML on, plain off). On edit,
-    // respect the saved values; on a new campaign (or when the template changes), re-default.
-    document.querySelectorAll('.kVarTpl').forEach(function(sel){ sel.addEventListener('change',function(){ kTrackSync(true); }); });
-    kTrackSync(!c.id);
+    var kt=document.getElementById('kTpl'); if(kt && firstTpl) kt.value=String(firstTpl);
+    // Tracking + A/B-test availability follow the chosen template. On edit respect saved
+    // values; on a new campaign (or when the template changes), re-default.
+    if(kt) kt.addEventListener('change',function(){ kTrackSync(true); kAbSync(true); });
+    kTrackSync(!c.id); kAbSync(!c.id);
 }
-// Is the currently-selected (first variant) template plain text? true/false, or null if none picked.
-function kSelPlain(){ var sel=document.querySelector('.kVarTpl'); if(!sel||!sel.value) return null; var t=_tpls.find(function(x){return String(x.id)===String(sel.value);}); return t?(t.is_plain==1):null; }
+// Is the currently-selected template plain text? true/false, or null if none picked.
+function kSelPlain(){ var sel=document.getElementById('kTpl'); if(!sel||!sel.value) return null; var t=_tpls.find(function(x){return String(x.id)===String(sel.value);}); return t?(t.is_plain==1):null; }
+// Show the "A/B test this send" toggle only when the chosen template actually has an A/B
+// Version B. applyDefault (new campaign / fresh template pick) turns it on by default.
+function kAbSync(applyDefault){ var sel=document.getElementById('kTpl'), wrap=document.getElementById('kAbWrap'), ab=document.getElementById('kAB'); if(!wrap||!ab) return;
+    var t=sel&&sel.value?_tpls.find(function(x){return String(x.id)===String(sel.value);}):null;
+    var isAb=!!(t&&t.ab_enabled==1);
+    wrap.style.display=isAb?'':'none';
+    if(!isAb) ab.checked=false; else if(applyDefault) ab.checked=true;
+}
 // Sync the tracking boxes to the selected template. Plain text => tracking unavailable; HTML =>
 // available, and defaulted ON when applyDefault (new campaign or a fresh template choice).
 function kTrackSync(applyDefault){ var to=document.getElementById('kTrackOpens'), tc=document.getElementById('kTrackClicks'), hint=document.getElementById('kFmtHint'); if(!to||!tc) return;
@@ -1186,9 +1254,11 @@ function kTrackSync(applyDefault){ var to=document.getElementById('kTrackOpens')
     if(plain===true){ to.checked=false; tc.checked=false; to.disabled=tc.disabled=true; to.closest('label').style.opacity=tc.closest('label').style.opacity='0.5'; if(hint) hint.textContent='This template is plain text — tracking is off (a text email can carry neither a tracking pixel nor rewritten links).'; }
     else { to.disabled=tc.disabled=false; to.closest('label').style.opacity=tc.closest('label').style.opacity=''; if(applyDefault && plain===false){ to.checked=true; tc.checked=true; } if(hint) hint.textContent=(plain===false?'This template is HTML — tracking is on by default; untick to turn it off.':'Pick a template below to set the email format.'); }
 }
-function kAddVar(){ const i=document.querySelectorAll('.kVarTpl').length; const tplOpts='<option value="">— template —</option>'+_tpls.map(o=>'<option value="'+o.id+'">'+esc(o.name)+'</option>').join(''); const div=document.createElement('div'); div.className='ec-row'; div.style.alignItems='end'; div.innerHTML='<div class="ec-fg"><label>Variant '+String.fromCharCode(65+i)+' template</label><select class="ec-sel kVarTpl">'+tplOpts+'</select></div><div class="ec-fg"><label>Weight</label><input class="ec-in kVarW" value="1"></div>'; document.getElementById('kVars').appendChild(div); document.querySelector('#kVars .ec-row:last-child .kVarTpl').addEventListener('change',function(){ kTrackSync(true); }); }
-function kSave(){ const vars=[]; document.querySelectorAll('.kVarTpl').forEach((el,i)=>{ if(el.value) vars.push({label:String.fromCharCode(65+i),template_id:el.value,weight:document.querySelectorAll('.kVarW')[i].value||1}); }); if(!vars.length){toast('Add at least one template variant','error');return;}
-    post(EC.campaigns,{action:'save',id:document.getElementById('kId').value,name:document.getElementById('kName').value,audience_id:document.getElementById('kAud').value,sending_profile_id:document.getElementById('kProfile').value,from_name:document.getElementById('kFromName').value,from_email:document.getElementById('kFromEmail').value,reply_to:document.getElementById('kReplyTo').value,batch_size:document.getElementById('kBatch').value,batch_interval_min:document.getElementById('kInterval').value,per_domain_limit:document.getElementById('kPerDomain').value,daily_cap:document.getElementById('kDaily').value,warmup_enabled:document.getElementById('kWarm').checked?1:0,ab_enabled:document.getElementById('kAB').checked?1:0,track_opens:document.getElementById('kTrackOpens').checked?1:0,track_clicks:document.getElementById('kTrackClicks').checked?1:0,scheduled_at:document.getElementById('kSched').value,variants:JSON.stringify(vars)}).done(function(r){ if(r.success){ecClose();toast('Saved');kLoad();}else toast(r.message,'error'); }); }
+function kSave(){ var tpl=(document.getElementById('kTpl')||{}).value||''; if(!tpl){toast('Choose an email template','error');return;}
+    // One template per campaign; A/B (if any) lives inside the template as Version A/B.
+    var vars=[{label:'A',template_id:tpl,weight:1}];
+    var abEl=document.getElementById('kAB');
+    post(EC.campaigns,{action:'save',id:document.getElementById('kId').value,name:document.getElementById('kName').value,audience_id:document.getElementById('kAud').value,sending_profile_id:document.getElementById('kProfile').value,from_name:document.getElementById('kFromName').value,from_email:document.getElementById('kFromEmail').value,reply_to:document.getElementById('kReplyTo').value,batch_size:document.getElementById('kBatch').value,batch_interval_min:document.getElementById('kInterval').value,per_domain_limit:document.getElementById('kPerDomain').value,daily_cap:document.getElementById('kDaily').value,warmup_enabled:document.getElementById('kWarm').checked?1:0,ab_enabled:(abEl&&abEl.checked)?1:0,track_opens:document.getElementById('kTrackOpens').checked?1:0,track_clicks:document.getElementById('kTrackClicks').checked?1:0,scheduled_at:document.getElementById('kSched').value,variants:JSON.stringify(vars)}).done(function(r){ if(r.success){ecClose();toast('Saved');kLoad();}else toast(r.message,'error'); }); }
 /* Shared, paged recipient list for a campaign — rendered into any container by id.
  * Used by both "Review & launch" and "Add new & re-run". */
 var _krState={};
@@ -1265,9 +1335,12 @@ function rLoad(){ const id=document.getElementById('rCampaign').value; if(!id){d
     h+='<h3>Engagement</h3><div class="ec-statrow">'+stat(f.sent,'sent')+(opensOn?stat(f.open,'opened'):stat('off','opens'))+(clicksOn?stat(f.click,'clicked'):stat('off','clicks'))+stat(f.reply,'replied')+stat(f.visit,'visits')+stat(f.bounce,'bounced')+stat(f.unsubscribe,'unsub')+'</div>';
     if(cm.plain_text){ h+='<div class="ec-hint" style="margin-top:6px">Sent as plain text — open &amp; click tracking off.</div>'; }
     else if(!opensOn||!clicksOn){ h+='<div class="ec-hint" style="margin-top:6px">'+([opensOn?'':'open',clicksOn?'':'click'].filter(Boolean).join(' &amp; '))+' tracking was off for this campaign.</div>'; }
-    h+='<h3>A/B variants</h3><table class="ec-tbl"><thead><tr><th>Variant</th><th>Recipients</th><th>Sent</th><th>Opened</th><th>Clicked</th><th>Replied</th></tr></thead><tbody>';
-    (r.variants||[]).forEach(v=>h+='<tr><td>'+esc(v.label)+'</td><td>'+v.recips+'</td><td>'+(v.sent||0)+'</td><td>'+(v.opened||0)+'</td><td>'+(v.clicked||0)+'</td><td>'+(v.replied||0)+'</td></tr>');
-    h+='</tbody></table><div style="margin-top:10px"><button class="ec-btn light sm" onclick="rRecips('+id+')">Show recipients</button></div><div id="rRecips"></div>';
+    if((r.variants||[]).length>1){
+        h+='<h3>A/B versions</h3><table class="ec-tbl"><thead><tr><th>Version</th><th>Recipients</th><th>Sent</th><th>Opened</th><th>Clicked</th><th>Replied</th></tr></thead><tbody>';
+        (r.variants||[]).forEach(v=>h+='<tr><td>'+esc(v.label)+'</td><td>'+v.recips+'</td><td>'+(v.sent||0)+'</td><td>'+(v.opened||0)+'</td><td>'+(v.clicked||0)+'</td><td>'+(v.replied||0)+'</td></tr>');
+        h+='</tbody></table>';
+    }
+    h+='<div style="margin-top:10px"><button class="ec-btn light sm" onclick="rRecips('+id+')">Show recipients</button></div><div id="rRecips"></div>';
     document.getElementById('rBody').innerHTML=h;
     if((bs.failed||0)>0 || (bs.skipped||0)>0) rRecips(id); // auto-open so the reason is visible
     }); }
