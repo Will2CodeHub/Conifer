@@ -6,11 +6,17 @@
   "use strict";
 
   // Registry mirror — keep in sync with lib/design_registry.php.
-  var PAGES = ["front", "section", "article", "impressum", "contact"];
+  var PAGES = ["front", "section", "article", "impressum", "contact", "about", "privacy", "terms", "disclaimer"];
+  var PAGE_LABELS = {
+    front: "Front page", section: "Section page", article: "Article page",
+    impressum: "Impressum", contact: "Contact", about: "About us",
+    privacy: "Privacy policy", terms: "Terms", disclaimer: "Disclaimer"
+  };
   var REG = {
     site_header:      { label: "Site header",       pages: PAGES, defaults: { show_search: true, show_subscribe: true } },
     masthead:         { label: "Masthead",          pages: ["front"], defaults: { tagline: "" } },
     front_feature:    { label: "Front feature",     pages: ["front"], defaults: { hero_source: "latest", lead_source: "latest", sidebar_count: 5 } },
+    front_sections:   { label: "Section blocks (all sections)", pages: ["front"], defaults: { per_section: 3 } },
     headlines_list:   { label: "Latest headlines",  pages: ["front", "section"], defaults: { count: 5, show_readtime: true } },
     section_title:    { label: "Section title",     pages: ["section"], defaults: { uppercase: true } },
     section_lead:     { label: "Section lead",      pages: ["section"], defaults: {} },
@@ -24,7 +30,7 @@
     advert:           { label: "Advert slot",       pages: ["front", "section", "article"], defaults: { slot: "" } },
     ticker:           { label: "News ticker",       pages: ["front"], defaults: {} },
     breaking_news:    { label: "Breaking news",     pages: ["front"], defaults: {} },
-    rich_text:        { label: "Rich text",         pages: ["impressum", "contact"], defaults: { content_key: "" } },
+    rich_text:        { label: "Rich text",         pages: ["impressum", "contact", "about", "privacy", "terms", "disclaimer"], defaults: { content_key: "" } },
     footer:           { label: "Footer",            pages: PAGES, defaults: {} }
   };
   var THEME = [
@@ -85,15 +91,17 @@
     m.innerHTML =
       '<div class="dl-bar">' +
         '<h3 id="dlTitle">Design</h3>' +
-        '<div class="dl-pages" id="dlPages"></div>' +
+        '<label class="dl-pagesel-wrap">Page: <select id="dlPageSel" class="dl-pagesel"></select></label>' +
         '<div class="dl-tabs" id="dlDevices">' +
           '<button class="dl-chip dl-active" data-dev="desktop">Desktop</button>' +
           '<button class="dl-chip" data-dev="mobile">Mobile</button>' +
         '</div>' +
         '<div class="dl-spacer"></div>' +
+        '<button class="dl-b preview" id="dlPreviewBtn">Preview ↗</button>' +
         '<button class="dl-b save" id="dlSave">Save draft</button>' +
         '<button class="dl-b publish" id="dlPublish">Publish</button>' +
         '<button class="dl-b history" id="dlHistory">History</button>' +
+        '<button class="dl-b max" id="dlMax" title="Maximise">⤢</button>' +
         '<button class="dl-b close" id="dlClose">Close</button>' +
       '</div>' +
       '<div class="dl-body">' +
@@ -105,7 +113,7 @@
     root.appendChild(ov); root.appendChild(m);
 
     el.ov = ov; el.modal = m;
-    el.pages = m.querySelector("#dlPages");
+    el.pageSel = m.querySelector("#dlPageSel");
     el.blocks = m.querySelector("#dlBlocks");
     el.palette = m.querySelector("#dlPalette");
     el.right = m.querySelector("#dlRight");
@@ -114,19 +122,19 @@
     el.title = m.querySelector("#dlTitle");
 
     PAGES.forEach(function (p) {
-      var b = document.createElement("button");
-      b.className = "dl-chip" + (p === "front" ? " dl-active" : "");
-      b.textContent = p.charAt(0).toUpperCase() + p.slice(1);
-      b.dataset.page = p;
-      b.addEventListener("click", function () { setPage(p); });
-      el.pages.appendChild(b);
+      var o = document.createElement("option");
+      o.value = p; o.textContent = PAGE_LABELS[p] || p;
+      el.pageSel.appendChild(o);
     });
+    el.pageSel.addEventListener("change", function () { setPage(el.pageSel.value); });
     m.querySelectorAll("#dlDevices .dl-chip").forEach(function (b) {
       b.addEventListener("click", function () { setDevice(b.dataset.dev); });
     });
+    m.querySelector("#dlPreviewBtn").addEventListener("click", function () { window.open(previewUrl(), "_blank"); });
     m.querySelector("#dlSave").addEventListener("click", saveDraft);
     m.querySelector("#dlPublish").addEventListener("click", doPublish);
     m.querySelector("#dlHistory").addEventListener("click", showHistory);
+    m.querySelector("#dlMax").addEventListener("click", function () { el.modal.classList.toggle("dl-max"); });
     m.querySelector("#dlClose").addEventListener("click", close);
     ov.addEventListener("click", close);
   }
@@ -137,13 +145,17 @@
            desktop: { theme: {}, blocks: [] }, mobile: {}, sel: -1 };
     el.title.textContent = "Design — " + p.title;
     el.ov.classList.add("dl-show"); el.modal.classList.add("dl-show");
+    document.body.style.overflow = "hidden"; // kill the page scrollbar behind the modal
     syncChips();
     loadPage();
   }
-  function close() { if (el.ov) { el.ov.classList.remove("dl-show"); el.modal.classList.remove("dl-show"); } }
+  function close() {
+    if (el.ov) { el.ov.classList.remove("dl-show"); el.modal.classList.remove("dl-show"); }
+    document.body.style.overflow = "";
+  }
 
   function syncChips() {
-    el.pages.querySelectorAll(".dl-chip").forEach(function (b) { b.classList.toggle("dl-active", b.dataset.page === st.page); });
+    if (el.pageSel) { el.pageSel.value = st.page; }
     el.modal.querySelectorAll("#dlDevices .dl-chip").forEach(function (b) { b.classList.toggle("dl-active", b.dataset.dev === st.device); });
     el.pvWrap.classList.toggle("mobile", st.device === "mobile");
   }
@@ -332,6 +344,7 @@
   }
 
   function doPublish() {
+    if (!window.confirm("Publish this design to the live site now? The current draft becomes the live version for this publication.")) { return; }
     var label = window.prompt("Optional label for this published version:", "");
     if (label === null) { return; }
     api("publish", { label: label })

@@ -8,9 +8,24 @@
  * If you change this file, copy it to design/lib/ as well.
  */
 
+/** Static (content) pages a publication's design can cover. */
+function dl_static_pages(): array {
+    return ['impressum', 'contact', 'about', 'privacy', 'terms', 'disclaimer'];
+}
+
 /** The pages a publication's design can cover. */
 function dl_page_types(): array {
-    return ['front', 'section', 'article', 'impressum', 'contact'];
+    return array_merge(['front', 'section', 'article'], dl_static_pages());
+}
+
+/** Human labels for the page selector. */
+function dl_page_label(string $page): string {
+    $map = [
+        'front' => 'Front page', 'section' => 'Section page', 'article' => 'Article page',
+        'impressum' => 'Impressum', 'contact' => 'Contact', 'about' => 'About us',
+        'privacy' => 'Privacy policy', 'terms' => 'Terms', 'disclaimer' => 'Disclaimer',
+    ];
+    return $map[$page] ?? ucfirst($page);
 }
 
 /** Default theme tokens (fonts, colours, spacing). Emitted as CSS variables. */
@@ -42,6 +57,7 @@ function dl_registry(): array {
         'site_header'      => ['label' => 'Site header',       'pages' => $all,                                'defaults' => ['show_search' => true, 'show_subscribe' => true]],
         'masthead'         => ['label' => 'Masthead',          'pages' => ['front'],                           'defaults' => ['tagline' => '']],
         'front_feature'    => ['label' => 'Front feature',     'pages' => ['front'],                           'defaults' => ['hero_source' => 'latest', 'lead_source' => 'latest', 'sidebar_count' => 5]],
+        'front_sections'   => ['label' => 'Section blocks (all sections)', 'pages' => ['front'],               'defaults' => ['per_section' => 3]],
         'headlines_list'   => ['label' => 'Latest headlines',  'pages' => ['front', 'section'],                'defaults' => ['count' => 5, 'show_readtime' => true]],
         'section_title'    => ['label' => 'Section title',     'pages' => ['section'],                         'defaults' => ['uppercase' => true]],
         'section_lead'     => ['label' => 'Section lead',      'pages' => ['section'],                         'defaults' => []],
@@ -55,7 +71,7 @@ function dl_registry(): array {
         'advert'           => ['label' => 'Advert slot',       'pages' => ['front', 'section', 'article'],     'defaults' => ['slot' => '']],
         'ticker'           => ['label' => 'News ticker',       'pages' => ['front'],                           'defaults' => []],
         'breaking_news'    => ['label' => 'Breaking news',     'pages' => ['front'],                           'defaults' => []],
-        'rich_text'        => ['label' => 'Rich text',         'pages' => ['impressum', 'contact'],            'defaults' => ['content_key' => '']],
+        'rich_text'        => ['label' => 'Rich text',         'pages' => dl_static_pages(),                   'defaults' => ['content_key' => '']],
         'footer'           => ['label' => 'Footer',            'pages' => $all,                                'defaults' => []],
     ];
 }

@@ -15,12 +15,22 @@
 .dl-chip { border: 1px solid #d1d5db; background: #fff; border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
 .dl-chip.dl-active { background: #2563eb; color: #fff; border-color: #2563eb; }
 .dl-b { border: none; border-radius: 6px; padding: 7px 13px; font-size: 13px; font-weight: 600; cursor: pointer; color: #fff; }
-.dl-b.save { background: #475569; } .dl-b.publish { background: #16a34a; } .dl-b.history { background: #7c3aed; } .dl-b.close { background: #ef4444; }
+.dl-b.save { background: #475569; } .dl-b.publish { background: #16a34a; } .dl-b.history { background: #7c3aed; }
+.dl-b.preview { background: #0891b2; } .dl-b.max { background: #334155; padding: 7px 11px; } .dl-b.close { background: #ef4444; }
+.dl-pagesel-wrap { font-size: 12px; color: #374151; display: flex; align-items: center; gap: 6px; }
+.dl-pagesel { padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; background: #fff; cursor: pointer; }
+
+/* Maximised modal */
+.dl-modal.dl-max { inset: 0; border-radius: 0; }
 
 .dl-body { display: grid; grid-template-columns: 280px 1fr 300px; min-height: 0; }
 .dl-col { overflow: auto; padding: 14px; }
+.dl-col.center { overflow: hidden; padding: 0; } /* the iframe scrolls internally — no extra bar */
 .dl-col.left { border-right: 1px solid #e5e7eb; }
 .dl-col.right { border-left: 1px solid #e5e7eb; background: #fcfcfd; }
+
+/* Greyed-out Design button for publications that can't edit their design */
+.ns-btn:disabled, .ns-btn[disabled] { background: #cbd5e1 !important; color: #64748b !important; cursor: not-allowed; opacity: .7; }
 .dl-col h4 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; }
 
 .dl-blocklist { list-style: none; margin: 0 0 12px; padding: 0; }
