@@ -21,6 +21,7 @@ $canEdit = isAdmin();
     <title>TEN News Sites — <?php echo SITE_NAME; ?></title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/backend-style.css">
+    <link rel="stylesheet" href="css/news_sites_design.css?v=<?php echo @filemtime(__DIR__ . '/css/news_sites_design.css'); ?>">
     <style>
         .ns-toolbar { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
         .ns-btn { background:#2563eb; color:#fff; border:none; padding:8px 14px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; }
@@ -44,8 +45,48 @@ $canEdit = isAdmin();
         .ns-field { margin-bottom:12px; }
         .ns-field label { display:block; font-weight:600; font-size:12px; color:#374151; margin-bottom:5px; }
         .ns-field input { width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; box-sizing:border-box; }
-        .ns-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
+        .ns-field input:focus { outline:none; border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.15); }
+        .ns-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:20px; }
         .ns-placeholder { color:#6b7280; font-size:14px; }
+
+        /* ---- Edit/Add publication modal: sectioned, visual layout ---- */
+        #nsModal { width:min(600px,94vw); max-height:90vh; overflow:auto; padding:24px; }
+        .ns-modal-head { display:flex; align-items:center; gap:12px; margin-bottom:20px; }
+        .ns-modal-icon { width:44px; height:44px; border-radius:11px; flex:0 0 auto;
+                         background:linear-gradient(135deg,#2563eb,#1e40af); color:#fff;
+                         display:flex; align-items:center; justify-content:center; font-size:19px; }
+        .ns-modal-head h3 { margin:0; font-size:18px; line-height:1.2; }
+        .ns-modal-sub { margin:3px 0 0; font-size:12px; color:#6b7280; }
+        .ns-section { border-top:1px solid #eef2f7; padding-top:16px; margin-top:16px; }
+        .ns-section:first-of-type { border-top:none; padding-top:0; margin-top:0; }
+        .ns-section-title { font-size:11px; font-weight:700; letter-spacing:.07em; text-transform:uppercase;
+                            color:#94a3b8; margin-bottom:12px; }
+        .ns-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+        @media (max-width:520px){ .ns-grid { grid-template-columns:1fr; } }
+        .ns-hint { font-size:12px; color:#6b7280; margin-top:5px; }
+
+        /* toggle rows */
+        .ns-toggle-row { display:flex; align-items:center; justify-content:space-between; gap:14px;
+                         padding:13px 15px; border:1px solid #e5e7eb; border-radius:10px;
+                         background:#f9fafb; margin-bottom:10px; transition:border-color .15s, background .15s; }
+        .ns-toggle-row:last-child { margin-bottom:0; }
+        .ns-toggle-row.is-on { background:#fff; border-color:#cbd5e1; }
+        .ns-toggle-text { min-width:0; }
+        .ns-toggle-label { display:block; font-weight:600; font-size:13px; color:#111827; }
+        .ns-toggle-label i { margin-right:7px; color:#94a3b8; }
+        .ns-toggle-row.is-on .ns-toggle-label i.fa-bolt { color:#f59e0b; }
+        .ns-toggle-desc { display:block; font-size:12px; color:#6b7280; margin-top:3px; line-height:1.45; }
+
+        /* switch */
+        .ns-switch { position:relative; display:inline-block; width:46px; height:26px; flex:0 0 auto; }
+        .ns-switch input { opacity:0; width:0; height:0; }
+        .ns-slider { position:absolute; cursor:pointer; inset:0; background:#cbd5e1; border-radius:999px; transition:.2s; }
+        .ns-slider::before { content:""; position:absolute; height:20px; width:20px; left:3px; top:3px;
+                             background:#fff; border-radius:50%; transition:.2s; box-shadow:0 1px 3px rgba(0,0,0,.25); }
+        .ns-switch input:checked + .ns-slider { background:#16a34a; }          /* live = green */
+        .ns-switch input:checked + .ns-slider::before { transform:translateX(20px); }
+        .ns-switch.brk input:checked + .ns-slider { background:#f59e0b; }      /* breaking = amber */
+        .ns-switch input:focus-visible + .ns-slider { outline:2px solid #2563eb; outline-offset:2px; }
     </style>
 </head>
 <body>
@@ -68,8 +109,12 @@ $canEdit = isAdmin();
 
             <div id="nsOverlay" class="ns-overlay" style="display:none;"></div>
             <div id="nsModal" class="ns-modal" style="display:none;"><div id="nsModalBody"></div></div>
+
+            <!-- Design editor mounts here (large modal built by news_sites_design.js) -->
+            <div id="dlDesignRoot"></div>
         </div>
     </div>
     <script src="js/news_sites.js?v=<?php echo @filemtime(__DIR__ . '/js/news_sites.js'); ?>"></script>
+    <script src="js/news_sites_design.js?v=<?php echo @filemtime(__DIR__ . '/js/news_sites_design.js'); ?>"></script>
 </body>
 </html>

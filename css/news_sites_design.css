@@ -1,0 +1,51 @@
+/* TEN Design editor modal (TEN News Sites). */
+.dl-ov { position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 7000; display: none; }
+.dl-ov.dl-show { display: block; }
+
+.dl-modal {
+  position: fixed; inset: 3vh 3vw; z-index: 7001; background: #fff; border-radius: 10px;
+  display: none; grid-template-rows: auto 1fr; overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,.35);
+}
+.dl-modal.dl-show { display: grid; }
+
+.dl-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; background: #f9fafb; }
+.dl-bar h3 { margin: 0; font-size: 16px; }
+.dl-bar .dl-spacer { flex: 1; }
+.dl-tabs, .dl-pages { display: flex; gap: 6px; flex-wrap: wrap; }
+.dl-chip { border: 1px solid #d1d5db; background: #fff; border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+.dl-chip.dl-active { background: #2563eb; color: #fff; border-color: #2563eb; }
+.dl-b { border: none; border-radius: 6px; padding: 7px 13px; font-size: 13px; font-weight: 600; cursor: pointer; color: #fff; }
+.dl-b.save { background: #475569; } .dl-b.publish { background: #16a34a; } .dl-b.history { background: #7c3aed; } .dl-b.close { background: #ef4444; }
+
+.dl-body { display: grid; grid-template-columns: 280px 1fr 300px; min-height: 0; }
+.dl-col { overflow: auto; padding: 14px; }
+.dl-col.left { border-right: 1px solid #e5e7eb; }
+.dl-col.right { border-left: 1px solid #e5e7eb; background: #fcfcfd; }
+.dl-col h4 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; }
+
+.dl-blocklist { list-style: none; margin: 0 0 12px; padding: 0; }
+.dl-blocklist li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 6px; background: #fff; cursor: grab; }
+.dl-blocklist li.dl-sel { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,.15); }
+.dl-blocklist li .dl-name { flex: 1; font-size: 13px; }
+.dl-blocklist li.dl-hidden { opacity: .45; }
+.dl-mini { border: none; background: none; cursor: pointer; font-size: 13px; color: #6b7280; }
+.dl-mini:hover { color: #111827; }
+
+.dl-palette { display: flex; flex-wrap: wrap; gap: 6px; }
+.dl-palette button { font-size: 12px; border: 1px dashed #9ca3af; background: #fff; border-radius: 6px; padding: 5px 9px; cursor: pointer; }
+
+.dl-preview { border: none; width: 100%; height: 100%; background: #fff; }
+.dl-preview-wrap { position: relative; height: 100%; }
+.dl-preview-wrap.mobile { max-width: 420px; margin: 0 auto; border-left: 1px solid #eee; border-right: 1px solid #eee; }
+
+.dl-field { margin-bottom: 12px; }
+.dl-field label { display: block; font-size: 12px; color: #374151; margin-bottom: 4px; }
+.dl-field input[type=text], .dl-field input[type=number], .dl-field select { width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 5px; font-size: 13px; }
+.dl-field input[type=color] { width: 44px; height: 28px; padding: 0; border: 1px solid #d1d5db; border-radius: 5px; }
+.dl-row2 { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+.dl-sub { font-size: 11px; color: #9ca3af; margin: 14px 0 6px; text-transform: uppercase; letter-spacing: .05em; }
+
+.dl-versions { list-style: none; margin: 0; padding: 0; }
+.dl-versions li { border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; font-size: 12px; }
+.dl-versions .dl-live { color: #16a34a; font-weight: 700; }
+.dl-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #111827; color: #fff; padding: 10px 16px; border-radius: 8px; z-index: 7100; font-size: 13px; }
