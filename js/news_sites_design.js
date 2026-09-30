@@ -137,6 +137,15 @@
     m.querySelector("#dlMax").addEventListener("click", function () { el.modal.classList.toggle("dl-max"); });
     m.querySelector("#dlClose").addEventListener("click", close);
     ov.addEventListener("click", close);
+
+    // Clicking a block in the preview iframe selects it and opens its settings.
+    window.addEventListener("message", function (e) {
+      var d = e.data;
+      if (!d || d.source !== "ten-design" || d.action !== "select" || !st) { return; }
+      if (st.device !== "desktop") { setDevice("desktop"); }
+      var idx = parseInt(d.index, 10);
+      if (!isNaN(idx) && st.desktop.blocks[idx]) { st.sel = idx; render(); }
+    });
   }
 
   function open(p) {
