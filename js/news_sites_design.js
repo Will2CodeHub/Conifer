@@ -15,7 +15,7 @@
   var REG = {
     site_header:      { label: "Site header",       pages: PAGES, defaults: { show_search: true, show_subscribe: true } },
     masthead:         { label: "Masthead",          pages: ["front"], defaults: { tagline: "" } },
-    front_feature:    { label: "Front feature",     pages: ["front"], defaults: { hero_source: "latest", lead_source: "latest", sidebar_count: 5 } },
+    front_feature:    { label: "Front feature",     pages: ["front"], defaults: { mid_count: 2, sidebar_count: 6, hero_ratio: "3 / 2", mid_ratio: "16 / 9" } },
     front_sections:   { label: "Section blocks (all sections)", pages: ["front"], defaults: { per_section: 3, sections: "" } },
     headlines_list:   { label: "Latest headlines",  pages: ["front", "section"], defaults: { count: 5, show_readtime: true } },
     section_title:    { label: "Section title",     pages: ["section"], defaults: { uppercase: true } },
@@ -29,7 +29,7 @@
     section_carousel: { label: "Section carousel",  pages: ["front", "section", "article"], defaults: { section: "", count: 10 } },
     advert:           { label: "Advert slot",       pages: ["front", "section", "article"], defaults: { slot: "" } },
     ticker:           { label: "News ticker",       pages: ["front"], defaults: {} },
-    breaking_news:    { label: "Breaking news",     pages: ["front"], defaults: {} },
+    breaking_news:    { label: "Breaking news",     pages: ["front"], defaults: { count: 6 } },
     rich_text:        { label: "Rich text",         pages: ["impressum", "contact", "about", "privacy", "terms", "disclaimer"], defaults: { content_key: "" } },
     footer:           { label: "Footer",            pages: PAGES, defaults: {} }
   };

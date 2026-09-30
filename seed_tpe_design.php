@@ -45,8 +45,8 @@ $pages = [
         'desktop' => ['theme' => $theme, 'blocks' => [
             ['type' => 'site_header',     'settings' => ['show_search' => true, 'show_subscribe' => true]],
             ['type' => 'masthead',        'settings' => ['tagline' => 'Independent journalism for the international community in France']],
-            ['type' => 'front_feature',   'settings' => ['sidebar_count' => 5]],
-            ['type' => 'breaking_news',   'settings' => []],
+            ['type' => 'front_feature',   'settings' => ['mid_count' => 2, 'sidebar_count' => 6, 'hero_ratio' => '3 / 2', 'mid_ratio' => '16 / 9']],
+            ['type' => 'breaking_news',   'settings' => ['count' => 6]],
             ['type' => 'section_carousel','settings' => ['section' => '', 'count' => 10]],
             ['type' => 'front_sections',  'settings' => ['per_section' => 3, 'sections' => '']],
             ['type' => 'footer',          'settings' => []],
