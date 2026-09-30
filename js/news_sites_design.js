@@ -335,6 +335,39 @@
   }
   function setStyle(styles, prop, val) { if (val === "" || val == null) { delete styles[prop]; } else { styles[prop] = val; } applyChangeDebounced(); }
 
+  function miniBtn(txt) { var b = document.createElement("button"); b.type = "button"; b.className = "dl-mini"; b.textContent = txt; return b; }
+
+  // Add / remove / reorder the sections shown by a front_sections block.
+  function renderSectionList(block) {
+    var arr = block.settings.sections;
+    if (!Array.isArray(arr)) {
+      arr = (typeof arr === "string" && arr) ? arr.split(",").map(function (s) { return s.trim(); }).filter(Boolean) : [];
+      block.settings.sections = arr;
+    }
+    var sub = document.createElement("div"); sub.className = "dl-sub"; sub.textContent = "Sections shown (in order)"; el.right.appendChild(sub);
+    if (!arr.length) { var n = document.createElement("p"); n.className = "dl-hint"; n.textContent = "Empty = all sections from the menu, in order."; el.right.appendChild(n); }
+    var ul = document.createElement("ul"); ul.className = "dl-seclist";
+    arr.forEach(function (name, i) {
+      var li = document.createElement("li");
+      var nm = document.createElement("span"); nm.className = "dl-name"; nm.textContent = name; li.appendChild(nm);
+      var up = miniBtn("↑"), dn = miniBtn("↓"), rm = miniBtn("✕");
+      up.addEventListener("click", function () { if (i > 0) { var t = arr[i - 1]; arr[i - 1] = arr[i]; arr[i] = t; renderRight(); applyChangeDebounced(); } });
+      dn.addEventListener("click", function () { if (i < arr.length - 1) { var t = arr[i + 1]; arr[i + 1] = arr[i]; arr[i] = t; renderRight(); applyChangeDebounced(); } });
+      rm.addEventListener("click", function () { arr.splice(i, 1); renderRight(); applyChangeDebounced(); });
+      li.appendChild(up); li.appendChild(dn); li.appendChild(rm);
+      ul.appendChild(li);
+    });
+    el.right.appendChild(ul);
+    var addWrap = document.createElement("div"); addWrap.className = "dl-row2";
+    var inp = document.createElement("input"); inp.type = "text"; inp.placeholder = "Add section, e.g. News";
+    var btn = document.createElement("button"); btn.type = "button"; btn.className = "dl-chip"; btn.textContent = "Add";
+    function add() { var v = inp.value.trim(); if (v) { arr.push(v); inp.value = ""; renderRight(); applyChangeDebounced(); } }
+    btn.addEventListener("click", add);
+    inp.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); add(); } });
+    addWrap.appendChild(inp); addWrap.appendChild(btn);
+    el.right.appendChild(addWrap);
+  }
+
   function renderBlockSettings(block) {
     var reg = REG[block.type] || { label: block.type, defaults: {} };
     if (!block.settings) block.settings = {};
@@ -370,6 +403,7 @@
 
       var defs = reg.defaults || {};
       Object.keys(defs).forEach(function (k) {
+        if (block.type === "front_sections" && k === "sections") { return; } // custom UI below
         var val = (k in block.settings) ? block.settings[k] : defs[k];
         var input;
         if (typeof defs[k] === "boolean") {
@@ -384,6 +418,8 @@
         }
         el.right.appendChild(field(k.replace(/_/g, " "), input));
       });
+
+      if (block.type === "front_sections") { renderSectionList(block); }
 
       // Custom HTML appended to the block.
       var htmlSub = document.createElement("div"); htmlSub.className = "dl-sub"; htmlSub.textContent = "Custom HTML (appended)"; el.right.appendChild(htmlSub);

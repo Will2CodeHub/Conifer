@@ -14,9 +14,12 @@
 .dl-tabs, .dl-pages { display: flex; gap: 6px; flex-wrap: wrap; }
 .dl-chip { border: 1px solid #d1d5db; background: #fff; border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
 .dl-chip.dl-active { background: #2563eb; color: #fff; border-color: #2563eb; }
-.dl-b { border: none; border-radius: 6px; padding: 7px 13px; font-size: 13px; font-weight: 600; cursor: pointer; color: #fff; }
-.dl-b.save { background: #475569; } .dl-b.publish { background: #16a34a; } .dl-b.history { background: #7c3aed; }
-.dl-b.preview { background: #0891b2; } .dl-b.max { background: #334155; padding: 7px 11px; } .dl-b.close { background: #ef4444; }
+.dl-b { border: 1px solid #dbe1ea; border-radius: 6px; padding: 7px 13px; font-size: 13px; font-weight: 500; cursor: pointer; color: #475569; background: #f3f5f8; }
+.dl-b:hover { background: #e8ecf1; }
+.dl-b.publish { background: #334155; color: #fff; border-color: #334155; font-weight: 600; }
+.dl-b.publish:hover { background: #26303f; }
+.dl-b.max { padding: 7px 11px; }
+.dl-b.close { color: #94a3b8; }
 .dl-pagesel-wrap { font-size: 12px; color: #374151; display: flex; align-items: center; gap: 6px; }
 .dl-pagesel { padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; background: #fff; cursor: pointer; }
 
@@ -62,6 +65,9 @@
 .dl-target { font-size: 12px; color: #1e3a8a; background: #eff6ff; border: 1px solid #dbeafe; padding: 7px 9px; border-radius: 6px; margin-bottom: 6px; display: flex; align-items: center; }
 .dl-color-row { display: flex; align-items: center; gap: 8px; }
 .dl-clear { border: none; background: none; color: #6b7280; font-size: 11px; cursor: pointer; text-decoration: underline; padding: 0; }
+.dl-seclist { list-style: none; margin: 0 0 8px; padding: 0; }
+.dl-seclist li { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 5px; background: #fff; }
+.dl-seclist li .dl-name { flex: 1; font-size: 13px; }
 
 .dl-versions { list-style: none; margin: 0; padding: 0; }
 .dl-versions li { border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; font-size: 12px; }
