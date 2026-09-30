@@ -48,6 +48,7 @@ $pages = [
             ['type' => 'front_feature',   'settings' => ['mid_count' => 2, 'sidebar_count' => 6, 'hero_ratio' => '3 / 2', 'mid_ratio' => '16 / 9']],
             ['type' => 'breaking_news',   'settings' => ['count' => 6]],
             ['type' => 'section_carousel','settings' => ['section' => '', 'count' => 10]],
+            ['type' => 'triple_box',      'settings' => []],
             ['type' => 'front_sections',  'settings' => ['per_section' => 3, 'sections' => '']],
             ['type' => 'footer',          'settings' => []],
         ]],

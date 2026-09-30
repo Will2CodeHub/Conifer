@@ -34,7 +34,9 @@ function dl_load_draft(string $pub, string $page, string $device = 'desktop'): ?
  * transaction (it will not be closed); omit it to use a self-managed connection.
  */
 function dl_save_draft(string $pub, string $page, string $device, array $layout, ?string $user, ?mysqli $conn = null): void {
-    if ($device === 'desktop') {
+    if ($page === '_blocks') {
+        $store = $layout; // reusable block templates, stored as-is
+    } elseif ($device === 'desktop') {
         $v = dl_validate_layout($layout, $page);
         $store = $v['layout'];
     } else {

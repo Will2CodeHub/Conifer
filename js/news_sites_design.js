@@ -26,6 +26,7 @@
     article_body:     { label: "Article body",      pages: ["article"], defaults: {} },
     article_byline:   { label: "Byline",            pages: ["article"], defaults: {} },
     article_comments: { label: "Comments",          pages: ["article"], defaults: { enabled: true } },
+    triple_box:       { label: "Triple box (insurance / clinics / events)", pages: ["front", "section"], defaults: {} },
     section_carousel: { label: "Section carousel",  pages: ["front", "section", "article"], defaults: { section: "", count: 10 } },
     advert:           { label: "Advert slot",       pages: ["front", "section", "article"], defaults: { slot: "" } },
     ticker:           { label: "News ticker",       pages: ["front"], defaults: {} },
@@ -92,6 +93,7 @@
       '<div class="dl-bar">' +
         '<h3 id="dlTitle">Design</h3>' +
         '<label class="dl-pagesel-wrap">Page: <select id="dlPageSel" class="dl-pagesel"></select></label>' +
+        '<label class="dl-pagesel-wrap">Block: <select id="dlBlockSel" class="dl-pagesel"><option value="">— editing pages —</option></select></label>' +
         '<div class="dl-tabs" id="dlDevices">' +
           '<button class="dl-chip dl-active" data-dev="desktop">Desktop</button>' +
           '<button class="dl-chip" data-dev="mobile">Mobile</button>' +
@@ -126,7 +128,15 @@
       o.value = p; o.textContent = PAGE_LABELS[p] || p;
       el.pageSel.appendChild(o);
     });
-    el.pageSel.addEventListener("change", function () { setPage(el.pageSel.value); });
+    el.pageSel.addEventListener("change", function () { el.blockSel.value = ""; setPage(el.pageSel.value); });
+
+    el.blockSel = m.querySelector("#dlBlockSel");
+    Object.keys(REG).forEach(function (type) {
+      var o = document.createElement("option"); o.value = type; o.textContent = REG[type].label; el.blockSel.appendChild(o);
+    });
+    el.blockSel.addEventListener("change", function () {
+      if (el.blockSel.value) { enterBlockMode(el.blockSel.value); } else { exitBlockMode(); }
+    });
     m.querySelectorAll("#dlDevices .dl-chip").forEach(function (b) {
       b.addEventListener("click", function () { setDevice(b.dataset.dev); });
     });
@@ -141,7 +151,7 @@
     // Preview → editor messages: select a block/element, or apply an inline edit.
     window.addEventListener("message", function (e) {
       var d = e.data;
-      if (!d || d.source !== "ten-design" || !st) { return; }
+      if (!d || d.source !== "ten-design" || !st || st.mode !== "page") { return; }
       if (d.action === "select") {
         if (st.device !== "desktop") { setDevice("desktop"); }
         var idx = parseInt(d.index, 10);
@@ -162,7 +172,8 @@
   function open(p) {
     build();
     st = { pub: p.publication, host: hostFrom(p.url), page: "front", device: "desktop",
-           desktop: { theme: {}, blocks: [] }, mobile: {}, sel: -1, selEl: "" };
+           desktop: { theme: {}, blocks: [] }, mobile: {}, sel: -1, selEl: "",
+           mode: "page", blockType: null, blockTemplates: {}, blockSel: null };
     el.title.textContent = "Design — " + p.title;
     el.ov.classList.add("dl-show"); el.modal.classList.add("dl-show");
     document.body.style.overflow = "hidden"; // kill the page scrollbar behind the modal
@@ -180,8 +191,85 @@
     el.pvWrap.classList.toggle("mobile", st.device === "mobile");
   }
 
-  function setPage(p) { st.page = p; st.sel = -1; st.selEl = ""; syncChips(); loadPage(); }
+  function setPage(p) { st.mode = "page"; st.page = p; st.sel = -1; st.selEl = ""; el.pageSel.disabled = false; syncChips(); loadPage(); }
   function setDevice(d) { st.device = d; st.sel = -1; st.selEl = ""; syncChips(); render(); refreshPreview(); }
+
+  // ---- Blocks mode: edit a reusable block's HTML template (per publication) ----
+  var TEMPLATE_BLOCKS = ["footer"]; // blocks converted to HTML templates so far
+  var BLOCK_PLACEHOLDERS = {
+    footer: "{{site_name}}, {{copyright}}, {{col1_label}}…{{col4_label}}, and {{#each sections}}{{name}} {{url}}{{/each}}"
+  };
+  var BLOCK_DEFAULT_TEMPLATES = {
+    footer:
+      '<footer class="dl-footer">\n' +
+      '  <div class="dl-container dl-footer-inner">\n' +
+      '    <div class="dl-footer-logo">{{site_name}}</div>\n' +
+      '    <div class="dl-footer-cols">\n' +
+      '      <div class="dl-footer-col">\n' +
+      '        <h4 data-dl-edit="col1_label">{{col1_label}}</h4>\n' +
+      '        {{#each sections}}<a href="{{url}}">{{name}}</a>{{/each}}\n' +
+      '      </div>\n' +
+      '      <div class="dl-footer-col">\n' +
+      '        <h4 data-dl-edit="col2_label">{{col2_label}}</h4>\n' +
+      '        <a href="/design/about">About Us</a>\n        <a href="/design/contact">Contact</a>\n' +
+      '        <a href="/design/impressum">Impressum</a>\n        <a href="/design/disclaimer">Disclaimer</a>\n' +
+      '      </div>\n' +
+      '      <div class="dl-footer-col">\n' +
+      '        <h4 data-dl-edit="col3_label">{{col3_label}}</h4>\n' +
+      '        <a href="/design/contact">Newsletter</a>\n        <a href="/design/contact">Digital Subscription</a>\n' +
+      '      </div>\n' +
+      '      <div class="dl-footer-col">\n' +
+      '        <h4 data-dl-edit="col4_label">{{col4_label}}</h4>\n' +
+      '        <a href="#">Twitter/X</a>\n        <a href="#">Facebook</a>\n        <a href="#">LinkedIn</a>\n' +
+      '      </div>\n' +
+      '    </div>\n' +
+      '    <div class="dl-footer-info" data-dl-edit="copyright">{{copyright}}</div>\n' +
+      '  </div>\n</footer>'
+  };
+
+  function enterBlockMode(type) {
+    st.mode = "blocks"; st.blockType = type; el.pageSel.disabled = true; el.pvWrap.classList.remove("mobile");
+    loadBlockTemplates(function () { renderBlockMode(); previewBlock(); });
+  }
+  function exitBlockMode() {
+    st.mode = "page"; st.blockType = null; el.pageSel.disabled = false;
+    render(); refreshPreview();
+  }
+  function loadBlockTemplates(cb) {
+    api("load", { page: "_blocks", device: "desktop" }).then(function (j) {
+      st.blockTemplates = (j.layout && j.layout.templates) ? j.layout.templates : {};
+      if (cb) { cb(); }
+    }).catch(function (e) { st.blockTemplates = {}; toast(e.message); if (cb) { cb(); } });
+  }
+  function saveBlockTemplatesDebounced() {
+    clearTimeout(applyTimer);
+    applyTimer = setTimeout(function () {
+      api("save_draft", { page: "_blocks", device: "desktop", layout_json: JSON.stringify({ templates: st.blockTemplates }) })
+        .then(previewBlock).catch(function (e) { toast(e.message); });
+    }, 500);
+  }
+  function previewBlock() {
+    el.preview.src = "https://" + st.host + "/design/?preview=1&block=" + encodeURIComponent(st.blockType) + "&_=" + Date.now();
+  }
+  function renderBlockMode() {
+    el.blocks.innerHTML = "<h4>Placeholders</h4><p class=\"dl-hint\">" + (BLOCK_PLACEHOLDERS[st.blockType] || "This block has no data placeholders.") + "</p><p class=\"dl-hint\">Placeholders are filled from the database and can't be removed; edit everything else freely.</p>";
+    el.palette.innerHTML = "";
+    el.right.innerHTML = "";
+    var h = document.createElement("h4"); h.textContent = REG[st.blockType].label + " — HTML template"; el.right.appendChild(h);
+    if (TEMPLATE_BLOCKS.indexOf(st.blockType) === -1) {
+      var p = document.createElement("p"); p.className = "dl-hint";
+      p.textContent = "This block isn't an HTML template yet — its text is editable inline on the page preview. I'm converting blocks to HTML templates one by one (footer is done).";
+      el.right.appendChild(p);
+      return;
+    }
+    var ta = document.createElement("textarea"); ta.className = "dl-css"; ta.rows = 22;
+    ta.value = (st.blockTemplates[st.blockType]) ? st.blockTemplates[st.blockType] : (BLOCK_DEFAULT_TEMPLATES[st.blockType] || "");
+    ta.addEventListener("input", function () { st.blockTemplates[st.blockType] = ta.value; saveBlockTemplatesDebounced(); });
+    el.right.appendChild(field("", ta));
+    var hint = document.createElement("p"); hint.className = "dl-hint";
+    hint.textContent = "Edit the HTML; keep the placeholders. Saves and previews automatically. This template is reused on every page that uses this block.";
+    el.right.appendChild(hint);
+  }
 
   function loadPage() {
     Promise.all([
@@ -212,9 +300,13 @@
       li.className = (st.sel === i ? "dl-sel " : "") + (hiddenOnMobile ? "dl-hidden" : "");
       if (st.device === "desktop") {
         li.draggable = true;
-        li.innerHTML = '<span class="dl-mini" title="drag">⋮⋮</span><span class="dl-name">' + esc(reg.label) + '</span>' +
+        li.innerHTML = '<span class="dl-name">' + esc(reg.label) + '</span>' +
+                       '<button class="dl-mini" data-a="up" title="Move up">↑</button>' +
+                       '<button class="dl-mini" data-a="down" title="Move down">↓</button>' +
                        '<button class="dl-mini" data-a="cfg" title="Settings">⚙</button>' +
                        '<button class="dl-mini" data-a="del" title="Remove">✕</button>';
+        li.querySelector('[data-a="up"]').addEventListener("click", function (e) { e.stopPropagation(); if (i > 0) { var t = blocks[i - 1]; blocks[i - 1] = blocks[i]; blocks[i] = t; st.sel = i - 1; render(); applyChangeDebounced(); } });
+        li.querySelector('[data-a="down"]').addEventListener("click", function (e) { e.stopPropagation(); if (i < blocks.length - 1) { var t = blocks[i + 1]; blocks[i + 1] = blocks[i]; blocks[i] = t; st.sel = i + 1; render(); applyChangeDebounced(); } });
         li.querySelector('[data-a="cfg"]').addEventListener("click", function (e) { e.stopPropagation(); st.sel = i; st.selEl = ""; render(); });
         li.querySelector('[data-a="del"]').addEventListener("click", function (e) { e.stopPropagation(); blocks.splice(i, 1); if (st.sel === i) st.sel = -1; render(); applyChangeDebounced(); });
         li.addEventListener("click", function () { st.sel = i; st.selEl = ""; render(); });

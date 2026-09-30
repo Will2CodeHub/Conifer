@@ -67,6 +67,7 @@ function dl_registry(): array {
         'article_body'     => ['label' => 'Article body',      'pages' => ['article'],                         'defaults' => []],
         'article_byline'   => ['label' => 'Byline',            'pages' => ['article'],                         'defaults' => []],
         'article_comments' => ['label' => 'Comments',          'pages' => ['article'],                         'defaults' => ['enabled' => true]],
+        'triple_box'       => ['label' => 'Triple box (insurance / clinics / events)', 'pages' => ['front', 'section'], 'defaults' => []],
         'section_carousel' => ['label' => 'Section carousel',  'pages' => ['front', 'section', 'article'],     'defaults' => ['section' => '', 'count' => 10]],
         'advert'           => ['label' => 'Advert slot',       'pages' => ['front', 'section', 'article'],     'defaults' => ['slot' => '']],
         'ticker'           => ['label' => 'News ticker',       'pages' => ['front'],                           'defaults' => []],
