@@ -261,6 +261,12 @@
     var reg = REG[block.type] || { label: block.type, defaults: {} };
     var h = document.createElement("h4"); h.textContent = reg.label + " — settings"; el.right.appendChild(h);
     if (!block.settings) block.settings = {};
+    // Universal: match the tallest element on the same row (equal-height columns).
+    var eqWrap = document.createElement("label"); eqWrap.className = "dl-inline";
+    var eq = document.createElement("input"); eq.type = "checkbox"; eq.checked = !!block.settings.equal_height;
+    eq.addEventListener("change", function () { block.settings.equal_height = eq.checked; });
+    eqWrap.appendChild(eq); eqWrap.appendChild(document.createTextNode(" Match tallest element in the same row"));
+    el.right.appendChild(eqWrap);
     var defs = reg.defaults || {};
     Object.keys(defs).forEach(function (k) {
       var val = (k in block.settings) ? block.settings[k] : defs[k];
