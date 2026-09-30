@@ -16,7 +16,7 @@
     site_header:      { label: "Site header",       pages: PAGES, defaults: { show_search: true, show_subscribe: true } },
     masthead:         { label: "Masthead",          pages: ["front"], defaults: { tagline: "" } },
     front_feature:    { label: "Front feature",     pages: ["front"], defaults: { hero_source: "latest", lead_source: "latest", sidebar_count: 5 } },
-    front_sections:   { label: "Section blocks (all sections)", pages: ["front"], defaults: { per_section: 3 } },
+    front_sections:   { label: "Section blocks (all sections)", pages: ["front"], defaults: { per_section: 3, sections: "" } },
     headlines_list:   { label: "Latest headlines",  pages: ["front", "section"], defaults: { count: 5, show_readtime: true } },
     section_title:    { label: "Section title",     pages: ["section"], defaults: { uppercase: true } },
     section_lead:     { label: "Section lead",      pages: ["section"], defaults: {} },

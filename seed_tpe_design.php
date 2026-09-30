@@ -43,14 +43,13 @@ function tpe_static_page($theme, $key) {
 $pages = [
     'front' => [
         'desktop' => ['theme' => $theme, 'blocks' => [
-            ['type' => 'site_header',    'settings' => ['show_search' => true, 'show_subscribe' => true]],
-            ['type' => 'breaking_news',  'settings' => []],
-            ['type' => 'ticker',         'settings' => []],
-            ['type' => 'masthead',       'settings' => ['tagline' => 'Independent journalism for the international community in France']],
-            ['type' => 'front_feature',  'settings' => ['sidebar_count' => 5]],
+            ['type' => 'site_header',     'settings' => ['show_search' => true, 'show_subscribe' => true]],
+            ['type' => 'masthead',        'settings' => ['tagline' => 'Independent journalism for the international community in France']],
+            ['type' => 'front_feature',   'settings' => ['sidebar_count' => 5]],
+            ['type' => 'breaking_news',   'settings' => []],
             ['type' => 'section_carousel','settings' => ['section' => '', 'count' => 10]],
-            ['type' => 'front_sections', 'settings' => ['per_section' => 3]],
-            ['type' => 'footer',         'settings' => []],
+            ['type' => 'front_sections',  'settings' => ['per_section' => 3, 'sections' => '']],
+            ['type' => 'footer',          'settings' => []],
         ]],
         // Mobile: lighter — drop the carousel, trim spacing.
         'mobile' => ['hidden' => ['section_carousel'], 'theme' => $mtheme],
