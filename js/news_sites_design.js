@@ -138,20 +138,31 @@
     m.querySelector("#dlClose").addEventListener("click", close);
     ov.addEventListener("click", close);
 
-    // Clicking a block in the preview iframe selects it and opens its settings.
+    // Preview → editor messages: select a block/element, or apply an inline edit.
     window.addEventListener("message", function (e) {
       var d = e.data;
-      if (!d || d.source !== "ten-design" || d.action !== "select" || !st) { return; }
-      if (st.device !== "desktop") { setDevice("desktop"); }
-      var idx = parseInt(d.index, 10);
-      if (!isNaN(idx) && st.desktop.blocks[idx]) { st.sel = idx; render(); }
+      if (!d || d.source !== "ten-design" || !st) { return; }
+      if (d.action === "select") {
+        if (st.device !== "desktop") { setDevice("desktop"); }
+        var idx = parseInt(d.index, 10);
+        if (!isNaN(idx) && st.desktop.blocks[idx]) { st.sel = idx; st.selEl = d.selector || ""; render(); }
+      } else if (d.action === "edit") {
+        var i = parseInt(d.index, 10);
+        var blk = st.desktop.blocks[i];
+        if (blk && d.key) {
+          if (!blk.settings) { blk.settings = {}; }
+          blk.settings[d.key] = d.value;
+          applyChangeDebounced();
+          if (st.sel === i) { renderRight(); }
+        }
+      }
     });
   }
 
   function open(p) {
     build();
     st = { pub: p.publication, host: hostFrom(p.url), page: "front", device: "desktop",
-           desktop: { theme: {}, blocks: [] }, mobile: {}, sel: -1 };
+           desktop: { theme: {}, blocks: [] }, mobile: {}, sel: -1, selEl: "" };
     el.title.textContent = "Design — " + p.title;
     el.ov.classList.add("dl-show"); el.modal.classList.add("dl-show");
     document.body.style.overflow = "hidden"; // kill the page scrollbar behind the modal
@@ -169,8 +180,8 @@
     el.pvWrap.classList.toggle("mobile", st.device === "mobile");
   }
 
-  function setPage(p) { st.page = p; st.sel = -1; syncChips(); loadPage(); }
-  function setDevice(d) { st.device = d; st.sel = -1; syncChips(); render(); refreshPreview(); }
+  function setPage(p) { st.page = p; st.sel = -1; st.selEl = ""; syncChips(); loadPage(); }
+  function setDevice(d) { st.device = d; st.sel = -1; st.selEl = ""; syncChips(); render(); refreshPreview(); }
 
   function loadPage() {
     Promise.all([
@@ -204,9 +215,9 @@
         li.innerHTML = '<span class="dl-mini" title="drag">⋮⋮</span><span class="dl-name">' + esc(reg.label) + '</span>' +
                        '<button class="dl-mini" data-a="cfg" title="Settings">⚙</button>' +
                        '<button class="dl-mini" data-a="del" title="Remove">✕</button>';
-        li.querySelector('[data-a="cfg"]').addEventListener("click", function (e) { e.stopPropagation(); st.sel = i; render(); });
-        li.querySelector('[data-a="del"]').addEventListener("click", function (e) { e.stopPropagation(); blocks.splice(i, 1); if (st.sel === i) st.sel = -1; render(); });
-        li.addEventListener("click", function () { st.sel = i; render(); });
+        li.querySelector('[data-a="cfg"]').addEventListener("click", function (e) { e.stopPropagation(); st.sel = i; st.selEl = ""; render(); });
+        li.querySelector('[data-a="del"]').addEventListener("click", function (e) { e.stopPropagation(); blocks.splice(i, 1); if (st.sel === i) st.sel = -1; render(); applyChangeDebounced(); });
+        li.addEventListener("click", function () { st.sel = i; st.selEl = ""; render(); });
         li.addEventListener("dragstart", function (e) { e.dataTransfer.setData("text/plain", i); });
         li.addEventListener("dragover", function (e) { e.preventDefault(); });
         li.addEventListener("drop", function (e) {
@@ -215,7 +226,7 @@
           if (isNaN(from) || from === i) return;
           var moved = blocks.splice(from, 1)[0];
           blocks.splice(i, 0, moved);
-          st.sel = -1; render();
+          st.sel = -1; st.selEl = ""; render(); applyChangeDebounced();
         });
       } else {
         // Mobile: read-only list with a "hide on mobile" checkbox.
@@ -226,7 +237,7 @@
           var idx = st.mobile.hidden.indexOf(b.type);
           if (this.checked) { if (idx !== -1) st.mobile.hidden.splice(idx, 1); }
           else { if (idx === -1) st.mobile.hidden.push(b.type); }
-          renderBlocks();
+          renderBlocks(); applyChangeDebounced();
         });
       }
       el.blocks.appendChild(li);
@@ -245,7 +256,7 @@
       b.textContent = "+ " + REG[type].label;
       b.addEventListener("click", function () {
         st.desktop.blocks.push({ type: type, settings: clone(REG[type].defaults) });
-        st.sel = st.desktop.blocks.length - 1; render();
+        st.sel = st.desktop.blocks.length - 1; st.selEl = ""; render(); applyChangeDebounced();
       });
       el.palette.appendChild(b);
     });
@@ -266,54 +277,130 @@
     }
   }
 
+  var FONT_OPTS = [
+    ["", "Inherit"],
+    ['"Playfair Display", Georgia, serif', "Playfair Display"],
+    ['"Lora", Georgia, serif', "Lora"],
+    ['"Inter", system-ui, sans-serif', "Inter"],
+    ["Georgia, serif", "Georgia"],
+    ["Arial, sans-serif", "Arial"],
+    ["'Times New Roman', serif", "Times"]
+  ];
+  var STYLE_SPECS = [
+    { sub: "Typography" },
+    { p: "font-family", l: "Font", t: "select", o: FONT_OPTS },
+    { p: "font-size", l: "Font size", t: "text", ph: "e.g. 20px" },
+    { p: "font-weight", l: "Weight", t: "select", o: [["",""],["400","Normal"],["500","Medium"],["600","Semibold"],["700","Bold"],["800","Extra bold"]] },
+    { p: "font-style", l: "Style", t: "select", o: [["",""],["normal","Normal"],["italic","Italic"]] },
+    { p: "text-align", l: "Align", t: "select", o: [["",""],["left","Left"],["center","Center"],["right","Right"],["justify","Justify"]] },
+    { p: "line-height", l: "Line height", t: "text", ph: "e.g. 1.3" },
+    { p: "letter-spacing", l: "Letter spacing", t: "text", ph: "e.g. 0.02em" },
+    { p: "text-transform", l: "Transform", t: "select", o: [["",""],["none","None"],["uppercase","UPPER"],["lowercase","lower"],["capitalize","Capitalize"]] },
+    { p: "color", l: "Text colour", t: "color" },
+    { sub: "Background & border" },
+    { p: "background-color", l: "Background", t: "color" },
+    { p: "border-width", l: "Border width", t: "text", ph: "e.g. 1px" },
+    { p: "border-style", l: "Border style", t: "select", o: [["",""],["solid","Solid"],["dashed","Dashed"],["dotted","Dotted"],["none","None"]] },
+    { p: "border-color", l: "Border colour", t: "color" },
+    { p: "border-radius", l: "Corner radius", t: "text", ph: "e.g. 8px" },
+    { sub: "Box" },
+    { p: "padding", l: "Padding", t: "text", ph: "e.g. 16px 24px" },
+    { p: "margin", l: "Margin", t: "text", ph: "e.g. 0 0 24px" }
+  ];
+
+  function buildStyleControls(styles) {
+    STYLE_SPECS.forEach(function (s) {
+      if (s.sub) { var d = document.createElement("div"); d.className = "dl-sub"; d.textContent = s.sub; el.right.appendChild(d); return; }
+      var input;
+      if (s.t === "select") {
+        input = document.createElement("select");
+        s.o.forEach(function (o) { var op = document.createElement("option"); op.value = o[0]; op.textContent = o[1]; input.appendChild(op); });
+        input.value = styles[s.p] || "";
+        input.addEventListener("change", function () { setStyle(styles, s.p, input.value); });
+      } else if (s.t === "color") {
+        var wrap = document.createElement("div"); wrap.className = "dl-color-row";
+        input = document.createElement("input"); input.type = "color"; input.value = styles[s.p] || "#000000";
+        var clr = document.createElement("button"); clr.type = "button"; clr.className = "dl-clear"; clr.textContent = styles[s.p] ? "clear" : "";
+        input.addEventListener("input", function () { setStyle(styles, s.p, input.value); clr.textContent = "clear"; });
+        clr.addEventListener("click", function () { setStyle(styles, s.p, ""); clr.textContent = ""; });
+        wrap.appendChild(input); wrap.appendChild(clr);
+        el.right.appendChild(field(s.l, wrap));
+        return;
+      } else {
+        input = document.createElement("input"); input.type = "text"; input.value = styles[s.p] || ""; input.placeholder = s.ph || "";
+        input.addEventListener("input", function () { setStyle(styles, s.p, input.value); });
+      }
+      el.right.appendChild(field(s.l, input));
+    });
+  }
+  function setStyle(styles, prop, val) { if (val === "" || val == null) { delete styles[prop]; } else { styles[prop] = val; } applyChangeDebounced(); }
+
   function renderBlockSettings(block) {
     var reg = REG[block.type] || { label: block.type, defaults: {} };
-    var h = document.createElement("h4"); h.textContent = reg.label + " — settings"; el.right.appendChild(h);
     if (!block.settings) block.settings = {};
-    // Universal: match the tallest element on the same row (equal-height columns).
-    var eqWrap = document.createElement("label"); eqWrap.className = "dl-inline";
-    var eq = document.createElement("input"); eq.type = "checkbox"; eq.checked = !!block.settings.equal_height;
-    eq.addEventListener("change", function () { block.settings.equal_height = eq.checked; });
-    eqWrap.appendChild(eq); eqWrap.appendChild(document.createTextNode(" Match tallest element in the same row"));
-    el.right.appendChild(eqWrap);
-    var defs = reg.defaults || {};
-    Object.keys(defs).forEach(function (k) {
-      var val = (k in block.settings) ? block.settings[k] : defs[k];
-      var input;
-      if (typeof defs[k] === "boolean") {
-        input = document.createElement("input"); input.type = "checkbox"; input.checked = !!val;
-        input.addEventListener("change", function () { block.settings[k] = input.checked; refreshPreviewDebounced(); });
-      } else if (typeof defs[k] === "number") {
-        input = document.createElement("input"); input.type = "number"; input.value = val;
-        input.addEventListener("input", function () { block.settings[k] = parseInt(input.value, 10) || 0; });
-      } else {
-        input = document.createElement("input"); input.type = "text"; input.value = val;
-        input.addEventListener("input", function () { block.settings[k] = input.value; });
-      }
-      el.right.appendChild(field(k.replace(/_/g, " "), input));
-    });
-    // Spacing group
-    var sub = document.createElement("div"); sub.className = "dl-sub"; sub.textContent = "Spacing"; el.right.appendChild(sub);
-    var sp = block.settings.spacing || {};
-    ["margin_top", "margin_bottom", "padding"].forEach(function (k) {
-      var input = document.createElement("input"); input.type = "text"; input.value = sp[k] || "";
-      input.placeholder = "e.g. 24px";
-      input.addEventListener("input", function () {
-        if (!block.settings.spacing) block.settings.spacing = {};
-        block.settings.spacing[k] = input.value;
+    if (!block.settings.styles) block.settings.styles = {};
+    var selEl = st.selEl || "";
+
+    var h = document.createElement("h4"); h.textContent = reg.label + " — settings"; el.right.appendChild(h);
+
+    // Which element the style controls target.
+    var target = document.createElement("div"); target.className = "dl-target";
+    target.innerHTML = "Styling: <strong>" + (selEl ? esc(selEl) : "whole block") + "</strong>";
+    if (selEl) {
+      var whole = document.createElement("button"); whole.type = "button"; whole.className = "dl-chip"; whole.style.marginLeft = "8px"; whole.textContent = "whole block";
+      whole.addEventListener("click", function () { st.selEl = ""; renderRight(); });
+      target.appendChild(whole);
+    }
+    el.right.appendChild(target);
+    var pHint = document.createElement("p"); pHint.className = "dl-hint"; pHint.textContent = "Click any element in the preview to style just that element.";
+    el.right.appendChild(pHint);
+
+    // Visual style controls for the selected element.
+    var styles = block.settings.styles[selEl] || (block.settings.styles[selEl] = {});
+    buildStyleControls(styles);
+
+    // Content / behaviour settings for the whole block only.
+    if (!selEl) {
+      var cfgSub = document.createElement("div"); cfgSub.className = "dl-sub"; cfgSub.textContent = "Content & options"; el.right.appendChild(cfgSub);
+      var eqWrap = document.createElement("label"); eqWrap.className = "dl-inline";
+      var eq = document.createElement("input"); eq.type = "checkbox"; eq.checked = !!block.settings.equal_height;
+      eq.addEventListener("change", function () { block.settings.equal_height = eq.checked; applyChangeDebounced(); });
+      eqWrap.appendChild(eq); eqWrap.appendChild(document.createTextNode(" Match tallest element in the same row"));
+      el.right.appendChild(eqWrap);
+
+      var defs = reg.defaults || {};
+      Object.keys(defs).forEach(function (k) {
+        var val = (k in block.settings) ? block.settings[k] : defs[k];
+        var input;
+        if (typeof defs[k] === "boolean") {
+          input = document.createElement("input"); input.type = "checkbox"; input.checked = !!val;
+          input.addEventListener("change", function () { block.settings[k] = input.checked; applyChangeDebounced(); });
+        } else if (typeof defs[k] === "number") {
+          input = document.createElement("input"); input.type = "number"; input.value = val;
+          input.addEventListener("input", function () { block.settings[k] = parseInt(input.value, 10) || 0; applyChangeDebounced(); });
+        } else {
+          input = document.createElement("input"); input.type = "text"; input.value = val;
+          input.addEventListener("input", function () { block.settings[k] = input.value; applyChangeDebounced(); });
+        }
+        el.right.appendChild(field(k.replace(/_/g, " "), input));
       });
-      el.right.appendChild(field(k.replace(/_/g, " "), input));
-    });
-    // Custom CSS for THIS block (auto-scoped to this block instance).
-    var cssSub = document.createElement("div"); cssSub.className = "dl-sub"; cssSub.textContent = "Custom CSS (this block)"; el.right.appendChild(cssSub);
-    var ta = document.createElement("textarea"); ta.className = "dl-css"; ta.rows = 7;
-    ta.placeholder = ".dl-headlines-list li { padding: 6px 0; }\n.dl-ff-hero-title { font-size: 46px; }";
-    ta.value = block.settings.custom_css || "";
-    ta.addEventListener("input", function () { block.settings.custom_css = ta.value; });
-    el.right.appendChild(field("", ta));
-    var hint = document.createElement("p"); hint.className = "dl-hint";
-    hint.textContent = "Selectors are scoped to this block automatically. Save to apply.";
-    el.right.appendChild(hint);
+
+      // Custom HTML appended to the block.
+      var htmlSub = document.createElement("div"); htmlSub.className = "dl-sub"; htmlSub.textContent = "Custom HTML (appended)"; el.right.appendChild(htmlSub);
+      var hta = document.createElement("textarea"); hta.className = "dl-css"; hta.rows = 5;
+      hta.placeholder = "<div class=\"promo\">Custom HTML…</div>";
+      hta.value = block.settings.custom_html || "";
+      hta.addEventListener("input", function () { block.settings.custom_html = hta.value; applyChangeDebounced(); });
+      el.right.appendChild(field("", hta));
+
+      // Advanced freeform CSS.
+      var cssSub = document.createElement("div"); cssSub.className = "dl-sub"; cssSub.textContent = "Advanced CSS (this block)"; el.right.appendChild(cssSub);
+      var ta = document.createElement("textarea"); ta.className = "dl-css"; ta.rows = 5;
+      ta.placeholder = ".dl-headlines-list li { padding: 6px 0; }";
+      ta.value = block.settings.custom_css || "";
+      ta.addEventListener("input", function () { block.settings.custom_css = ta.value; applyChangeDebounced(); });
+      el.right.appendChild(field("", ta));
+    }
   }
 
   function renderTheme() {
@@ -332,6 +419,7 @@
         input.addEventListener("input", function () {
           if (!st.mobile.theme) st.mobile.theme = {};
           if (input.value) st.mobile.theme[f.k] = input.value; else delete st.mobile.theme[f.k];
+          applyChangeDebounced();
         });
         el.right.appendChild(field(f.label, input));
       });
@@ -343,14 +431,14 @@
       var input = document.createElement("input");
       input.type = f.t === "color" ? "color" : "text";
       input.value = st.desktop.theme[f.k] || "";
-      input.addEventListener("input", function () { st.desktop.theme[f.k] = input.value; });
+      input.addEventListener("input", function () { st.desktop.theme[f.k] = input.value; applyChangeDebounced(); });
       el.right.appendChild(field(f.label, input));
     });
     var sub = document.createElement("div"); sub.className = "dl-sub"; sub.textContent = "Spacing & margins"; el.right.appendChild(sub);
     SPACING.forEach(function (f) {
       var input = document.createElement("input"); input.type = "text"; input.value = st.desktop.theme[f.k] || "";
       input.placeholder = "e.g. 24px";
-      input.addEventListener("input", function () { st.desktop.theme[f.k] = input.value; });
+      input.addEventListener("input", function () { st.desktop.theme[f.k] = input.value; applyChangeDebounced(); });
       el.right.appendChild(field(f.label, input));
     });
     // Whole-page custom CSS — style any element on the page.
@@ -358,7 +446,7 @@
     var ta = document.createElement("textarea"); ta.className = "dl-css"; ta.rows = 10;
     ta.placeholder = ".dl-headlines-list li { padding: 6px 0; font-size: 16px; }\n.dl-ff { gap: 32px; }";
     ta.value = st.desktop.theme.custom_css || "";
-    ta.addEventListener("input", function () { st.desktop.theme.custom_css = ta.value; });
+    ta.addEventListener("input", function () { st.desktop.theme.custom_css = ta.value; applyChangeDebounced(); });
     el.right.appendChild(field("", ta));
     var hint = document.createElement("p"); hint.className = "dl-hint";
     hint.textContent = "Target any element by its class (e.g. .dl-ff-hero-title). Save to apply.";
@@ -369,13 +457,27 @@
   function refreshPreviewDebounced() { clearTimeout(pvTimer); pvTimer = setTimeout(refreshPreview, 400); }
 
   // ---- persistence ----
+  function currentDraftPayload() {
+    if (st.device === "desktop") { return { device: "desktop", payload: st.desktop }; }
+    return { device: "mobile", payload: { hidden: st.mobile.hidden || [], theme: st.mobile.theme || {} } };
+  }
   function saveDraft() {
-    var payload, device;
-    if (st.device === "desktop") { device = "desktop"; payload = st.desktop; }
-    else { device = "mobile"; payload = { hidden: st.mobile.hidden || [], theme: st.mobile.theme || {} }; }
-    api("save_draft", { page: st.page, device: device, layout_json: JSON.stringify(payload) })
+    var d = currentDraftPayload();
+    api("save_draft", { page: st.page, device: d.device, layout_json: JSON.stringify(d.payload) })
       .then(function () { toast("Draft saved"); refreshPreview(); })
       .catch(function (e) { toast(e.message); });
+  }
+  function saveDraftSilent() {
+    var d = currentDraftPayload();
+    return api("save_draft", { page: st.page, device: d.device, layout_json: JSON.stringify(d.payload) })
+      .catch(function (e) { toast(e.message); });
+  }
+  var applyTimer = null;
+  // Every editor change persists the draft then refreshes the preview, so the
+  // preview always reflects the current settings (e.g. hiding search/subscribe).
+  function applyChangeDebounced() {
+    clearTimeout(applyTimer);
+    applyTimer = setTimeout(function () { saveDraftSilent().then(refreshPreview); }, 500);
   }
 
   function doPublish() {
