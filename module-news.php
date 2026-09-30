@@ -117,6 +117,7 @@ $canEdit = isAdmin();
     </div>
     <script src="js/news_sites.js?v=<?php echo @filemtime(__DIR__ . '/js/news_sites.js'); ?>"></script>
     <script src="https://unpkg.com/grapesjs"></script>
+    <script src="https://unpkg.com/grapesjs-preset-webpage"></script>
     <script src="js/news_sites_design.js?v=<?php echo @filemtime(__DIR__ . '/js/news_sites_design.js'); ?>"></script>
 </body>
 </html>

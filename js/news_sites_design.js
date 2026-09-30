@@ -269,14 +269,22 @@
   function initGjs(type, html) {
     if (!window.grapesjs) { toast("Visual editor library failed to load"); return; }
     if (!gjs) {
-      gjs = grapesjs.init({
+      var cfg = {
         container: "#dlGjs",
         height: "100%",
         fromElement: false,
         storageManager: false,
-        canvas: { styles: ["https://" + st.host + "/design/assets/design.css"] },
-        blockManager: { blocks: DL_GJS_BLOCKS }
-      });
+        canvas: { styles: ["https://" + st.host + "/design/assets/design.css"] }
+      };
+      // Full builder UI (blocks panel, style manager, layers, RTE) when available.
+      if (typeof window.grapesjsPresetWebpage === "function") {
+        cfg.plugins = [window.grapesjsPresetWebpage];
+      } else {
+        cfg.blockManager = { blocks: DL_GJS_BLOCKS };
+      }
+      gjs = grapesjs.init(cfg);
+      // Add our own basic blocks alongside whatever the preset provides.
+      try { DL_GJS_BLOCKS.forEach(function (b) { gjs.BlockManager.add(b.id, b); }); } catch (e) {}
       gjs.on("update", saveGjsDebounced);
     }
     gjs.setStyle("");
