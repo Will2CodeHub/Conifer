@@ -60,7 +60,7 @@ function dl_registry(): array {
         'front_sections'   => ['label' => 'Section blocks (all sections)', 'pages' => ['front'],               'defaults' => ['per_section' => 3, 'sections' => '']],
         'headlines_list'   => ['label' => 'Latest headlines',  'pages' => ['front', 'section'],                'defaults' => ['count' => 5, 'show_readtime' => true]],
         'section_title'    => ['label' => 'Section title',     'pages' => ['section'],                         'defaults' => ['uppercase' => true]],
-        'section_lead'     => ['label' => 'Section lead',      'pages' => ['section'],                         'defaults' => []],
+        'section_lead'     => ['label' => 'Section lead + headlines', 'pages' => ['section'],                  'defaults' => ['sidebar_count' => 6]],
         'article_grid'     => ['label' => 'Article grid',      'pages' => ['section'],                         'defaults' => ['columns' => 3, 'per_page' => 12]],
         'article_header'   => ['label' => 'Article header',    'pages' => ['article'],                         'defaults' => []],
         'article_hero'     => ['label' => 'Article hero image','pages' => ['article'],                         'defaults' => ['ratio' => '16x9']],

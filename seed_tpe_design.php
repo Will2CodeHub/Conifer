@@ -58,8 +58,7 @@ $pages = [
         'desktop' => ['theme' => $theme, 'blocks' => [
             ['type' => 'site_header',    'settings' => []],
             ['type' => 'section_title',  'settings' => ['uppercase' => true]],
-            ['type' => 'section_lead',   'settings' => []],
-            ['type' => 'headlines_list', 'settings' => ['count' => 5, 'show_readtime' => true]],
+            ['type' => 'section_lead',   'settings' => ['sidebar_count' => 6]],
             ['type' => 'article_grid',   'settings' => ['columns' => 3, 'per_page' => 12]],
             ['type' => 'footer',         'settings' => []],
         ]],
