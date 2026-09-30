@@ -195,36 +195,20 @@
   function setDevice(d) { st.device = d; st.sel = -1; st.selEl = ""; syncChips(); render(); refreshPreview(); }
 
   // ---- Blocks mode: edit a reusable block's HTML template (per publication) ----
-  var TEMPLATE_BLOCKS = ["footer"]; // blocks converted to HTML templates so far
+  var TEMPLATE_BLOCKS = ["site_header", "masthead", "footer", "breaking_news", "triple_box",
+                         "headlines_list", "ticker", "advert", "section_title", "rich_text", "article_comments"];
   var BLOCK_PLACEHOLDERS = {
-    footer: "{{site_name}}, {{copyright}}, {{col1_label}}…{{col4_label}}, and {{#each sections}}{{name}} {{url}}{{/each}}"
-  };
-  var BLOCK_DEFAULT_TEMPLATES = {
-    footer:
-      '<footer class="dl-footer">\n' +
-      '  <div class="dl-container dl-footer-inner">\n' +
-      '    <div class="dl-footer-logo">{{site_name}}</div>\n' +
-      '    <div class="dl-footer-cols">\n' +
-      '      <div class="dl-footer-col">\n' +
-      '        <h4 data-dl-edit="col1_label">{{col1_label}}</h4>\n' +
-      '        {{#each sections}}<a href="{{url}}">{{name}}</a>{{/each}}\n' +
-      '      </div>\n' +
-      '      <div class="dl-footer-col">\n' +
-      '        <h4 data-dl-edit="col2_label">{{col2_label}}</h4>\n' +
-      '        <a href="/design/about">About Us</a>\n        <a href="/design/contact">Contact</a>\n' +
-      '        <a href="/design/impressum">Impressum</a>\n        <a href="/design/disclaimer">Disclaimer</a>\n' +
-      '      </div>\n' +
-      '      <div class="dl-footer-col">\n' +
-      '        <h4 data-dl-edit="col3_label">{{col3_label}}</h4>\n' +
-      '        <a href="/design/contact">Newsletter</a>\n        <a href="/design/contact">Digital Subscription</a>\n' +
-      '      </div>\n' +
-      '      <div class="dl-footer-col">\n' +
-      '        <h4 data-dl-edit="col4_label">{{col4_label}}</h4>\n' +
-      '        <a href="#">Twitter/X</a>\n        <a href="#">Facebook</a>\n        <a href="#">LinkedIn</a>\n' +
-      '      </div>\n' +
-      '    </div>\n' +
-      '    <div class="dl-footer-info" data-dl-edit="copyright">{{copyright}}</div>\n' +
-      '  </div>\n</footer>'
+    site_header: "{{site_name}}, {{logo}}, {{search_icon}}, {{subscribe_label}}, {{#if show_search}}, {{#if show_subscribe}}, {{#each nav}}{{name}} {{href}}{{/each}}",
+    masthead: "{{site_name}}, {{tagline}}",
+    footer: "{{site_name}}, {{copyright}}, {{col1_label}}…{{col4_label}}, {{#each sections}}{{name}} {{url}}{{/each}}",
+    breaking_news: "{{heading}}, {{viewall_label}}, {{viewall_href}}, {{#each items}}{{title}} {{href}} {{read_time}}{{/each}}",
+    triple_box: "{{pkv_title}}, {{pkv_text}}, {{clinics_title}}, {{clinics_text}}, {{events_title}}, {{#if event}}{{event.title}} {{event.text}}{{/if}}",
+    headlines_list: "{{headlines_label}}, {{#each items}}{{title}} {{href}} {{meta}}{{/each}}",
+    ticker: "{{label}}, {{#each items}}{{title}} {{href}}{{/each}}",
+    advert: "{{label}}, {{slot}}",
+    section_title: "{{name}}, {{cls}}",
+    rich_text: "{{title}}, {{body}}",
+    article_comments: "{{heading}}, {{button_label}}"
   };
 
   function enterBlockMode(type) {
@@ -263,8 +247,18 @@
       return;
     }
     var ta = document.createElement("textarea"); ta.className = "dl-css"; ta.rows = 22;
-    ta.value = (st.blockTemplates[st.blockType]) ? st.blockTemplates[st.blockType] : (BLOCK_DEFAULT_TEMPLATES[st.blockType] || "");
     ta.addEventListener("input", function () { st.blockTemplates[st.blockType] = ta.value; saveBlockTemplatesDebounced(); });
+    if (st.blockTemplates[st.blockType]) {
+      ta.value = st.blockTemplates[st.blockType];
+    } else {
+      // Fetch the block's built-in default template from the engine to prefill.
+      ta.value = "Loading default template…";
+      var t = st.blockType;
+      fetch("https://" + st.host + "/design/?block=" + encodeURIComponent(t) + "&tpl_default=1")
+        .then(function (r) { return r.text(); })
+        .then(function (txt) { if (st.blockType === t && !st.blockTemplates[t]) { ta.value = txt; } })
+        .catch(function () { ta.value = ""; });
+    }
     el.right.appendChild(field("", ta));
     var hint = document.createElement("p"); hint.className = "dl-hint";
     hint.textContent = "Edit the HTML; keep the placeholders. Saves and previews automatically. This template is reused on every page that uses this block.";
