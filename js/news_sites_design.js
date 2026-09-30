@@ -195,18 +195,30 @@
   function setDevice(d) { st.device = d; st.sel = -1; st.selEl = ""; syncChips(); render(); refreshPreview(); }
 
   // ---- Blocks mode: edit a reusable block's HTML template (per publication) ----
-  var TEMPLATE_BLOCKS = ["site_header", "masthead", "footer", "breaking_news", "triple_box",
-                         "headlines_list", "ticker", "advert", "section_title", "rich_text", "article_comments"];
+  var TEMPLATE_BLOCKS = ["site_header", "masthead", "front_feature", "front_sections", "footer",
+                         "breaking_news", "triple_box", "headlines_list", "ticker", "advert",
+                         "section_title", "section_lead", "section_carousel", "article_grid",
+                         "article_header", "article_hero", "article_body", "article_byline",
+                         "rich_text", "article_comments"];
   var BLOCK_PLACEHOLDERS = {
     site_header: "{{site_name}}, {{logo}}, {{search_icon}}, {{subscribe_label}}, {{#if show_search}}, {{#if show_subscribe}}, {{#each nav}}{{name}} {{href}}{{/each}}",
     masthead: "{{site_name}}, {{tagline}}",
+    front_feature: "{{#if hero}}{{hero.title}} {{hero.image}} {{hero.meta}} {{hero.summary}}{{/if}}, {{#each mid}}{{title}} {{image}} {{summary}}{{/each}}, {{#each side}}{{title}} {{section}}{{/each}}",
+    front_sections: "{{#each sections}}{{name}} {{href}} {{#each cards}}{{title}} {{image}} {{snippet}}{{/each}}{{/each}}",
     footer: "{{site_name}}, {{copyright}}, {{col1_label}}…{{col4_label}}, {{#each sections}}{{name}} {{url}}{{/each}}",
-    breaking_news: "{{heading}}, {{viewall_label}}, {{viewall_href}}, {{#each items}}{{title}} {{href}} {{read_time}}{{/each}}",
+    breaking_news: "{{heading}}, {{viewall_label}}, {{#each items}}{{title}} {{href}} {{read_time}}{{/each}}",
     triple_box: "{{pkv_title}}, {{pkv_text}}, {{clinics_title}}, {{clinics_text}}, {{events_title}}, {{#if event}}{{event.title}} {{event.text}}{{/if}}",
     headlines_list: "{{headlines_label}}, {{#each items}}{{title}} {{href}} {{meta}}{{/each}}",
     ticker: "{{label}}, {{#each items}}{{title}} {{href}}{{/each}}",
     advert: "{{label}}, {{slot}}",
     section_title: "{{name}}, {{cls}}",
+    section_lead: "{{#if lead}}{{lead.title}} {{lead.image}} {{lead.summary}}{{/if}}, {{#each side}}{{title}} {{meta}}{{/each}}",
+    section_carousel: "{{title}}, {{#each items}}{{title}} {{image}} {{section}}{{/each}}",
+    article_grid: "{{columns}}, {{#each cards}}{{title}} {{image}} {{read_time}}{{/each}}, {{{pager}}}",
+    article_header: "{{section}}, {{title}}, {{standfirst}}, {{meta}}",
+    article_hero: "{{#if image}}{{image}} {{title}}{{/if}}",
+    article_body: "{{{body}}}",
+    article_byline: "{{#if byline}}{{byline}}{{/if}}",
     rich_text: "{{title}}, {{body}}",
     article_comments: "{{heading}}, {{button_label}}"
   };
