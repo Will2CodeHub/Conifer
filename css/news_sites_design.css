@@ -26,7 +26,11 @@
 /* Maximised modal */
 .dl-modal.dl-max { inset: 0; border-radius: 0; }
 
-.dl-body { display: grid; grid-template-columns: 280px 1fr 300px; min-height: 0; }
+.dl-main { min-height: 0; overflow: hidden; position: relative; }
+.dl-body { display: grid; grid-template-columns: 280px 1fr 300px; min-height: 0; height: 100%; }
+#dlGjsWrap { display: none; height: 100%; }
+#dlGjs { height: 100%; }
+#dlGjsWrap .gjs-editor { height: 100%; }
 .dl-col { overflow: auto; padding: 14px; }
 .dl-col.center { overflow: hidden; padding: 0; } /* the iframe scrolls internally — no extra bar */
 .dl-col.left { border-right: 1px solid #e5e7eb; }

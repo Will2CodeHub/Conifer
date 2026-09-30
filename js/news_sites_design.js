@@ -106,15 +106,20 @@
         '<button class="dl-b max" id="dlMax" title="Maximise">⤢</button>' +
         '<button class="dl-b close" id="dlClose">Close</button>' +
       '</div>' +
-      '<div class="dl-body">' +
-        '<div class="dl-col left"><h4>Blocks</h4><ul class="dl-blocklist" id="dlBlocks"></ul>' +
-          '<h4>Add block</h4><div class="dl-palette" id="dlPalette"></div></div>' +
-        '<div class="dl-col center" style="padding:0"><div class="dl-preview-wrap" id="dlPvWrap"><iframe class="dl-preview" id="dlPreview"></iframe></div></div>' +
-        '<div class="dl-col right" id="dlRight"></div>' +
+      '<div class="dl-main">' +
+        '<div class="dl-body">' +
+          '<div class="dl-col left"><h4>Blocks</h4><ul class="dl-blocklist" id="dlBlocks"></ul>' +
+            '<h4>Add block</h4><div class="dl-palette" id="dlPalette"></div></div>' +
+          '<div class="dl-col center" style="padding:0"><div class="dl-preview-wrap" id="dlPvWrap"><iframe class="dl-preview" id="dlPreview"></iframe></div></div>' +
+          '<div class="dl-col right" id="dlRight"></div>' +
+        '</div>' +
+        '<div id="dlGjsWrap"><div id="dlGjs"></div></div>' +
       '</div>';
     root.appendChild(ov); root.appendChild(m);
 
     el.ov = ov; el.modal = m;
+    el.body = m.querySelector(".dl-body");
+    el.gjsWrap = m.querySelector("#dlGjsWrap");
     el.pageSel = m.querySelector("#dlPageSel");
     el.blocks = m.querySelector("#dlBlocks");
     el.palette = m.querySelector("#dlPalette");
@@ -223,12 +228,36 @@
     article_comments: "{{heading}}, {{button_label}}"
   };
 
+  var gjs = null;
+  var DL_GJS_BLOCKS = [
+    { id: "dl-text", label: "Text", content: '<div data-gjs-type="text">Insert text</div>' },
+    { id: "dl-heading", label: "Heading", content: '<h2 data-gjs-type="text">Heading</h2>' },
+    { id: "dl-para", label: "Paragraph", content: '<p data-gjs-type="text">Paragraph text</p>' },
+    { id: "dl-image", label: "Image", content: { type: "image" } },
+    { id: "dl-link", label: "Link", content: '<a data-gjs-type="link" href="#">Link</a>' },
+    { id: "dl-button", label: "Button", content: '<a class="dl-btn" href="#">Button</a>' },
+    { id: "dl-box", label: "Box", content: '<div style="padding:20px;border:1px solid #e5e7eb;min-height:40px"></div>' },
+    { id: "dl-row2", label: "2 columns", content: '<div style="display:flex;gap:20px"><div style="flex:1;min-height:40px">Column</div><div style="flex:1;min-height:40px">Column</div></div>' },
+    { id: "dl-row3", label: "3 columns", content: '<div style="display:flex;gap:20px"><div style="flex:1;min-height:40px">Col</div><div style="flex:1;min-height:40px">Col</div><div style="flex:1;min-height:40px">Col</div></div>' }
+  ];
+
   function enterBlockMode(type) {
-    st.mode = "blocks"; st.blockType = type; el.pageSel.disabled = true; el.pvWrap.classList.remove("mobile");
-    loadBlockTemplates(function () { renderBlockMode(); previewBlock(); });
+    st.mode = "blocks"; st.blockType = type; el.pageSel.disabled = true;
+    el.gjsWrap.style.display = "block"; el.body.style.display = "none";
+    loadBlockTemplates(function () {
+      var saved = st.blockTemplates[type];
+      if (saved != null && saved !== "") { initGjs(type, saved); }
+      else {
+        fetch("https://" + st.host + "/design/?block=" + encodeURIComponent(type) + "&tpl_default=1")
+          .then(function (r) { return r.text(); })
+          .then(function (txt) { if (st.blockType === type) { initGjs(type, txt); } })
+          .catch(function () { initGjs(type, "<div>Empty block</div>"); });
+      }
+    });
   }
   function exitBlockMode() {
     st.mode = "page"; st.blockType = null; el.pageSel.disabled = false;
+    el.gjsWrap.style.display = "none"; el.body.style.display = "";
     render(); refreshPreview();
   }
   function loadBlockTemplates(cb) {
@@ -237,44 +266,32 @@
       if (cb) { cb(); }
     }).catch(function (e) { st.blockTemplates = {}; toast(e.message); if (cb) { cb(); } });
   }
-  function saveBlockTemplatesDebounced() {
+  function initGjs(type, html) {
+    if (!window.grapesjs) { toast("Visual editor library failed to load"); return; }
+    if (!gjs) {
+      gjs = grapesjs.init({
+        container: "#dlGjs",
+        height: "100%",
+        fromElement: false,
+        storageManager: false,
+        canvas: { styles: ["https://" + st.host + "/design/assets/design.css"] },
+        blockManager: { blocks: DL_GJS_BLOCKS }
+      });
+      gjs.on("update", saveGjsDebounced);
+    }
+    gjs.setStyle("");
+    gjs.setComponents(html || "<div>Empty block</div>");
+  }
+  function saveGjsDebounced() {
     clearTimeout(applyTimer);
     applyTimer = setTimeout(function () {
+      if (!gjs || !st.blockType) { return; }
+      var html = gjs.getHtml();
+      var css = gjs.getCss();
+      st.blockTemplates[st.blockType] = html + (css ? "\n<style>" + css + "</style>" : "");
       api("save_draft", { page: "_blocks", device: "desktop", layout_json: JSON.stringify({ templates: st.blockTemplates }) })
-        .then(previewBlock).catch(function (e) { toast(e.message); });
-    }, 500);
-  }
-  function previewBlock() {
-    el.preview.src = "https://" + st.host + "/design/?preview=1&block=" + encodeURIComponent(st.blockType) + "&_=" + Date.now();
-  }
-  function renderBlockMode() {
-    el.blocks.innerHTML = "<h4>Placeholders</h4><p class=\"dl-hint\">" + (BLOCK_PLACEHOLDERS[st.blockType] || "This block has no data placeholders.") + "</p><p class=\"dl-hint\">Placeholders are filled from the database and can't be removed; edit everything else freely.</p>";
-    el.palette.innerHTML = "";
-    el.right.innerHTML = "";
-    var h = document.createElement("h4"); h.textContent = REG[st.blockType].label + " — HTML template"; el.right.appendChild(h);
-    if (TEMPLATE_BLOCKS.indexOf(st.blockType) === -1) {
-      var p = document.createElement("p"); p.className = "dl-hint";
-      p.textContent = "This block isn't an HTML template yet — its text is editable inline on the page preview. I'm converting blocks to HTML templates one by one (footer is done).";
-      el.right.appendChild(p);
-      return;
-    }
-    var ta = document.createElement("textarea"); ta.className = "dl-css"; ta.rows = 22;
-    ta.addEventListener("input", function () { st.blockTemplates[st.blockType] = ta.value; saveBlockTemplatesDebounced(); });
-    if (st.blockTemplates[st.blockType]) {
-      ta.value = st.blockTemplates[st.blockType];
-    } else {
-      // Fetch the block's built-in default template from the engine to prefill.
-      ta.value = "Loading default template…";
-      var t = st.blockType;
-      fetch("https://" + st.host + "/design/?block=" + encodeURIComponent(t) + "&tpl_default=1")
-        .then(function (r) { return r.text(); })
-        .then(function (txt) { if (st.blockType === t && !st.blockTemplates[t]) { ta.value = txt; } })
-        .catch(function () { ta.value = ""; });
-    }
-    el.right.appendChild(field("", ta));
-    var hint = document.createElement("p"); hint.className = "dl-hint";
-    hint.textContent = "Edit the HTML; keep the placeholders. Saves and previews automatically. This template is reused on every page that uses this block.";
-    el.right.appendChild(hint);
+        .catch(function (e) { toast(e.message); });
+    }, 700);
   }
 
   function loadPage() {

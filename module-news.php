@@ -22,6 +22,7 @@ $canEdit = isAdmin();
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/backend-style.css">
     <link rel="stylesheet" href="css/news_sites_design.css?v=<?php echo @filemtime(__DIR__ . '/css/news_sites_design.css'); ?>">
+    <link rel="stylesheet" href="https://unpkg.com/grapesjs/dist/css/grapes.min.css">
     <style>
         .ns-toolbar { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
         .ns-btn { background:#2563eb; color:#fff; border:none; padding:8px 14px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; }
@@ -115,6 +116,7 @@ $canEdit = isAdmin();
         </div>
     </div>
     <script src="js/news_sites.js?v=<?php echo @filemtime(__DIR__ . '/js/news_sites.js'); ?>"></script>
+    <script src="https://unpkg.com/grapesjs"></script>
     <script src="js/news_sites_design.js?v=<?php echo @filemtime(__DIR__ . '/js/news_sites_design.js'); ?>"></script>
 </body>
 </html>
