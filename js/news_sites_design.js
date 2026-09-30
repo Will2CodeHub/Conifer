@@ -290,6 +290,8 @@
     }
     gjs.setStyle("");
     gjs.setComponents(html || "<div>Empty block</div>");
+    window.__dlGjs = gjs;
+    try { gjs.runCommand("open-blocks"); } catch (e) {}
   }
   function saveGjsDebounced() {
     clearTimeout(applyTimer);
