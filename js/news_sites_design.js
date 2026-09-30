@@ -277,8 +277,9 @@
         canvas: { styles: ["https://" + st.host + "/design/assets/design.css"] }
       };
       // Full builder UI (blocks panel, style manager, layers, RTE) when available.
-      if (typeof window.grapesjsPresetWebpage === "function") {
-        cfg.plugins = [window.grapesjsPresetWebpage];
+      var preset = window["grapesjs-preset-webpage"] || window.grapesjsPresetWebpage;
+      if (typeof preset === "function") {
+        cfg.plugins = [preset];
       } else {
         cfg.blockManager = { blocks: DL_GJS_BLOCKS };
       }
