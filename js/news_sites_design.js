@@ -289,6 +289,16 @@
       });
       el.right.appendChild(field(k.replace(/_/g, " "), input));
     });
+    // Custom CSS for THIS block (auto-scoped to this block instance).
+    var cssSub = document.createElement("div"); cssSub.className = "dl-sub"; cssSub.textContent = "Custom CSS (this block)"; el.right.appendChild(cssSub);
+    var ta = document.createElement("textarea"); ta.className = "dl-css"; ta.rows = 7;
+    ta.placeholder = ".dl-headlines-list li { padding: 6px 0; }\n.dl-ff-hero-title { font-size: 46px; }";
+    ta.value = block.settings.custom_css || "";
+    ta.addEventListener("input", function () { block.settings.custom_css = ta.value; });
+    el.right.appendChild(field("", ta));
+    var hint = document.createElement("p"); hint.className = "dl-hint";
+    hint.textContent = "Selectors are scoped to this block automatically. Save to apply.";
+    el.right.appendChild(hint);
   }
 
   function renderTheme() {
@@ -328,6 +338,16 @@
       input.addEventListener("input", function () { st.desktop.theme[f.k] = input.value; });
       el.right.appendChild(field(f.label, input));
     });
+    // Whole-page custom CSS — style any element on the page.
+    var cssSub = document.createElement("div"); cssSub.className = "dl-sub"; cssSub.textContent = "Custom CSS (whole page)"; el.right.appendChild(cssSub);
+    var ta = document.createElement("textarea"); ta.className = "dl-css"; ta.rows = 10;
+    ta.placeholder = ".dl-headlines-list li { padding: 6px 0; font-size: 16px; }\n.dl-ff { gap: 32px; }";
+    ta.value = st.desktop.theme.custom_css || "";
+    ta.addEventListener("input", function () { st.desktop.theme.custom_css = ta.value; });
+    el.right.appendChild(field("", ta));
+    var hint = document.createElement("p"); hint.className = "dl-hint";
+    hint.textContent = "Target any element by its class (e.g. .dl-ff-hero-title). Save to apply.";
+    el.right.appendChild(hint);
   }
 
   var pvTimer = null;
