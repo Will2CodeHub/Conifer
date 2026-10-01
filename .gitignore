@@ -32,3 +32,5 @@ scraper/worker/vpn_configs/
 Thumbs.db
 .idea/
 .vscode/
+
+.claude/settings.local.json
