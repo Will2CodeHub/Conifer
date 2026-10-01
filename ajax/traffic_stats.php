@@ -224,6 +224,23 @@ function getDailySeries($siteKey, $days = 31) {
 }
 
 /**
+ * Live "today" stats straight from the site's visitor log (00:00..now), or null if the
+ * log isn't readable here. Lets the current-month summary reflect today's visits before
+ * the nightly collector has aggregated them. Includes human_unique_hashes for dedup.
+ */
+function ts_live_today_stats($siteKey) {
+    $sites = ten_stats_sites();
+    $logPath = $sites[$siteKey]['log_path'] ?? '';
+    if (!$logPath || !@file_exists($logPath) || !@is_readable($logPath)) { return null; }
+    try {
+        $an = new LogAnalyzer($logPath, $siteKey);
+        return $an->analyzeTimePeriod(strtotime('today 00:00:00'), time(), 40 * 1024 * 1024, true);
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+/**
  * Get monthly summary with projections
  */
 function getMonthlySummary() {
@@ -257,8 +274,9 @@ function getMonthlySummary() {
     $startDate = date('Y-m-d', $currentMonthStart);
     $endDate = date('Y-m-d', $currentMonthEnd);
 
-    // Page views for the current month so far (human-only breakdown).
-    $currentMonthPageViews = getPageViewsTotal($conn, $siteKey, $startDate, $endDate);
+    // DB aggregate for the month so far. The collector runs nightly, so this normally
+    // EXCLUDES today until tomorrow's run — we overlay today's live figure below.
+    $dbMonthPageViews = getPageViewsTotal($conn, $siteKey, $startDate, $endDate);
 
     $stmt = $conn->prepare("
         SELECT COUNT(DISTINCT stat_date) as days_with_data,
@@ -276,17 +294,54 @@ function getMonthlySummary() {
     $currentMonthData = $stmt->get_result()->fetch_assoc();
     $stmt->close();
 
+    // Today's DB row (if the collector already aggregated today) — subtracted when we
+    // overlay the fresher live-today figure, so today is never double-counted.
+    $todayDate = date('Y-m-d');
+    $stmt = $conn->prepare("SELECT total_visits, human_visits, human_unique, bot_visits, spam_visits
+                            FROM ten_traffic_stats WHERE site_key = ? AND stat_date = ?");
+    $stmt->bind_param("ss", $siteKey, $todayDate);
+    $stmt->execute();
+    $todayRow = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    $todayDbPageViews = getPageViewsTotal($conn, $siteKey, $todayDate, $todayDate);
+
     $curHumanVisits = (int)($currentMonthData['human_visits'] ?? 0);
     $curBots        = (int)($currentMonthData['bot_visits'] ?? 0) + (int)($currentMonthData['spam_visits'] ?? 0);
     $curTotal       = (int)($currentMonthData['total_visits'] ?? 0);
-
-    $currentHumanUnique = getUniqueVisitorsDedup(
-        $conn, $siteKey, $startDate, $endDate,
-        (int)($currentMonthData['human_unique'] ?? 0), 'human_unique_hashes', 'human_unique'
-    );
-
-    $daysInMonth = date('t');
+    $currentMonthPageViews = (int)$dbMonthPageViews;
+    $daysInMonth  = date('t');
     $daysWithData = (int)($currentMonthData['days_with_data'] ?? 0);
+
+    // Fold TODAY's live visits (straight from the log) on top of the month-to-date, so
+    // the current-month box reflects today before the nightly collector aggregates it.
+    $live = ts_live_today_stats($siteKey);
+    if ($live !== null) {
+        $tHuman = (int)($todayRow['human_visits'] ?? 0);
+        $tBots  = (int)($todayRow['bot_visits'] ?? 0) + (int)($todayRow['spam_visits'] ?? 0);
+        $tTotal = (int)($todayRow['total_visits'] ?? 0);
+        $liveHuman = (int)($live['human_visits'] ?? 0);
+        $liveBots  = (int)($live['bot_visits'] ?? 0) + (int)($live['spam_visits'] ?? 0);
+        $liveTotal = (int)($live['total_visits'] ?? 0);
+        $livePV = 0; foreach (($live['page_views'] ?? []) as $pc) { $livePV += (int)$pc; }
+
+        $curHumanVisits        = max(0, $curHumanVisits - $tHuman) + $liveHuman;
+        $curBots               = max(0, $curBots - $tBots) + $liveBots;
+        $curTotal              = max(0, $curTotal - $tTotal) + $liveTotal;
+        $currentMonthPageViews = max(0, (int)$dbMonthPageViews - (int)$todayDbPageViews) + $livePV;
+        if (!$todayRow && $liveHuman > 0) { $daysWithData++; } // today now counts as a data day
+
+        $yesterday = date('Y-m-d', strtotime('yesterday'));
+        $fallback  = max(0, (int)($currentMonthData['human_unique'] ?? 0) - (int)($todayRow['human_unique'] ?? 0)) + (int)($live['human_unique'] ?? 0);
+        $currentHumanUnique = getUniqueVisitorsDedup(
+            $conn, $siteKey, $startDate, $yesterday, $fallback,
+            'human_unique_hashes', 'human_unique', ($live['human_unique_hashes'] ?? [])
+        );
+    } else {
+        $currentHumanUnique = getUniqueVisitorsDedup(
+            $conn, $siteKey, $startDate, $endDate,
+            (int)($currentMonthData['human_unique'] ?? 0), 'human_unique_hashes', 'human_unique'
+        );
+    }
     // A projection needs a few real days to be meaningful — extrapolating a full
     // month from 1-2 days gives nonsense, so require at least 3 days of data.
     $projectionAvailable = $daysWithData >= 3;
@@ -341,7 +396,7 @@ function getMonthlySummary() {
  * missing its fingerprints (i.e. predates fingerprint collection). This keeps a
  * transition month from silently under-reporting.
  */
-function getUniqueVisitorsDedup($conn, $siteKey, $startDate, $endDate, $fallbackSum, $hashCol = 'visitor_hashes', $countCol = 'unique_visitors') {
+function getUniqueVisitorsDedup($conn, $siteKey, $startDate, $endDate, $fallbackSum, $hashCol = 'visitor_hashes', $countCol = 'unique_visitors', $extraHashes = []) {
     static $colOk = [];
     if (!isset($colOk[$hashCol])) {
         $colOk[$hashCol] = false;
@@ -381,6 +436,15 @@ function getUniqueVisitorsDedup($conn, $siteKey, $startDate, $endDate, $fallback
         }
     }
     $stmt->close();
+
+    // Fold in today's LIVE fingerprints (from the log) when supplied, so the current
+    // month includes today before the nightly collector has aggregated it. Today's
+    // live pass counts as one fully-fingerprinted day of traffic.
+    if (!empty($extraHashes) && is_array($extraHashes)) {
+        foreach ($extraHashes as $h) { $union[$h] = true; }
+        $daysWithTraffic++;
+        $daysFingerprinted++;
+    }
 
     // Only trust the dedup when every day that had traffic was fingerprinted.
     if ($daysWithTraffic > 0 && $daysFingerprinted >= $daysWithTraffic) {
