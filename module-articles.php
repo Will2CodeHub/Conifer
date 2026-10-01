@@ -29,8 +29,77 @@ $pageTitle = 'Article Management';
     <link rel="stylesheet" href="css/backend-style.css">
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+    /* Author finder: the author <select> lists only ACTIVE authors by default; this adds
+       a "Find another author…" option that searches ALL authors (incl. inactive) so an
+       old/retired writer can still be credited. Used by both the add-article and edit forms. */
+    (function () {
+        var FIND_VALUE = '__find_author__';
+        window.TEN_appendAuthorFinder = function (selectEl) {
+            if (!selectEl || selectEl.querySelector('option[value="' + FIND_VALUE + '"]')) return;
+            var o = document.createElement('option');
+            o.value = FIND_VALUE;
+            o.textContent = '🔍 Find another author (incl. inactive)…';
+            selectEl.appendChild(o);
+            selectEl.addEventListener('focus', function () { selectEl.dataset.prevValue = selectEl.value; });
+            selectEl.addEventListener('change', function () {
+                if (selectEl.value !== FIND_VALUE) return;
+                selectEl.value = selectEl.dataset.prevValue || '';
+                openFinder(selectEl);
+            });
+        };
+        function injectAndSelect(selectEl, a) {
+            var exists = Array.prototype.some.call(selectEl.options, function (o) { return o.value === String(a.id); });
+            if (!exists) {
+                var o = document.createElement('option');
+                o.value = a.id;
+                o.textContent = a.name + (a.active ? '' : ' — inactive');
+                var finder = selectEl.querySelector('option[value="' + FIND_VALUE + '"]');
+                if (finder) { selectEl.insertBefore(o, finder); } else { selectEl.appendChild(o); }
+            }
+            selectEl.value = String(a.id);
+        }
+        function openFinder(selectEl) {
+            Swal.fire({
+                title: 'Find an author',
+                input: 'text',
+                inputLabel: 'Search by name — includes inactive accounts',
+                inputPlaceholder: 'Type a name…',
+                showCancelButton: true,
+                confirmButtonText: 'Search',
+                customClass: { container: 'swal-high-z' }
+            }).then(function (res) {
+                if (!res.isConfirmed) return;
+                var q = (res.value || '').trim();
+                if (q.length < 2) { Swal.fire('Too short', 'Type at least 2 characters.', 'info'); return; }
+                return fetch('/management/ajax/search_authors.php', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({ q: q })
+                }).then(function (r) { return r.json(); }).then(function (j) {
+                    var list = (j && j.status === 'success') ? (j.authors || []) : [];
+                    if (!list.length) { Swal.fire('No matches', 'No authors found for that name.', 'info'); return; }
+                    var opts = {};
+                    list.forEach(function (a) { opts[a.id] = a.name + (a.active ? '' : ' — inactive'); });
+                    return Swal.fire({
+                        title: 'Select author', input: 'select', inputOptions: opts,
+                        showCancelButton: true, confirmButtonText: 'Use this author',
+                        customClass: { container: 'swal-high-z' }
+                    }).then(function (sel) {
+                        if (!sel.isConfirmed || !sel.value) return;
+                        var chosen = list.filter(function (a) { return String(a.id) === String(sel.value); })[0];
+                        if (chosen) injectAndSelect(selectEl, chosen);
+                    });
+                }).catch(function () { Swal.fire('Error', 'Could not search authors.', 'error'); });
+            });
+        }
+    })();
+    </script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.css" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.js"></script>
+    <!-- flatpickr: calendar + time picker for scheduling publish from/to -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
     <style>
         :root {
             --primary: #3c4f6d;      /* slate-blue — matches the Data Scraper page */
@@ -877,7 +946,7 @@ $pageTitle = 'Article Management';
                         <div class="ed-tabs">
                             <button type="button" class="ed-tab" data-edtab="apub"><i class="fas fa-newspaper"></i> Publications</button>
                             <button type="button" class="ed-tab" data-edtab="aauthor"><i class="fas fa-user"></i> Author &amp; Section</button>
-                            <button type="button" class="ed-tab" data-edtab="aflags"><i class="fas fa-sliders-h"></i> Flags</button>
+                            <button type="button" class="ed-tab" data-edtab="aflags"><i class="fas fa-sliders-h"></i> Flags &amp; Scheduling</button>
                             <button type="button" class="ed-tab" data-edtab="aseo"><i class="fas fa-hashtag"></i> SEO &amp; Metadata</button>
                         </div>
                         <div class="ed-tabwrap">
@@ -903,6 +972,16 @@ $pageTitle = 'Article Management';
                                     <label class="ed-flag" title="Show this article as the section headline."><input type="checkbox" id="add_article_featured"><i class="fas fa-star" style="color:#f59e0b;"></i> Section Headline</label>
                                     <label class="ed-flag" title="Never expires."><input type="checkbox" id="add_article_evergreen"><i class="fas fa-leaf" style="color:#10b981;"></i> Evergreen</label>
                                     <label class="ed-flag" title="Paid/partner content."><input type="checkbox" id="add_article_sponsored" name="add_article_sponsored" value="1"><i class="fas fa-ad" style="color:#8b5cf6;"></i> Sponsored</label>
+                                </div>
+                                <!-- Scheduling: publish now, or pick a from/to window on the calendar. -->
+                                <div style="display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid #f0f0f0;">
+                                    <label class="ed-flag" title="Publish immediately. Uncheck to schedule a publish window." style="background:#eff6ff;border-color:#bfdbfe;align-self:center;">
+                                        <input type="checkbox" id="add_publish_now" checked><i class="fas fa-bolt" style="color:#3b82f6;"></i> Publish now
+                                    </label>
+                                    <div id="add_publish_date_fields" style="display:none;align-items:flex-end;gap:10px;">
+                                        <div><label class="ed-lbl">Publish from</label><input id="add_publish_from" type="text" placeholder="Pick date &amp; time" class="ed-input" style="width:170px;"></div>
+                                        <div><label class="ed-lbl">Publish to <span style="font-weight:400;text-transform:none;color:#94a3b8;">(optional)</span></label><input id="add_publish_to" type="text" placeholder="Pick date &amp; time" class="ed-input" style="width:170px;"></div>
+                                    </div>
                                 </div>
                             </div>
                             <div class="ed-tabpanel" data-edpanel="aseo">
@@ -1339,6 +1418,35 @@ document.getElementById('modal_publish_now').addEventListener('change', function
     const dateFields = document.getElementById('publish_date_fields');
     dateFields.style.display = this.checked ? 'none' : 'flex';
 });
+
+/* Scheduling calendars (flatpickr) for BOTH the edit modal and the Add Article form.
+   altInput shows a friendly "12 Oct 2026, 14:30"; the real <input> keeps 'Y-m-d H:i'
+   (what we POST). save_article.php normalises that to a MySQL datetime. */
+(function () {
+    if (typeof flatpickr === 'undefined') return;
+    var fpOpts = { enableTime: true, time_24hr: true, dateFormat: 'Y-m-d H:i',
+                   altInput: true, altFormat: 'd M Y, H:i', allowInput: true, minuteIncrement: 5 };
+    function mk(id) { var el = document.getElementById(id); return el ? flatpickr(el, fpOpts) : null; }
+    window.TEN_fp = {
+        modalFrom: mk('modal_publish_from'),
+        modalTo:   mk('modal_publish_to'),
+        addFrom:   mk('add_publish_from'),
+        addTo:     mk('add_publish_to')
+    };
+    // Add Article: reveal the from/to calendars when "Publish now" is unticked.
+    var addNow = document.getElementById('add_publish_now');
+    if (addNow) addNow.addEventListener('change', function () {
+        var f = document.getElementById('add_publish_date_fields');
+        if (f) f.style.display = this.checked ? 'none' : 'flex';
+    });
+})();
+// Load a flatpickr instance from a DB datetime ('Y-m-d H:i:s' | 'Y-m-d' | empty/zero).
+window.TEN_setFp = function (fp, val) {
+    if (!fp) return;
+    if (!val || /^0000-00-00/.test(String(val))) { fp.clear(); return; }
+    var d = new Date(String(val).replace(' ', 'T'));
+    if (isNaN(d.getTime())) { fp.clear(); } else { fp.setDate(d, false); }
+};
 
 /* Settings tabs: keep the tab row fixed; open the chosen panel below it.
    Scoped per .ed-tabs group (its own .ed-tabwrap sibling + panels) so multiple
@@ -2302,6 +2410,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                                 opt.textContent = j.name;
                                 authorSel.appendChild(opt);
                             });
+                            if (window.TEN_appendAuthorFinder) TEN_appendAuthorFinder(authorSel);
                             // Hide wrapper if no choice (only one journalist = current user)
                             if (json.all_journalists.length === 1) {
                                 authorSel.value = json.all_journalists[0].id;
@@ -2361,9 +2470,10 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                 fd.append('featured', $('#add_article_featured').is(':checked') ? '1' : '0');
                 fd.append('sponsored', $('#add_article_sponsored').is(':checked') ? '1' : '0');
                 fd.append('frontpage_temp', $('#add_article_headline').is(':checked') ? '1' : '0');
-                fd.append('publish_now', '1');
-                fd.append('publish_from', '');
-                fd.append('publish_to', '');
+                var addPubNow = $('#add_publish_now').is(':checked');
+                fd.append('publish_now', addPubNow ? '1' : '0');
+                fd.append('publish_from', addPubNow ? '' : ($('#add_publish_from').val() || ''));
+                fd.append('publish_to', addPubNow ? '' : ($('#add_publish_to').val() || ''));
                 fd.append('action', (window._addArticleAction === 'submit') ? 'submit' : 'save'); // Save Draft or Submit for Review
 
                 fetch('/management/ajax/save_article.php', { method: 'POST', body: fd, credentials: 'same-origin' })
@@ -2387,6 +2497,9 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                                 $('#article_text').html('');
                                 $('#add_article_meta_title,#add_article_meta_description,#add_article_meta_keywords,#add_article_tags').val('');
                                 $('#add_article_headline,#add_article_featured,#add_article_evergreen,#add_article_sponsored').prop('checked', false);
+                                $('#add_publish_now').prop('checked', true);
+                                $('#add_publish_date_fields').css('display', 'none');
+                                if (window.TEN_fp) { if (TEN_fp.addFrom) TEN_fp.addFrom.clear(); if (TEN_fp.addTo) TEN_fp.addTo.clear(); }
                                 $('#article_submission_terms_checkbox').prop('checked', true);
                             }
                         });
@@ -3470,9 +3583,16 @@ document.getElementById('modal_publish_now').addEventListener('change', function
         if (fld_featured) fld_featured.checked = false;
         if (fld_sponsored) fld_sponsored.checked = false;
         fld_headline.value = '';
-        fld_publish_from.value = '';
-        fld_publish_to.value = '';
+        if (window.TEN_fp) {
+            if (TEN_fp.modalFrom) TEN_fp.modalFrom.clear();
+            if (TEN_fp.modalTo) TEN_fp.modalTo.clear();
+        } else {
+            fld_publish_from.value = '';
+            fld_publish_to.value = '';
+        }
         fld_publish_now.checked = true; // Default to publish now
+        var _pdf0 = document.getElementById('publish_date_fields');
+        if (_pdf0) _pdf0.style.display = 'none';
         pub_container.innerHTML = '';
 
         // Try to move the editor in first
@@ -3561,6 +3681,7 @@ document.getElementById('modal_publish_now').addEventListener('change', function
                     fld_author.appendChild(option);
                 });
             }
+            if (window.TEN_appendAuthorFinder) TEN_appendAuthorFinder(fld_author);
 
             // Populate basic fields
             fld_title.value = json.title || '';
@@ -3590,9 +3711,16 @@ document.getElementById('modal_publish_now').addEventListener('change', function
             if (fld_sponsored) fld_sponsored.checked = sponsoredValue;
             if (fld_headline) fld_headline.checked = headlineValue;
             
-            fld_publish_from.value = json.publish_from || '';
-            fld_publish_to.value = json.publish_to || '';
+            if (window.TEN_fp) {
+                TEN_setFp(TEN_fp.modalFrom, json.publish_from);
+                TEN_setFp(TEN_fp.modalTo, json.publish_to);
+            } else {
+                fld_publish_from.value = json.publish_from || '';
+                fld_publish_to.value = json.publish_to || '';
+            }
             fld_publish_now.checked = publishNowValue;
+            var _pdf = document.getElementById('publish_date_fields');
+            if (_pdf) _pdf.style.display = publishNowValue ? 'none' : 'flex';
             
             // Build publication rows with checkbox + radio in same row
             pub_container.innerHTML = '';

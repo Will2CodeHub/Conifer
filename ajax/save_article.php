@@ -22,6 +22,28 @@ function ten_article_slug(string $text): string {
 }
 
 /**
+ * Normalise a scheduling value to a MySQL 'Y-m-d H:i:s' string, or null when empty.
+ * Accepts the flatpickr calendar output ('Y-m-d H:i'), the legacy 'd-m-Y[ H:i]' text,
+ * and a plain date; anything unparseable becomes null (= no schedule). The leading '!'
+ * resets unspecified parts (so a date-only value gets 00:00:00, not the current time).
+ */
+function ten_normalize_datetime($v): ?string {
+    $v = trim((string) $v);
+    if ($v === '') { return null; }
+    foreach (['!Y-m-d H:i:s', '!Y-m-d H:i', '!Y-m-d', '!d-m-Y H:i:s', '!d-m-Y H:i', '!d-m-Y', '!d/m/Y H:i', '!d/m/Y'] as $f) {
+        $dt = DateTime::createFromFormat($f, $v);
+        if ($dt !== false) {
+            $errs = DateTime::getLastErrors();
+            if ($errs === false || ($errs['warning_count'] === 0 && $errs['error_count'] === 0)) {
+                return $dt->format('Y-m-d H:i:s');
+            }
+        }
+    }
+    $ts = strtotime($v);
+    return $ts ? date('Y-m-d H:i:s', $ts) : null;
+}
+
+/**
  * After an article is published, rebuild the front page (index.php) of
  * each publication it appears on by calling that site's generate_index_page.php.
  * Best-effort: a cache failure must never affect the save.
@@ -177,24 +199,10 @@ try {
         }
     }
     
-    // Convert date formats if needed (dd-mm-yyyy to yyyy-mm-dd)
-    if ($publishFrom && !empty($publishFrom)) {
-        $parts = explode('-', $publishFrom);
-        if (count($parts) == 3 && strlen($parts[0]) <= 2) {
-            $publishFrom = $parts[2] . '-' . $parts[1] . '-' . $parts[0];
-        }
-    } else {
-        $publishFrom = null;
-    }
-    
-    if ($publishTo && !empty($publishTo)) {
-        $parts = explode('-', $publishTo);
-        if (count($parts) == 3 && strlen($parts[0]) <= 2) {
-            $publishTo = $parts[2] . '-' . $parts[1] . '-' . $parts[0];
-        }
-    } else {
-        $publishTo = null;
-    }
+    // Normalise the schedule inputs to a MySQL datetime. Accepts the calendar's
+    // 'Y-m-d H:i' as well as the legacy 'dd-mm-yyyy' / 'dd-mm-yyyy HH:MM' text.
+    $publishFrom = ten_normalize_datetime($publishFrom);
+    $publishTo   = ten_normalize_datetime($publishTo);
     
     // Set default author if not provided
     if ($author == 0) {
@@ -204,7 +212,20 @@ try {
     if ($position === 'Journalist') {
         $author = $userId;
     }
-    
+
+    // Resolve the author's display name so created_by always tracks journalist_id.
+    // Without this, reassigning the author on an existing article left created_by as
+    // the original writer, so the live article showed two different authors.
+    $createdBy = '';
+    try {
+        $cn = getDBConnection();
+        $cs = $cn->prepare("SELECT full_name FROM ten_users WHERE id = ?");
+        $cs->bind_param('i', $author); $cs->execute();
+        $cr = $cs->get_result()->fetch_assoc(); $cs->close(); $cn->close();
+        $createdBy = $cr['full_name'] ?? '';
+    } catch (Throwable $e) { $createdBy = ''; }
+    if ($createdBy === '') { $createdBy = $_SESSION['ten_full_name'] ?? ($_SESSION['ten_username'] ?? ''); }
+
     // Update or insert
     if ($articleId > 0) {
         // UPDATE
@@ -226,6 +247,7 @@ try {
             sponsored = ?,
             frontpage_temp = ?,
             note = ?,
+            created_by = ?,
             publish_now = ?,
             publish_from = ?,
             publish_to = ?,
@@ -233,7 +255,7 @@ try {
             WHERE id = ?";
 
         $stmt = $conn->prepare($query);
-        $stmt->bind_param('ssssssisssssiiiisssssi',
+        $stmt->bind_param('ssssssisssssiiiississsi',
             $title,
             $articleText,
             $alias,
@@ -251,6 +273,7 @@ try {
             $sponsored,
             $headline,
             $note,
+            $createdBy,
             $publishNow,
             $publishFrom,
             $publishTo,
@@ -261,11 +284,12 @@ try {
         if ($stmt->execute()) {
             $stmt->close();
 
-            // Backfill the site URL for articles created before URLs were set on
-            // save (empty url => the site links to the front page). Never rewrite
-            // an existing url — that would break already-published links/SEO.
+            // Rebuild the site URL (<slug>-<id>) from the CURRENT title on every save,
+            // so retitling an article updates its URL too (William, 2026-10-01). The
+            // trailing -<id> keeps it unique; note this changes the link for already-
+            // published articles, so old URLs to this article will 404.
             $slug = substr(ten_article_slug($title) . '-' . $articleId, 0, 200);
-            $su = $conn->prepare("UPDATE articles SET url = ? WHERE id = ? AND (url IS NULL OR url = '')");
+            $su = $conn->prepare("UPDATE articles SET url = ? WHERE id = ?");
             $su->bind_param('si', $slug, $articleId); $su->execute(); $su->close();
 
             // Auto-populate the featured image (filename only) from the first body
@@ -307,16 +331,7 @@ try {
     } else {
         // INSERT NEW (create). Inserts the same fields the editor modal edits, so a
         // created article is immediately fully editable through that same modal.
-        $createdBy = '';
-        try {
-            $cn = getDBConnection();
-            $cs = $cn->prepare("SELECT full_name FROM ten_users WHERE id = ?");
-            $cs->bind_param('i', $author); $cs->execute();
-            $cr = $cs->get_result()->fetch_assoc(); $cs->close(); $cn->close();
-            $createdBy = $cr['full_name'] ?? '';
-        } catch (Throwable $e) { $createdBy = ''; }
-        if ($createdBy === '') { $createdBy = $_SESSION['ten_full_name'] ?? ($_SESSION['ten_username'] ?? ''); }
-
+        // $createdBy was resolved from the author above (shared with the UPDATE path).
         $insert = "INSERT INTO articles
             (title, article_text, alias, tags, section, section_subcat, journalist_id, publications, canonical,
              meta_title, meta_description, meta_keywords, evergreen, featured, sponsored, frontpage_temp, note,

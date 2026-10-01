@@ -482,8 +482,28 @@ try {
             $deadlines = [];
             while ($row = $res->fetch_assoc()) { $deadlines[] = notes_present_note($c, $row, $me); }
             $st->close();
+
+            // Notes newly shared with me (unseen) — surfaced at the top of the sticky-note panel.
+            $st = $c->prepare("SELECT n.* FROM ten_project_notes n
+                               JOIN ten_note_shares s ON s.note_id = n.id AND s.user_id = ? AND s.seen_at IS NULL
+                               WHERE n.status IN " . NOTES_OPEN_SQL . "
+                               ORDER BY s.created_at DESC LIMIT 30");
+            $st->bind_param("i", $me);
+            $st->execute();
+            $res = $st->get_result();
+            $sharedNew = [];
+            while ($row = $res->fetch_assoc()) { $sharedNew[] = notes_present_note($c, $row, $me); }
+            $st->close();
+
             $resp = ['success' => true, 'page_notes' => $pageNotes, 'page_counts' => $counts, 'deadlines' => $deadlines,
-                     'summary' => notes_header_summary($c, $me, $pageKey)];
+                     'shared_new' => $sharedNew, 'summary' => notes_header_summary($c, $me, $pageKey)];
+            break;
+        }
+
+        // ── Mark all notes shared with me as seen (clears the sticky-note "new" count) ──
+        case 'seen_shares': {
+            $c->query("UPDATE ten_note_shares SET seen_at = NOW() WHERE user_id = $me AND seen_at IS NULL");
+            $resp = ['success' => true];
             break;
         }
 

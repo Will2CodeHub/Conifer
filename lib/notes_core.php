@@ -329,16 +329,40 @@ function notes_mine_or_shared_sql() {
     return "(n.author_id = ? OR EXISTS (SELECT 1 FROM ten_note_shares s WHERE s.note_id = n.id AND s.user_id = ?))";
 }
 
-/** Header summary: deadline count, overdue count and whether this page has notes. */
+/**
+ * Header sticky-note summary — drives the icon badge.
+ *   attention  : notes needing attention = live notes with a deadline (mine or shared to me)
+ *                PLUS notes newly shared with me that I haven't seen yet (deduped per note).
+ *   overdue    : how many of those are past their deadline (badge turns red).
+ *   shared_new : how many are unseen shares (also turns the badge red).
+ *   page       : open notes pinned to the current page (drives the icon glow).
+ */
 function notes_header_summary($c, $userId, $pageKey) {
     $userId = (int) $userId;
-    $vis = notes_mine_or_shared_sql();
-    $st = $c->prepare("SELECT COUNT(*) total, SUM(n.deadline < NOW()) overdue FROM ten_project_notes n
-                       WHERE n.status IN " . NOTES_LIVE_SQL . " AND n.deadline IS NOT NULL AND $vis");
+    $open = NOTES_OPEN_SQL;   // ('active','in_progress','on_hold')
+    $live = NOTES_LIVE_SQL;   // ('active','in_progress')
+    // One pass over distinct notes: a note counts when it is a live deadline note (mine or
+    // shared to me) OR an unseen share to me on a still-open note. uq_note_user keeps the
+    // shares join to at most one row per note, so each note is counted once.
+    $sql = "
+        SELECT COUNT(*) total, SUM(is_overdue) overdue, SUM(is_new_share) shared_new
+        FROM (
+            SELECT n.id,
+                   MAX(n.deadline IS NOT NULL AND n.deadline < NOW() AND n.status IN $live) AS is_overdue,
+                   MAX(s.id IS NOT NULL AND s.seen_at IS NULL)                              AS is_new_share
+            FROM ten_project_notes n
+            LEFT JOIN ten_note_shares s ON s.note_id = n.id AND s.user_id = ?
+            WHERE ( n.status IN $live AND n.deadline IS NOT NULL AND (n.author_id = ? OR s.id IS NOT NULL) )
+               OR ( n.status IN $open AND s.id IS NOT NULL AND s.seen_at IS NULL )
+            GROUP BY n.id
+        ) t";
+    $st = $c->prepare($sql);
     $st->bind_param("ii", $userId, $userId);
     $st->execute();
     $d = $st->get_result()->fetch_assoc();
     $st->close();
+
+    $vis = notes_mine_or_shared_sql();
     $page = 0;
     if ($pageKey) {
         $st = $c->prepare("SELECT COUNT(*) c FROM ten_project_notes n WHERE n.status IN " . NOTES_OPEN_SQL . " AND n.page_key = ? AND $vis");
@@ -347,7 +371,12 @@ function notes_header_summary($c, $userId, $pageKey) {
         $page = (int) $st->get_result()->fetch_assoc()['c'];
         $st->close();
     }
-    return ['deadlines' => (int) $d['total'], 'overdue' => (int) $d['overdue'], 'page' => $page];
+    return [
+        'attention'  => (int) $d['total'],
+        'overdue'    => (int) $d['overdue'],
+        'shared_new' => (int) $d['shared_new'],
+        'page'       => $page,
+    ];
 }
 
 /** Record that the user has read a note's thread now (clears "new replies" in the bell). */

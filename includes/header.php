@@ -11,7 +11,7 @@ $currentLang = getUserLanguage();
 if (!isset($availableLanguages[$currentLang])) $currentLang = 'en';
 
 // Header badges, computed at render so they never flicker: post-it summary + bell count.
-$hdrNotes = ['deadlines' => 0, 'overdue' => 0, 'page' => 0];
+$hdrNotes = ['attention' => 0, 'overdue' => 0, 'shared_new' => 0, 'page' => 0];
 $hdrBellCount = 0;
 try {
     require_once __DIR__ . '/../lib/notifications_core.php';
@@ -61,10 +61,17 @@ try {
         
         <!-- Post-it notes: badge = my open notes with a deadline; glows when this page has notes -->
         <div class="hdr-pop-wrap" id="hdrNotesWrap">
+            <?php
+                // Badge turns red when something is overdue OR newly shared with me, amber otherwise.
+                $hdrNotesHot = ($hdrNotes['overdue'] > 0) || ($hdrNotes['shared_new'] > 0);
+                $hdrNotesTip = [];
+                if ($hdrNotes['shared_new'] > 0) $hdrNotesTip[] = $hdrNotes['shared_new'] . ' new shared';
+                if ($hdrNotes['page'] > 0)       $hdrNotesTip[] = $hdrNotes['page'] . ' on this page';
+            ?>
             <button class="icon-btn hdr-notes-btn<?php echo $hdrNotes['page'] > 0 ? ' has-page-notes' : ''; ?>" id="hdrNotesBtn"
-                    title="<?php echo $hdrNotes['page'] > 0 ? $hdrNotes['page'] . ' note(s) on this page' : 'Notes'; ?>">
+                    title="<?php echo $hdrNotesTip ? htmlspecialchars(implode(' · ', $hdrNotesTip)) : 'Notes'; ?>">
                 <i class="fas fa-note-sticky"></i>
-                <span class="badge<?php echo $hdrNotes['overdue'] > 0 ? ' badge-red' : ' badge-amber'; ?>" id="hdrNotesBadge"<?php echo $hdrNotes['deadlines'] > 0 ? '' : ' style="display:none"'; ?>><?php echo (int) $hdrNotes['deadlines']; ?></span>
+                <span class="badge<?php echo $hdrNotesHot ? ' badge-red' : ' badge-amber'; ?>" id="hdrNotesBadge"<?php echo $hdrNotes['attention'] > 0 ? '' : ' style="display:none"'; ?>><?php echo (int) $hdrNotes['attention']; ?></span>
             </button>
             <div class="hdr-pop" id="hdrNotesPop"></div>
         </div>

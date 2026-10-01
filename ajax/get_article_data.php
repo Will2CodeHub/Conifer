@@ -314,52 +314,31 @@ try {
         }
         $meStmt->close();
 
-    } elseif ($position === 'Section Editor' && !empty($section) && !empty($publication)) {
-        // Section Editors see: Section Editors in their section + Editors + Administrators
-        $query = "SELECT u.id, u.full_name, u.username, r.role_name
-                  FROM ten_users u
-                  JOIN ten_user_roles ur ON u.id = ur.user_id
-                  JOIN ten_roles r ON ur.role_id = r.id
-                  WHERE u.status = 'active'
-                  AND (
-                    (r.role_name = 'Section Editor' AND u.section = ? AND u.publication = ?)
-                    OR r.role_name IN ('Editor', 'Administrator')
-                  )
-                  ORDER BY u.full_name ASC";
-        
-        $stmt = $connManagement->prepare($query);
-        $stmt->bind_param('ss', $section, $publication);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        
-        while($userRow = $result->fetch_assoc()) {
-            $all_journalists[] = [
-                'id' => $userRow['id'],
-                'name' => $userRow['full_name'] . ' (' . $userRow['username'] . ')'
-            ];
-        }
-        
-        $stmt->close();
-        
     } else {
-        // Higher roles see all Editors + Section Editors + Administrators
-        $query = "SELECT u.id, u.full_name, u.username, r.role_name
+        // Any non-Journalist can credit any active editorial/management user as the
+        // author. List all of them (DISTINCT — a user may hold several roles) so new
+        // journalists appear too. Byline-only imported author rows have no role, so
+        // they stay out of the picker; verticals (PKV/WNE/Marketing/Restaurants/
+        // Venues/CRM) and legacy Broker/Viewer aren't article authors, so excluded.
+        $authorRoles = "'Journalist','Section Editor','Editor','Managing Editor','General Editor',"
+                     . "'Editor-in-Chief','Edition Editor-in-Chief','Administrator','Super User','Manager'";
+        $query = "SELECT DISTINCT u.id, u.full_name, u.username
                   FROM ten_users u
                   JOIN ten_user_roles ur ON u.id = ur.user_id
                   JOIN ten_roles r ON ur.role_id = r.id
                   WHERE u.status = 'active'
-                  AND r.role_name IN ('Editor', 'Section Editor', 'Administrator')
+                  AND r.role_name IN ($authorRoles)
                   ORDER BY u.full_name ASC";
-        
+
         $result = $connManagement->query($query);
-        
+
         while($userRow = $result->fetch_assoc()) {
             $all_journalists[] = [
                 'id' => $userRow['id'],
                 'name' => $userRow['full_name'] . ' (' . $userRow['username'] . ')'
             ];
         }
-        
+
         $result->free();
     }
 

@@ -55,12 +55,19 @@
     function applySummary(notes, bellCount) {
         var nb = el('hdrNotesBadge'), btn = el('hdrNotesBtn');
         if (nb && notes) {
-            nb.textContent = notes.deadlines;
-            nb.style.display = notes.deadlines > 0 ? '' : 'none';
-            nb.classList.toggle('badge-red', notes.overdue > 0);
-            nb.classList.toggle('badge-amber', !(notes.overdue > 0));
+            // "attention" = deadline notes + notes newly shared with me (server-deduped).
+            // Fall back to the old deadline-only key if an older response arrives.
+            var n = (notes.attention != null ? notes.attention : notes.deadlines) || 0;
+            var hot = (notes.overdue > 0) || (notes.shared_new > 0);
+            nb.textContent = n;
+            nb.style.display = n > 0 ? '' : 'none';
+            nb.classList.toggle('badge-red', hot);
+            nb.classList.toggle('badge-amber', !hot);
             btn.classList.toggle('has-page-notes', notes.page > 0);
-            btn.title = notes.page > 0 ? notes.page + ' note(s) on this page' : 'Notes';
+            var bits = [];
+            if (notes.shared_new > 0) bits.push(notes.shared_new + ' new shared');
+            if (notes.page > 0) bits.push(notes.page + ' on this page');
+            btn.title = bits.length ? bits.join(' · ') : 'Notes';
         }
         var bb = el('hdrBellBadge');
         if (bb && typeof bellCount === 'number') {
@@ -122,8 +129,28 @@
                     '</div>';
             }).join('');
 
+            // Notes newly shared with me — rows reuse .hdr-dl-row[data-note] so the click
+            // handler below opens the thread (which marks the share seen and clears the count).
+            var shares = d.shared_new || [];
+            var shareColors = { yellow: '#fff59d', pink: '#f8bbd0', green: '#c5e1a5', blue: '#b3e5fc', orange: '#ffcc80', purple: '#d1c4e9' };
+            var sharedRows = shares.map(function (n) {
+                var who = n.author_name || 'Someone';
+                return '<div class="hdr-dl-row" data-note="' + n.id + '">' +
+                    '<span class="hdr-dl-dot" style="background:' + (shareColors[n.color] || shareColors.yellow) + ';"></span>' +
+                    '<div class="hdr-dl-main"><div class="hdr-dl-title">' + esc(n.title || (n.body || '').slice(0, 60) || 'Note') + '</div>' +
+                        '<div class="hdr-dl-sub">Shared by ' + esc(who) + (n.project_name ? ' · ' + esc(n.project_name) : '') + '</div></div>' +
+                    '</div>';
+            }).join('');
+            var sharedSection = shares.length
+                ? '<div class="hdr-pop-sec"><div class="hdr-pop-label" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
+                        '<span>Shared with you (' + shares.length + ')</span>' +
+                        '<button id="hdrSharedSeen" style="background:none;border:none;color:#4f46e5;font-size:11.5px;font-weight:600;cursor:pointer;padding:2px 6px;border-radius:6px;">Mark all seen</button>' +
+                    '</div>' + sharedRows + '</div>'
+                : '';
+
             pop.innerHTML =
                 '<div class="hdr-pop-head"><h4><i class="fas fa-note-sticky" style="color:#eab308;"></i> Notes</h4></div>' +
+                sharedSection +
                 '<div class="hdr-pop-sec"><div class="hdr-pop-label">On this page · ' + esc(label) + '</div>' +
                     '<div class="pn-views" id="hdrPageViews" style="margin:0 0 6px;"></div>' + pageHtml +
                     '<button class="hdr-new-note" id="hdrNewNote"><i class="fas fa-plus"></i> New note on this page</button></div>' +
@@ -145,6 +172,11 @@
                 ensureSwal().then(function () {
                     ProjectNotes.openEditor({ pageKey: PAGE, pageLabel: label, onSaved: renderNotesPanel });
                 });
+            });
+            var seenAll = el('hdrSharedSeen');
+            if (seenAll) seenAll.addEventListener('click', function (e) {
+                e.stopPropagation();
+                ProjectNotes.api('seen_shares', {}).then(function () { refreshBadges(); renderNotesPanel(); });
             });
         });
     }
@@ -238,7 +270,10 @@
             refreshBadges();
             if (el('hdrBellPop').classList.contains('active')) renderBellPanel();
         });
-        setInterval(function () { if (!document.hidden) refreshBadges(); }, 120000);
+        // Poll every 60s so a note shared by someone else shows on the badge without a refresh.
+        setInterval(function () { if (!document.hidden) refreshBadges(); }, 60000);
+        // Also refresh as soon as the tab regains focus.
+        document.addEventListener('visibilitychange', function () { if (!document.hidden) refreshBadges(); });
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
