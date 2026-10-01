@@ -946,7 +946,7 @@ $pageTitle = 'Article Management';
                         <div class="ed-tabs">
                             <button type="button" class="ed-tab" data-edtab="apub"><i class="fas fa-newspaper"></i> Publications</button>
                             <button type="button" class="ed-tab" data-edtab="aauthor"><i class="fas fa-user"></i> Author &amp; Section</button>
-                            <button type="button" class="ed-tab" data-edtab="aflags"><i class="fas fa-sliders-h"></i> Flags &amp; Scheduling</button>
+                            <button type="button" class="ed-tab" data-edtab="aflags"><i class="fas fa-calendar-alt"></i> Scheduling</button>
                             <button type="button" class="ed-tab" data-edtab="aseo"><i class="fas fa-hashtag"></i> SEO &amp; Metadata</button>
                         </div>
                         <div class="ed-tabwrap">
@@ -967,14 +967,9 @@ $pageTitle = 'Article Management';
                                 </div>
                             </div>
                             <div class="ed-tabpanel" data-edpanel="aflags">
-                                <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                                    <label class="ed-flag" title="Show this article as the main front-page headline story."><input type="checkbox" id="add_article_headline"><i class="fas fa-fire" style="color:#ef4444;"></i> Frontpage Headline</label>
-                                    <label class="ed-flag" title="Show this article as the section headline."><input type="checkbox" id="add_article_featured"><i class="fas fa-star" style="color:#f59e0b;"></i> Section Headline</label>
-                                    <label class="ed-flag" title="Never expires."><input type="checkbox" id="add_article_evergreen"><i class="fas fa-leaf" style="color:#10b981;"></i> Evergreen</label>
-                                    <label class="ed-flag" title="Paid/partner content."><input type="checkbox" id="add_article_sponsored" name="add_article_sponsored" value="1"><i class="fas fa-ad" style="color:#8b5cf6;"></i> Sponsored</label>
-                                </div>
+                                <p style="margin:0 0 10px;font-size:12.5px;color:#64748b;">Frontpage headline, section headline and sponsored are now set <strong>per publication</strong> — tick them next to each publication on the Publications tab.</p>
                                 <!-- Scheduling: publish now, or pick a from/to window on the calendar. -->
-                                <div style="display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid #f0f0f0;">
+                                <div style="display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;">
                                     <label class="ed-flag" title="Publish immediately. Uncheck to schedule a publish window." style="background:#eff6ff;border-color:#bfdbfe;align-self:center;">
                                         <input type="checkbox" id="add_publish_now" checked><i class="fas fa-bolt" style="color:#3b82f6;"></i> Publish now
                                     </label>
@@ -1274,7 +1269,6 @@ $pageTitle = 'Article Management';
                     <div class="ed-tabs">
                         <button type="button" class="ed-tab" data-edtab="pub"><i class="fas fa-newspaper"></i> Publications</button>
                         <button type="button" class="ed-tab" data-edtab="author"><i class="fas fa-user"></i> Author &amp; Section</button>
-                        <button type="button" class="ed-tab" data-edtab="flags"><i class="fas fa-sliders-h"></i> Flags &amp; Scheduling</button>
                         <button type="button" class="ed-tab" data-edtab="seo"><i class="fas fa-hashtag"></i> SEO &amp; Metadata</button>
                     </div>
                     <div class="ed-tabwrap">
@@ -1290,15 +1284,6 @@ $pageTitle = 'Article Management';
                                     <label class="ed-lbl">Section</label>
                                     <select id="modal_section" name="modal_section" size="1" class="ed-input"><option value="">Choose section...</option></select>
                                 </div>
-                            </div>
-                        </div>
-
-                        <div class="ed-tabpanel" data-edpanel="flags">
-                            <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                                <label class="ed-flag" title="Show this article as the main front-page headline story."><input type="checkbox" id="modal_headline_checkbox"><i class="fas fa-fire" style="color:#ef4444;"></i> Frontpage Headline</label>
-                                <label class="ed-flag" title="Show this article as the section headline."><input type="checkbox" id="modal_featured" name="modal_featured" value="1"><i class="fas fa-star" style="color:#f59e0b;"></i> Section Headline</label>
-                                <label class="ed-flag" title="Never expires."><input type="checkbox" id="modal_evergreen"><i class="fas fa-leaf" style="color:#10b981;"></i> Evergreen</label>
-                                <label class="ed-flag" title="Paid/partner content."><input type="checkbox" id="modal_sponsored"><i class="fas fa-ad" style="color:#8b5cf6;"></i> Sponsored</label>
                             </div>
                         </div>
 
@@ -1446,6 +1431,57 @@ window.TEN_setFp = function (fp, val) {
     if (!val || /^0000-00-00/.test(String(val))) { fp.clear(); return; }
     var d = new Date(String(val).replace(' ', 'T'));
     if (isNaN(d.getTime())) { fp.clear(); } else { fp.setDate(d, false); }
+};
+
+/* Per-publication flag toggles (frontpage / section headline / sponsored), shown in each
+   publication row of the Publications tab. Returns {el, setEnabled}; read them back on save
+   with TEN_collectPubFlags(). */
+window.TEN_pubFlags = function (initial) {
+    initial = initial || {};
+    var wrap = document.createElement('div');
+    wrap.className = 'pub-flags';
+    wrap.style.cssText = 'display:flex;align-items:center;gap:12px;white-space:nowrap;';
+    var defs = [
+        { k: 'frontpage',    label: '🔥 Front',     title: 'Front-page headline on this publication' },
+        { k: 'section_head', label: '★ Section',    title: 'Section headline on this publication' },
+        { k: 'sponsored',    label: '💲 Sponsored', title: 'Sponsored / paid content on this publication' }
+    ];
+    var boxes = [];
+    defs.forEach(function (d) {
+        var lab = document.createElement('label');
+        lab.title = d.title;
+        lab.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:12px;color:#64748b;cursor:pointer;';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.className = 'pubflag'; cb.setAttribute('data-flag', d.k);
+        cb.checked = !!initial[d.k];
+        cb.style.cssText = 'width:14px;height:14px;cursor:pointer;';
+        var sp = document.createElement('span'); sp.textContent = d.label;
+        lab.appendChild(cb); lab.appendChild(sp);
+        wrap.appendChild(lab);
+        boxes.push({ cb: cb, lab: lab });
+    });
+    return {
+        el: wrap,
+        setEnabled: function (on) {
+            boxes.forEach(function (b) {
+                b.cb.disabled = !on;
+                b.lab.style.opacity = on ? '1' : '0.4';
+                if (!on) b.cb.checked = false;
+            });
+        }
+    };
+};
+/* Collect {pub: {frontpage,section_head,sponsored}} from the ticked rows of a container. */
+window.TEN_collectPubFlags = function (containerId, includeSelector) {
+    var out = {};
+    document.querySelectorAll('#' + containerId + ' .pub-row').forEach(function (row) {
+        var inc = row.querySelector(includeSelector);
+        if (!inc || !inc.checked) return;
+        var f = { frontpage: 0, section_head: 0, sponsored: 0 };
+        row.querySelectorAll('.pubflag').forEach(function (x) { f[x.getAttribute('data-flag')] = x.checked ? 1 : 0; });
+        out[inc.value] = f;
+    });
+    return out;
 };
 
 /* Settings tabs: keep the tab row fixed; open the chosen panel below it.
@@ -2365,9 +2401,12 @@ window.TEN_setFp = function (fp, val) {
                     pubContainer.innerHTML = '';
                     if (json.all_publications && json.all_publications.length > 0) {
                         var only = (json.all_publications.length === 1);
+                        var addPubFlags = (json.pub_flags || {});
                         json.all_publications.forEach(function(pub) {
                             var row = document.createElement('div');
-                            row.style.cssText = 'display:grid;grid-template-columns:1fr auto;align-items:center;gap:16px;padding:8px 10px;border-bottom:1px solid #f0f0f0;';
+                            row.className = 'pub-row';
+                            row.setAttribute('data-pub', pub.name);
+                            row.style.cssText = 'display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:16px;padding:8px 10px;border-bottom:1px solid #f0f0f0;';
                             var left = document.createElement('label');
                             left.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;color:#1e293b;';
                             var cb = document.createElement('input');
@@ -2377,6 +2416,9 @@ window.TEN_setFp = function (fp, val) {
                             cb.style.cssText = 'width:16px;height:16px;cursor:pointer;';
                             var span = document.createElement('span'); span.textContent = pub.title || pub.name;
                             left.appendChild(cb); left.appendChild(span);
+                            // Per-publication flags (front / section / sponsored).
+                            var flags = window.TEN_pubFlags ? TEN_pubFlags(addPubFlags[pub.name]) : { el: document.createElement('span'), setEnabled: function(){} };
+                            flags.setEnabled(cb.checked);
                             var right = document.createElement('label');
                             right.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:12px;color:#64748b;cursor:pointer;white-space:nowrap;';
                             var radio = document.createElement('input');
@@ -2389,9 +2431,10 @@ window.TEN_setFp = function (fp, val) {
                             cb.addEventListener('change', function(){
                                 radio.disabled = !cb.checked;
                                 if (!cb.checked && radio.checked) radio.checked = false;
+                                flags.setEnabled(cb.checked);
                                 if (window._rebuildAddSections) window._rebuildAddSections();
                             });
-                            row.appendChild(left); row.appendChild(right);
+                            row.appendChild(left); row.appendChild(flags.el); row.appendChild(right);
                             pubContainer.appendChild(row);
                         });
                     }
@@ -2466,10 +2509,9 @@ window.TEN_setFp = function (fp, val) {
                 fd.append('meta_title', $('#add_article_meta_title').val() || '');
                 fd.append('meta_description', $('#add_article_meta_description').val() || '');
                 fd.append('meta_keywords', $('#add_article_meta_keywords').val() || '');
-                fd.append('evergreen', $('#add_article_evergreen').is(':checked') ? '1' : '0');
-                fd.append('featured', $('#add_article_featured').is(':checked') ? '1' : '0');
-                fd.append('sponsored', $('#add_article_sponsored').is(':checked') ? '1' : '0');
-                fd.append('frontpage_temp', $('#add_article_headline').is(':checked') ? '1' : '0');
+                // Per-publication flags (frontpage / section headline / sponsored) replace the
+                // old global checkboxes; the backend derives the legacy columns from these.
+                fd.append('pub_flags', JSON.stringify(window.TEN_collectPubFlags ? TEN_collectPubFlags('add_article_publications', 'input.add_pub_cb') : {}));
                 var addPubNow = $('#add_publish_now').is(':checked');
                 fd.append('publish_now', addPubNow ? '1' : '0');
                 fd.append('publish_from', addPubNow ? '' : ($('#add_publish_from').val() || ''));
@@ -2496,7 +2538,8 @@ window.TEN_setFp = function (fp, val) {
                                 $('#article_title').val('');
                                 $('#article_text').html('');
                                 $('#add_article_meta_title,#add_article_meta_description,#add_article_meta_keywords,#add_article_tags').val('');
-                                $('#add_article_headline,#add_article_featured,#add_article_evergreen,#add_article_sponsored').prop('checked', false);
+                                // Reset per-publication flag checkboxes (built into each pub row).
+                                $('#add_article_publications .pubflag').prop('checked', false);
                                 $('#add_publish_now').prop('checked', true);
                                 $('#add_publish_date_fields').css('display', 'none');
                                 if (window.TEN_fp) { if (TEN_fp.addFrom) TEN_fp.addFrom.clear(); if (TEN_fp.addTo) TEN_fp.addTo.clear(); }
@@ -3582,7 +3625,7 @@ window.TEN_setFp = function (fp, val) {
         if (fld_evergreen) fld_evergreen.checked = false;
         if (fld_featured) fld_featured.checked = false;
         if (fld_sponsored) fld_sponsored.checked = false;
-        fld_headline.value = '';
+        if (fld_headline) fld_headline.checked = false;
         if (window.TEN_fp) {
             if (TEN_fp.modalFrom) TEN_fp.modalFrom.clear();
             if (TEN_fp.modalTo) TEN_fp.modalTo.clear();
@@ -3728,17 +3771,21 @@ window.TEN_setFp = function (fp, val) {
             console.log('Article publications:', json.publications);
             console.log('Article canonical:', json.canonical);
             
+            var modalPubFlags = (json.pub_flags || {});
             if (json.all_publications && json.all_publications.length > 0) {
                 json.all_publications.forEach(function(pub) {
                     const row = document.createElement('div');
-                    row.style.cssText = 'display:grid;grid-template-columns:1fr auto;align-items:center;gap:16px;padding:8px 10px;border-bottom:1px solid #f0f0f0;';
-                    
+                    row.className = 'pub-row';
+                    row.setAttribute('data-pub', pub.name);
+                    row.style.cssText = 'display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:16px;padding:8px 10px;border-bottom:1px solid #f0f0f0;';
+
                     // Left side: checkbox + publication name
                     const leftSide = document.createElement('div');
                     leftSide.style.cssText = 'display:flex;align-items:center;gap:8px;';
                     
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
+                    checkbox.className = 'modal_pub_cb';
                     checkbox.id = 'pub_' + pub.name.replace(/\s+/g, '_');
                     checkbox.value = pub.name;
                     checkbox.checked = pub.selected;
@@ -3774,7 +3821,11 @@ window.TEN_setFp = function (fp, val) {
                         radio.style.cursor = 'not-allowed';
                     }
                     
-                    // Add change event to checkbox to enable/disable radio
+                    // Per-publication flags (front / section / sponsored).
+                    const flags = window.TEN_pubFlags ? TEN_pubFlags(modalPubFlags[pub.name]) : { el: document.createElement('span'), setEnabled: function(){} };
+                    flags.setEnabled(pub.selected);
+
+                    // Add change event to checkbox to enable/disable radio + flags
                     checkbox.addEventListener('change', function() {
                         if (checkbox.checked) {
                             radio.disabled = false;
@@ -3786,6 +3837,7 @@ window.TEN_setFp = function (fp, val) {
                             radio.style.opacity = '0.3';
                             radio.style.cursor = 'not-allowed';
                         }
+                        flags.setEnabled(checkbox.checked);
                         if (window._rebuildModalSections) window._rebuildModalSections();
                     });
 
@@ -3793,6 +3845,7 @@ window.TEN_setFp = function (fp, val) {
                     rightSide.appendChild(radio);
 
                     row.appendChild(leftSide);
+                    row.appendChild(flags.el);
                     row.appendChild(rightSide);
                     pub_container.appendChild(row);
                 });
@@ -4076,8 +4129,8 @@ window.TEN_setFp = function (fp, val) {
             if (window.tenStripFormatting) articleHtml = window.tenStripFormatting(articleHtml);
         })();
 
-        // chosen publications
-        const pubInputs = pub_container.querySelectorAll('input[type="checkbox"]');
+        // chosen publications (exclude the per-row flag checkboxes)
+        const pubInputs = pub_container.querySelectorAll('input.modal_pub_cb');
         const chosenPubs = [];
         pubInputs.forEach(function (cb) {
             if (cb.checked) {
@@ -4103,10 +4156,9 @@ window.TEN_setFp = function (fp, val) {
         fd.append('author', fld_author.value || '');
         fd.append('publications', chosenPubs.join(','));
         fd.append('canonical', canonicalVal || '');
-        fd.append('evergreen', fld_evergreen.checked ? '1' : '0');
-        fd.append('featured', fld_featured.checked ? '1' : '0');
-        fd.append('sponsored', fld_sponsored.checked ? '1' : '0');
-        fd.append('frontpage_temp', fld_headline.checked ? '1' : '0');
+        // Per-publication flags (frontpage / section headline / sponsored); backend derives
+        // the legacy evergreen/featured/sponsored/frontpage_temp columns from these.
+        fd.append('pub_flags', JSON.stringify(window.TEN_collectPubFlags ? TEN_collectPubFlags('modal_publications_container', 'input.modal_pub_cb') : {}));
         fd.append('publish_now', fld_publish_now.checked ? '1' : '0');
         fd.append('publish_from', fld_publish_from.value || '');
         fd.append('publish_to', fld_publish_to.value || '');

@@ -43,6 +43,38 @@ function ten_normalize_datetime($v): ?string {
     return $ts ? date('Y-m-d H:i:s', $ts) : null;
 }
 
+/** Create the per-publication flags table on first use (idempotent). */
+function ten_ensure_pub_flags_table($conn) {
+    $conn->query("CREATE TABLE IF NOT EXISTS article_pub_flags (
+        article_id   INT NOT NULL,
+        publication  VARCHAR(32) NOT NULL,
+        frontpage    TINYINT(1) NOT NULL DEFAULT 0,
+        section_head TINYINT(1) NOT NULL DEFAULT 0,
+        sponsored    TINYINT(1) NOT NULL DEFAULT 0,
+        PRIMARY KEY (article_id, publication),
+        KEY idx_pub_front (publication, frontpage),
+        KEY idx_pub_section (publication, section_head)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
+/**
+ * Replace an article's per-publication flag rows. Writes one row per selected publication
+ * (even all-zero) so the table fully represents the article's pubs for the site generators.
+ */
+function ten_write_pub_flags($conn, $articleId, array $selPubs, array $pubFlags) {
+    ten_ensure_pub_flags_table($conn);
+    $articleId = (int) $articleId;
+    $conn->query("DELETE FROM article_pub_flags WHERE article_id = $articleId");
+    if (!$selPubs) { return; }
+    $ins = $conn->prepare("INSERT INTO article_pub_flags (article_id, publication, frontpage, section_head, sponsored) VALUES (?,?,?,?,?)");
+    foreach ($selPubs as $pub) {
+        $pf = $pubFlags[$pub] ?? ['frontpage' => 0, 'section_head' => 0, 'sponsored' => 0];
+        $ins->bind_param('isiii', $articleId, $pub, $pf['frontpage'], $pf['section_head'], $pf['sponsored']);
+        $ins->execute();
+    }
+    $ins->close();
+}
+
 /**
  * After an article is published, rebuild the front page (index.php) of
  * each publication it appears on by calling that site's generate_index_page.php.
@@ -112,6 +144,35 @@ $publishNow = isset($_POST['publish_now']) ? intval($_POST['publish_now']) : 0;
 $publishFrom = isset($_POST['publish_from']) ? trim($_POST['publish_from']) : null;
 $publishTo = isset($_POST['publish_to']) ? trim($_POST['publish_to']) : null;
 $action = isset($_POST['action']) ? $_POST['action'] : 'save'; // 'save', 'submit', 'publish'
+
+// Per-publication flags: {pub: {frontpage, section_head, sponsored}}. When present they are
+// authoritative — the legacy single columns (frontpage_temp/featured/sponsored) are derived
+// as the OR across the article's publications so sites still reading the old columns keep
+// working until they read article_pub_flags. Absent (an older caller) => keep the posted
+// legacy flags and don't touch the join table.
+$hasPubFlags = isset($_POST['pub_flags']);
+$pubFlags = [];
+if ($hasPubFlags) {
+    $selPubs = array_values(array_filter(array_map('trim', explode(',', $publications))));
+    $pfRaw = json_decode((string) $_POST['pub_flags'], true);
+    if (is_array($pfRaw)) {
+        foreach ($selPubs as $pub) {
+            $pv = $pfRaw[$pub] ?? [];
+            $pubFlags[$pub] = [
+                'frontpage'    => !empty($pv['frontpage']) ? 1 : 0,
+                'section_head' => !empty($pv['section_head']) ? 1 : 0,
+                'sponsored'    => !empty($pv['sponsored']) ? 1 : 0,
+            ];
+        }
+    }
+    // Derive the legacy columns from the per-pub flags.
+    $headline = 0; $featured = 0; $sponsored = 0;
+    foreach ($pubFlags as $pf) {
+        if ($pf['frontpage'])    { $headline = 1; }
+        if ($pf['section_head']) { $featured = 1; }
+        if ($pf['sponsored'])    { $sponsored = 1; }
+    }
+}
 
 // Validation
 if (empty($title)) {
@@ -310,6 +371,11 @@ try {
             $iu->execute();
             $iu->close();
 
+            // Per-publication flags (frontpage / section headline / sponsored).
+            if ($hasPubFlags) {
+                ten_write_pub_flags($conn, $articleId, array_keys($pubFlags), $pubFlags);
+            }
+
             $conn->close();
 
             echo json_encode([
@@ -363,6 +429,11 @@ try {
             $imageless = preg_match('#<img[^>]+src=#i', $articleText) ? 0 : 1;
             $iu = $conn->prepare("UPDATE articles SET imageless = ? WHERE id = ?");
             $iu->bind_param('ii', $imageless, $newId); $iu->execute(); $iu->close();
+
+            // Per-publication flags (frontpage / section headline / sponsored).
+            if ($hasPubFlags) {
+                ten_write_pub_flags($conn, $newId, array_keys($pubFlags), $pubFlags);
+            }
 
             $conn->close();
 

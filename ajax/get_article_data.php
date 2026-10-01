@@ -365,10 +365,38 @@ try {
 
     // Close TEN_Management connection
     $connManagement->close();
-    
+
+    // Per-publication flags (frontpage/section_head/sponsored), keyed by publication.
+    // Falls back to the legacy single columns (applied to each of the article's pubs) when
+    // there are no rows yet — so existing articles show their current flags before backfill.
+    $pub_flags = [];
+    if (!$dropdownDataOnly) {
+        try {
+            $pf = $connArticles->query("SELECT publication, frontpage, section_head, sponsored FROM article_pub_flags WHERE article_id = " . (int) $id);
+            while ($pf && ($pr = $pf->fetch_assoc())) {
+                $pub_flags[$pr['publication']] = [
+                    'frontpage'    => (int) $pr['frontpage'],
+                    'section_head' => (int) $pr['section_head'],
+                    'sponsored'    => (int) $pr['sponsored'],
+                ];
+            }
+        } catch (Throwable $e) { $pub_flags = []; }
+        if (empty($pub_flags)) {
+            foreach ($article_publications_array as $p) {
+                $p = trim($p);
+                if ($p === '') { continue; }
+                $pub_flags[$p] = [
+                    'frontpage'    => (int) $headline,   // legacy frontpage_temp
+                    'section_head' => (int) $featured,
+                    'sponsored'    => (int) $sponsored,
+                ];
+            }
+        }
+    }
+
     // Close admin_ten connection
     $connArticles->close();
-    
+
     // Prepare response
     $response = [
         'status' => 'success',
@@ -401,6 +429,7 @@ try {
         'all_sections' => $all_sections,
         'sections_by_pub' => $sections_by_pub,
         'all_subcategories' => $all_subcategories,
+        'pub_flags' => $pub_flags,
         'can_publish' => $isUserAdmin || in_array($position, ['Admin', 'Super Admin', 'Super User', 'Editor-in-Chief', 'Edition Editor-in-Chief', 'Managing Editor', 'General Editor', 'Section Editor', 'Administrator', 'Manager', 'Editor'])
     ];
     
