@@ -57,15 +57,27 @@ def run_ingest(
     html_lister: Optional[HtmlLister] = None,
     facts_builder: Optional[FactsBuilder] = None,
     default_rate_seconds: float = 2.0,
+    daily_cap: int = 0,
+    already_today: int = 0,
 ) -> IngestResult:
-    """Fetch each feed, parse, dedup, and insert new items. Returns a summary."""
+    """Fetch each feed, parse, dedup, and insert new items. Returns a summary.
+
+    daily_cap: the section's daily_count (N). When > 0, the section is never allowed
+    to collect more than N items in one day — once today's total (already_today plus
+    what this run inserts) reaches N, ingestion stops. This keeps a section (e.g.
+    Breaking News with many busy world feeds) from piling up hundreds of items a day;
+    curation/publishing limits are separate and still apply on top.
+    """
     result = IngestResult()
+    made_today = int(already_today)  # items already collected today for this section
 
     # Seed the "seen" set with what we already have and what's already published.
     seen = set(repo.existing_item_hashes(pub_section_id))
     seen |= set(repo.article_scrape_hashes())
 
     for feed in feeds:
+        if daily_cap and made_today >= daily_cap:
+            break  # daily per-section cap reached — stop scraping further feeds
         policy = RobotsPolicy(feed.respect_robots, feed.robots_override_reason)
 
         # robots.txt gate (default on).
@@ -108,6 +120,8 @@ def run_ingest(
         result.items_found += len(items)
 
         for item in items:
+            if daily_cap and made_today >= daily_cap:
+                break  # hit the section's daily cap mid-feed
             h = url_hash(item.source_url)
             if h in seen:
                 result.skipped_dupe += 1
@@ -124,5 +138,6 @@ def run_ingest(
             repo.insert_item(pub_section_id, feed.feed_id, item, h, cluster_key(item.title), facts)
             seen.add(h)
             result.items_new += 1
+            made_today += 1
 
     return result

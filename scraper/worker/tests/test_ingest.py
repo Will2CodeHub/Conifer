@@ -95,6 +95,56 @@ def test_ingest_respects_robots_disallow(read_fixture):
     assert repo.inserted == []
 
 
+def test_ingest_daily_cap_limits_inserts(read_fixture):
+    # The feed has 2 items; a daily cap of 1 must stop after inserting 1.
+    rss = read_fixture("sample_rss.xml")
+    repo = InMemoryRepo()
+    result = run_ingest(
+        pub_section_id=7,
+        feeds=[_make_feed()],
+        repo=repo,
+        fetcher=lambda url, ua: rss,
+        user_agent="ua",
+        rate_limiter=_no_wait_limiter(),
+        daily_cap=1,
+    )
+    assert result.items_new == 1
+    assert len(repo.inserted) == 1
+
+
+def test_ingest_daily_cap_counts_already_collected_today(read_fixture):
+    # Already at the cap for today -> this run inserts nothing.
+    rss = read_fixture("sample_rss.xml")
+    repo = InMemoryRepo()
+    result = run_ingest(
+        pub_section_id=7,
+        feeds=[_make_feed()],
+        repo=repo,
+        fetcher=lambda url, ua: rss,
+        user_agent="ua",
+        rate_limiter=_no_wait_limiter(),
+        daily_cap=5,
+        already_today=5,
+    )
+    assert result.items_new == 0
+    assert repo.inserted == []
+
+
+def test_ingest_daily_cap_zero_means_no_cap(read_fixture):
+    rss = read_fixture("sample_rss.xml")
+    repo = InMemoryRepo()
+    result = run_ingest(
+        pub_section_id=7,
+        feeds=[_make_feed()],
+        repo=repo,
+        fetcher=lambda url, ua: rss,
+        user_agent="ua",
+        rate_limiter=_no_wait_limiter(),
+        daily_cap=0,
+    )
+    assert result.items_new == 2
+
+
 def test_ingest_robots_override_allows_fetch(read_fixture):
     rss = read_fixture("sample_rss.xml")
     repo = InMemoryRepo()

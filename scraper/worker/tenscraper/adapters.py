@@ -250,6 +250,16 @@ class PyMySQLRepo:
             )
             return {r[0] for r in cur.fetchall()}
 
+    def count_items_today(self, pub_section_id: int) -> int:
+        """How many items this section has already collected today (for the daily cap)."""
+        with self._ten.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM ten_scraper_items "
+                "WHERE pub_section_id=%s AND DATE(fetched_at)=CURDATE()",
+                (pub_section_id,),
+            )
+            return int(cur.fetchone()[0])
+
     def article_scrape_hashes(self) -> Set[str]:
         with self._admin.cursor() as cur:
             cur.execute(

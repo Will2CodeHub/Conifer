@@ -37,6 +37,15 @@
             });
     }
 
+    // Jump from Configure to the Curate view, preselecting the publication we just ran.
+    function reviewInCurate(pubKey) {
+        var tab = document.querySelector('.sc-subtabs > .sc-subtab[data-view="curate"]');
+        if (tab) tab.click();
+        if (typeof window.scCurateOpenPub === "function") window.scCurateOpenPub(pubKey);
+        else if (typeof window.scCurateInit === "function") window.scCurateInit();
+        try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) {}
+    }
+
     function optionList(items, selected, valKey, labKey) {
         return items.map(function (it) {
             var v = valKey ? it[valKey] : it;
@@ -115,7 +124,7 @@
                         " · sources: " + esc(s.source_count) + "</div>" +
                 "</div>" +
                 "<div>" +
-                    (active ? '<button class="sc-btn small" data-act="run" title="Scrape this section now"><i class="fas fa-bolt"></i> Run now</button> ' : "") +
+                    '<button class="sc-btn small" data-act="run" title="Scrape this section now' + (active ? '' : ' — works even though scraping is disabled') + '"><i class="fas fa-bolt"></i> Run now</button> ' +
                     '<button class="sc-btn small ' + (active ? "" : "secondary") + '" data-act="toggle">' +
                         (active ? '<i class="fas fa-pause"></i> Disable' : '<i class="fas fa-play"></i> Enable') + "</button> " +
                     '<button class="sc-btn small" data-act="sources">Sources</button> ' +
@@ -123,18 +132,43 @@
                     '<button class="sc-btn small danger" data-act="del">Delete</button>' +
                 "</div>" +
             "</div>" +
+            '<div class="sc-run-result" style="display:none;margin:8px 0 2px;font-size:13px;"></div>' +
             '<div class="sc-card-body"></div>';
 
         var body = card.querySelector(".sc-card-body");
+        var resultBox = card.querySelector(".sc-run-result");
         var runBtn = card.querySelector('[data-act="run"]');
         if (runBtn) runBtn.addEventListener("click", function () {
             var old = runBtn.innerHTML; runBtn.disabled = true;
-            runBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Requesting…';
+            runBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scraping…';
+            if (resultBox) { resultBox.style.display = "none"; resultBox.innerHTML = ""; }
             api("section", "run_now", { id: s.id }).then(function (j) {
-                runBtn.innerHTML = j.spawned
-                    ? '<i class="fas fa-check"></i> Started'
-                    : (j.already ? '<i class="fas fa-check"></i> Already queued' : '<i class="fas fa-check"></i> Queued');
-                setTimeout(function () { runBtn.disabled = false; runBtn.innerHTML = old; }, 5000);
+                if (j.mode === "sync") {
+                    runBtn.innerHTML = '<i class="fas fa-check"></i> Done';
+                    if (resultBox) {
+                        resultBox.style.display = "";
+                        resultBox.innerHTML =
+                            '<span style="color:#065f46;font-weight:600;"><i class="fas fa-check-circle"></i> ' +
+                            'Found ' + (j.found || 0) + ' · ' + (j.new || 0) + ' new</span> ' +
+                            (( (j.new || 0) > 0)
+                                ? '<a href="#" class="sc-review-curate" style="margin-left:8px;font-weight:600;">Review in Curate →</a>'
+                                : '<span style="color:#6b7280;margin-left:8px;">nothing new to curate</span>');
+                        var lnk = resultBox.querySelector(".sc-review-curate");
+                        if (lnk) lnk.addEventListener("click", function (e) {
+                            e.preventDefault(); reviewInCurate(j.publication_key);
+                        });
+                    }
+                } else {
+                    // async fallback (worker not reachable inline) — it was queued.
+                    runBtn.innerHTML = j.already
+                        ? '<i class="fas fa-check"></i> Already queued'
+                        : '<i class="fas fa-check"></i> Queued';
+                    if (resultBox) {
+                        resultBox.style.display = "";
+                        resultBox.innerHTML = '<span style="color:#6b7280;">Queued — the worker will scrape it shortly. Check Curate in a few minutes.</span>';
+                    }
+                }
+                setTimeout(function () { runBtn.disabled = false; runBtn.innerHTML = old; }, 6000);
             }).catch(function (e) { runBtn.disabled = false; runBtn.innerHTML = old; alertErr(e); });
         });
         card.querySelector('[data-act="toggle"]').addEventListener("click", function () {
@@ -183,7 +217,7 @@
                     (anyActive ? "" : ' <span class="sc-badge off">all scraping off</span>') +
                 "</div>" +
                 '<div>' +
-                    (anyActive ? '<button class="sc-btn small" data-pubrun title="Scrape all enabled sections now"><i class="fas fa-bolt"></i> Run now</button> ' : "") +
+                    '<button class="sc-btn small" data-pubrun title="Scrape all sections of this publication now (including disabled ones)"><i class="fas fa-bolt"></i> Run now</button> ' +
                     '<button class="sc-btn small ' + (anyActive ? "" : "secondary") + '" data-pubtoggle>' +
                     (anyActive ? '<i class="fas fa-pause"></i> Disable scraping' : '<i class="fas fa-play"></i> Enable scraping') + "</button></div>";
             var body = document.createElement("div");
@@ -205,9 +239,9 @@
             var pubRun = head.querySelector("[data-pubrun]");
             if (pubRun) pubRun.addEventListener("click", function (ev) {
                 ev.stopPropagation();
-                if (!confirm("Run an immediate scrape for all enabled sections of " + pubLabel(pk) + "?")) return;
+                if (!confirm("Run an immediate scrape for all sections of " + pubLabel(pk) + " (including disabled ones)?\n\nThey are queued and the worker processes them within a few minutes; open Curate to review the results.")) return;
                 var old = pubRun.innerHTML; pubRun.disabled = true;
-                pubRun.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Requesting…';
+                pubRun.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Queueing…';
                 api("publication", "run_now", { project_id: PROJECT_ID, publication_key: pk }).then(function (j) {
                     pubRun.innerHTML = '<i class="fas fa-check"></i> ' + (j.queued || 0) + " queued";
                     setTimeout(function () { pubRun.disabled = false; pubRun.innerHTML = old; }, 5000);

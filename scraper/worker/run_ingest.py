@@ -26,9 +26,11 @@ def main() -> int:
     admin = mysql_connect_from_env("SCRAPER_ADMIN_DB")
     repo = PyMySQLRepo(ten, admin)
     try:
-        result = ingest_section(repo, args.pub_section_id)
+        # CLI invocation is always a manual/explicit run — scrape the section even
+        # if it is disabled (force=True). Matches the "Run now" button behaviour.
+        result = ingest_section(repo, args.pub_section_id, force=True)
         if result is None:
-            print(f"Section {args.pub_section_id} not found or inactive.")
+            print(f"Section {args.pub_section_id} not found.")
             return 0
         print(f"found={result.items_found} new={result.items_new} "
               f"dupe={result.skipped_dupe} robots={result.skipped_robots}")

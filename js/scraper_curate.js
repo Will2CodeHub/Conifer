@@ -34,8 +34,10 @@
     }
 
     /* ---- init: load publications, build draggable tabs ---- */
-    window.scCurateInit = function () {
-        if (inited) return; inited = true;
+    window.scCurateInit = function (preferredPubKey) {
+        // preferredPubKey forces a fresh publications load (to pick up a section that was
+        // just manually run and is now temporarily curatable) and selects that publication.
+        if (inited && !preferredPubKey) return; inited = true;
         var tabs = el("scCuratePubTabs");
         tabs.innerHTML = "<span class='scraper-placeholder'>Loading publications…</span>";
         post({ action: "curate_pubs" }).then(function (j) {
@@ -43,9 +45,17 @@
             pubs = j.publications || [];
             if (!pubs.length) { tabs.innerHTML = ""; el("scCurateBody").innerHTML = "<p class='scraper-placeholder'>No publications configured yet — add one from the Configure tab.</p>"; return; }
             renderPubTabs();
-            selectPub(pubs[0]);
+            var pick = preferredPubKey && pubs.filter(function (x) { return x.publication_key === preferredPubKey; })[0];
+            selectPub(pick || pubs[0]);
         }).catch(function (e) { tabs.innerHTML = "<span class='scraper-placeholder'>Error: " + esc(e.message) + "</span>"; });
         wireActions();
+    };
+
+    // Open the Curate view on a specific publication (called from the Configure tab's
+    // "Review in Curate" link after a manual Run now). Forces a fresh publications load.
+    window.scCurateOpenPub = function (pubKey) {
+        inited = false;
+        window.scCurateInit(pubKey);
     };
 
     // Stable per-publication colour + monogram so each tab is instantly distinguishable.

@@ -58,13 +58,59 @@ function scraper_ensure_run_requests_table(mysqli $conn): void {
  *   cd "$(dirname "$0")"; set -a; source ./env.sh; set +a
  *   exec ./venv/bin/python run_ingest.py --pub-section-id "$1"
  */
+/** Real on-disk worker directory. FTP is chrooted to /home/tenuser, so the worker
+ * that deploys to FTP path /home/tenuser/scraper_worker actually lives here. */
+if (!defined('SCRAPER_WORKER_DIR')) {
+    define('SCRAPER_WORKER_DIR', '/home/tenuser/home/tenuser/scraper_worker');
+}
+
+/** True if we can invoke the worker synchronously (shell_exec enabled + wrapper present). */
+function scraper_worker_available(): bool {
+    if (!function_exists('shell_exec')) return false;
+    $disabled = array_map('trim', explode(',', (string)ini_get('disable_functions')));
+    if (in_array('shell_exec', $disabled, true)) return false;
+    return @is_dir(SCRAPER_WORKER_DIR) && @is_file(SCRAPER_WORKER_DIR . '/run_now.sh');
+}
+
+/**
+ * Run ONE section's ingest synchronously via the worker wrapper and return the
+ * parsed counts. Single-section ingests are fast (~5-15s), so this is safe to run
+ * inline for the "Run now" button. The wrapper forces the run, so it works for a
+ * DISABLED section too. Returns:
+ *   ['ok'=>bool, 'found'=>int, 'new'=>int, 'dupe'=>int, 'robots'=>int, 'raw'=>string, 'error'?=>string]
+ */
+function scraper_run_section_now_sync(int $pubSectionId): array {
+    if (!scraper_worker_available()) return ['ok'=>false, 'error'=>'worker_unavailable'];
+    $script = SCRAPER_WORKER_DIR . '/run_now.sh';
+    $cmd = 'bash ' . escapeshellarg($script) . ' ' . (int)$pubSectionId . ' 2>&1';
+    $out = (string)@shell_exec($cmd);
+    if (preg_match('/found=(\d+)\s+new=(\d+)\s+dupe=(\d+)\s+robots=(\d+)/', $out, $m)) {
+        return ['ok'=>true, 'found'=>(int)$m[1], 'new'=>(int)$m[2],
+                'dupe'=>(int)$m[3], 'robots'=>(int)$m[4], 'raw'=>trim($out)];
+    }
+    return ['ok'=>false, 'error'=>'no_result', 'raw'=>trim(mb_substr($out, 0, 500))];
+}
+
+/** Fire-and-forget: kick a translate+rank precompute pass for one section so the
+ * freshly-scraped items also surface in Curate's "Curated pick" (not just "All today").
+ * Non-blocking; best-effort. */
+function scraper_kick_precompute(int $pubSectionId): void {
+    if (!function_exists('shell_exec')) return;
+    $disabled = array_map('trim', explode(',', (string)ini_get('disable_functions')));
+    if (in_array('shell_exec', $disabled, true)) return;
+    $url = 'https://theeyenewspapers.com/management/scraper/cron/precompute.php?t=p7r3c0mp&section=' . (int)$pubSectionId;
+    @shell_exec('curl -s ' . escapeshellarg($url) . ' >/dev/null 2>&1 &');
+}
+
+/** Legacy async fallback: best-effort background spawn of the worker wrapper. */
 function scraper_try_spawn_worker(int $pubSectionId): bool {
-    $wrapper = '/home/tenuser/scraper_worker/run_now.sh';
-    if (!function_exists('exec') || !@is_executable($wrapper)) return false;
+    if (!function_exists('exec')) return false;
     $disabled = array_map('trim', explode(',', (string)ini_get('disable_functions')));
     if (in_array('exec', $disabled, true)) return false;
-    $cmd = escapeshellarg($wrapper) . ' ' . (int)$pubSectionId
-         . ' >> /home/tenuser/scraper_worker/run_now.log 2>&1 &';
+    $wrapper = SCRAPER_WORKER_DIR . '/run_now.sh';
+    if (!@is_file($wrapper)) return false;
+    $cmd = 'bash ' . escapeshellarg($wrapper) . ' ' . (int)$pubSectionId
+         . ' >> ' . escapeshellarg(SCRAPER_WORKER_DIR . '/run_now.log') . ' 2>&1 &';
     @exec($cmd);
     return true;
 }
@@ -79,9 +125,16 @@ function scraper_request_section_run(int $pubSectionId, ?int $userId): array {
     scraper_ensure_run_requests_table($conn);
     $r = $conn->query("SELECT is_active FROM ten_scraper_pub_sections WHERE id=" . (int)$pubSectionId);
     $row = $r ? $r->fetch_assoc() : null;
-    if (!$row)                       { $conn->close(); return ['ok'=>false, 'message'=>'Section not found']; }
-    if ((int)$row['is_active'] !== 1){ $conn->close(); return ['ok'=>false, 'message'=>'Section is disabled — enable it first']; }
-    $r = $conn->query("SELECT id FROM ten_scraper_run_requests WHERE pub_section_id=" . (int)$pubSectionId . " AND status IN ('pending','running') ORDER BY id DESC LIMIT 1");
+    if (!$row) { $conn->close(); return ['ok'=>false, 'message'=>'Section not found']; }
+    // A manual run is an explicit override — disabled sections are allowed (the
+    // worker forces the run). Only a request queued in the LAST 15 MIN counts as a
+    // live duplicate; anything older is stale (e.g. a worker that isn't draining)
+    // and must not block a fresh Run now.
+    $r = $conn->query("SELECT id FROM ten_scraper_run_requests
+                       WHERE pub_section_id=" . (int)$pubSectionId . "
+                         AND status IN ('pending','running')
+                         AND requested_at >= (NOW() - INTERVAL 15 MINUTE)
+                       ORDER BY id DESC LIMIT 1");
     $existing = $r ? $r->fetch_assoc() : null;
     if ($existing) { $conn->close(); return ['ok'=>true, 'request_id'=>(int)$existing['id'], 'already'=>true, 'spawned'=>false]; }
     $s = $conn->prepare("INSERT INTO ten_scraper_run_requests (pub_section_id, requested_by) VALUES (?,?)");
@@ -92,12 +145,37 @@ function scraper_request_section_run(int $pubSectionId, ?int $userId): array {
     return ['ok'=>true, 'request_id'=>$id, 'already'=>false, 'spawned'=>$spawned];
 }
 
-/** Queue immediate runs for every ENABLED section of a publication. */
+/** Record a completed manual run as a run-request row. Doubles as the "recently
+ * run" signal that makes a temporarily-disabled section curatable for 48h. */
+function scraper_record_manual_run(int $pubSectionId, ?int $userId, string $result): void {
+    $conn = getDBConnection();
+    scraper_ensure_run_requests_table($conn);
+    $res = substr($result, 0, 255);
+    $s = $conn->prepare("INSERT INTO ten_scraper_run_requests
+                         (pub_section_id, requested_by, status, started_at, finished_at, result)
+                         VALUES (?,?, 'done', NOW(), NOW(), ?)");
+    $s->bind_param('iis', $pubSectionId, $userId, $res);
+    $s->execute(); $s->close(); $conn->close();
+}
+
+/** Mark any pending/running run-requests for a section as done (used after a
+ * synchronous manual run, so a stale queue doesn't get re-processed later). */
+function scraper_clear_pending_requests(int $pubSectionId): void {
+    $conn = getDBConnection();
+    scraper_ensure_run_requests_table($conn);
+    $conn->query("UPDATE ten_scraper_run_requests
+                  SET status='done', finished_at=NOW(), result='superseded by manual run'
+                  WHERE pub_section_id=" . (int)$pubSectionId . " AND status IN ('pending','running')");
+    $conn->close();
+}
+
+/** Queue immediate runs for every section of a publication (incl. disabled). */
 function scraper_request_publication_run(int $projectId, string $pubKey, ?int $userId): array {
     $conn = getDBConnection();
     scraper_ensure_run_requests_table($conn);
     $ids = [];
-    $st = $conn->prepare("SELECT id FROM ten_scraper_pub_sections WHERE project_id=? AND publication_key=? AND is_active=1");
+    // Include disabled sections too — a manual publication run is an explicit override.
+    $st = $conn->prepare("SELECT id FROM ten_scraper_pub_sections WHERE project_id=? AND publication_key=?");
     $st->bind_param('is', $projectId, $pubKey);
     $st->execute(); $res = $st->get_result();
     while ($x = $res->fetch_assoc()) $ids[] = (int)$x['id'];

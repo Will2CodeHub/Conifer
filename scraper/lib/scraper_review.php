@@ -146,7 +146,13 @@ function scraper_fetch_facts(string $url, int $maxChars = 5000): string {
 /** Publications with an active section, one primary section each (News preferred). */
 function scraper_curate_publications(): array {
     $conn = getDBConnection();
-    $res = $conn->query("SELECT id, publication_key, ten_section, daily_count FROM ten_scraper_pub_sections WHERE is_active=1 ORDER BY publication_key ASC");
+    // Active sections, PLUS any section manually "Run now"-ed in the last 48h — so a
+    // temporarily-disabled section you just scraped is curatable without permanently
+    // showing every disabled backlog.
+    $res = $conn->query("SELECT id, publication_key, ten_section, daily_count FROM ten_scraper_pub_sections
+                         WHERE (is_active=1 OR id IN (SELECT pub_section_id FROM ten_scraper_run_requests
+                                                      WHERE requested_at >= (NOW() - INTERVAL 48 HOUR)))
+                         ORDER BY publication_key ASC");
     $pick = [];
     while ($r = $res->fetch_assoc()) {
         $k = $r['publication_key'];
@@ -155,7 +161,9 @@ function scraper_curate_publications(): array {
     $out = [];
     foreach ($pick as $k => $r) {
         $sid = (int)$r['id'];
-        $c = $conn->query("SELECT COUNT(*) c FROM ten_scraper_items WHERE pub_section_id=$sid AND status='new'")->fetch_assoc()['c'];
+        // Today's new items only — the Curate screen displays only today (CURDATE), so
+        // counting older backlog here just produced a misleadingly huge pill.
+        $c = $conn->query("SELECT COUNT(*) c FROM ten_scraper_items WHERE pub_section_id=$sid AND status='new' AND DATE(fetched_at)=CURDATE()")->fetch_assoc()['c'];
         $out[] = ['publication_key' => $k, 'section_id' => $sid, 'ten_section' => $r['ten_section'], 'top_n' => (int)$r['daily_count'], 'new_count' => (int)$c];
     }
     $conn->close();
@@ -201,7 +209,7 @@ function scraper_curate_rank(int $pubSectionId, int $topN): array {
     if (!$section || $topN < 1) return ['items' => []];
     $conn = getDBConnection();
     $stmt = $conn->prepare("SELECT id, COALESCE(NULLIF(title_translated,''),title) AS t, COALESCE(NULLIF(summary_translated,''),summary) AS s
-                            FROM ten_scraper_items WHERE pub_section_id=? AND status='new'
+                            FROM ten_scraper_items WHERE pub_section_id=? AND status='new' AND DATE(fetched_at)=CURDATE()
                             ORDER BY published_at DESC, id DESC LIMIT 80");
     $stmt->bind_param('i', $pubSectionId); $stmt->execute();
     $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC); $stmt->close(); $conn->close();
@@ -254,7 +262,17 @@ function scraper_curate_rank(int $pubSectionId, int $topN): array {
  */
 function scraper_precompute_section(int $pubSectionId): array {
     $section = scraper_get_section($pubSectionId);
-    if (!$section || (int)$section['is_active'] !== 1) return ['skipped' => 'inactive', 'more' => false];
+    if (!$section) return ['skipped' => 'missing', 'more' => false];
+    if ((int)$section['is_active'] !== 1) {
+        // Allow a temporarily-disabled section that was manually run in the last 48h,
+        // so its freshly-scraped items get translated + ranked for Curate's "Curated pick".
+        $c0 = getDBConnection();
+        $sidq = (int)$pubSectionId;
+        $rr = $c0->query("SELECT 1 FROM ten_scraper_run_requests WHERE pub_section_id=$sidq AND requested_at >= (NOW() - INTERVAL 48 HOUR) LIMIT 1");
+        $recent = $rr && $rr->num_rows > 0;
+        $c0->close();
+        if (!$recent) return ['skipped' => 'inactive', 'more' => false];
+    }
     $ai = scraper_translation_ai($section); // cheap model for bulk title/summary translation
 
     // The cron and the Curate screen can both drive this; a per-section lock stops them
@@ -278,7 +296,7 @@ function scraper_precompute_section_locked(int $pubSectionId, array $section, ar
     $CAP = 60;
     $conn = getDBConnection();
     $rows = $conn->query("SELECT id, title, summary FROM ten_scraper_items
-                          WHERE pub_section_id=$pubSectionId AND status='new'
+                          WHERE pub_section_id=$pubSectionId AND status='new' AND DATE(fetched_at)=CURDATE()
                             AND (title_translated IS NULL OR title_translated=''
                                  OR translated_lang IS NULL OR translated_lang<>'English')
                           ORDER BY id DESC LIMIT $CAP")->fetch_all(MYSQLI_ASSOC);
@@ -313,7 +331,7 @@ function scraper_precompute_section_locked(int $pubSectionId, array $section, ar
     }
     // Any untranslated left? If so, defer ranking until the section is fully translated.
     $remain = (int)$conn->query("SELECT COUNT(*) c FROM ten_scraper_items
-                                 WHERE pub_section_id=$pubSectionId AND status='new'
+                                 WHERE pub_section_id=$pubSectionId AND status='new' AND DATE(fetched_at)=CURDATE()
                                    AND (title_translated IS NULL OR title_translated=''
                                         OR translated_lang IS NULL OR translated_lang<>'English')")->fetch_assoc()['c'];
     $conn->close();
@@ -339,7 +357,7 @@ function scraper_precompute_section_locked(int $pubSectionId, array $section, ar
 function scraper_untranslated_count(int $pubSectionId): int {
     $conn = getDBConnection();
     $n = (int)$conn->query("SELECT COUNT(*) c FROM ten_scraper_items
-                            WHERE pub_section_id=" . (int)$pubSectionId . " AND status='new'
+                            WHERE pub_section_id=" . (int)$pubSectionId . " AND status='new' AND DATE(fetched_at)=CURDATE()
                               AND (title_translated IS NULL OR title_translated=''
                                    OR translated_lang IS NULL OR translated_lang<>'English')")->fetch_assoc()['c'];
     $conn->close();
@@ -356,15 +374,16 @@ function scraper_sections_needing_precompute(): array {
     $conn = getDBConnection();
     $res = $conn->query("SELECT ps.id
                          FROM ten_scraper_pub_sections ps
-                         WHERE ps.is_active=1 AND (
+                         WHERE (ps.is_active=1 OR ps.id IN (SELECT pub_section_id FROM ten_scraper_run_requests
+                                                            WHERE requested_at >= (NOW() - INTERVAL 48 HOUR))) AND (
                              EXISTS (
                                  SELECT 1 FROM ten_scraper_items i
-                                 WHERE i.pub_section_id=ps.id AND i.status='new'
+                                 WHERE i.pub_section_id=ps.id AND i.status='new' AND DATE(i.fetched_at)=CURDATE()
                                    AND (i.title_translated IS NULL OR i.title_translated=''
                                         OR i.translated_lang IS NULL OR i.translated_lang<>'English')
                              )
                              OR (
-                                 EXISTS (SELECT 1 FROM ten_scraper_items n WHERE n.pub_section_id=ps.id AND n.status='new')
+                                 EXISTS (SELECT 1 FROM ten_scraper_items n WHERE n.pub_section_id=ps.id AND n.status='new' AND DATE(n.fetched_at)=CURDATE())
                                  AND NOT EXISTS (SELECT 1 FROM ten_scraper_items c
                                                  WHERE c.pub_section_id=ps.id AND c.curate_rank IS NOT NULL AND DATE(c.curated_at)=CURDATE())
                              )
@@ -449,7 +468,9 @@ function scraper_curate_publications_ordered(int $userId): array {
 function scraper_curate_sections(string $pub): array {
     $conn = getDBConnection();
     $stmt = $conn->prepare("SELECT id, ten_section, daily_count FROM ten_scraper_pub_sections
-                            WHERE publication_key=? AND is_active=1
+                            WHERE publication_key=? AND (is_active=1 OR id IN (
+                                SELECT pub_section_id FROM ten_scraper_run_requests
+                                WHERE requested_at >= (NOW() - INTERVAL 48 HOUR)))
                             ORDER BY (ten_section='News') DESC, ten_section ASC");
     $stmt->bind_param('s', $pub); $stmt->execute();
     $secs = $stmt->get_result()->fetch_all(MYSQLI_ASSOC); $stmt->close();
@@ -974,6 +995,43 @@ function scraper_history(int $pubSectionId, int $days = 30): array {
  * admin_ten.articles (draft, or published if the section auto-publishes).
  * @return array list of per-item results
  */
+/** Human display name for a publication (for the breaking sub-editor prompt). */
+function scraper_publication_display_name(string $pubKey): string {
+    $a = getDBConnection_TENAdmin();
+    $st = $a->prepare("SELECT title FROM publications WHERE publication=? LIMIT 1");
+    $st->bind_param('s', $pubKey); $st->execute();
+    $row = $st->get_result()->fetch_assoc(); $st->close(); $a->close();
+    $t = $row && trim((string)$row['title']) !== '' ? trim((string)$row['title']) : strtoupper($pubKey);
+    return $t;
+}
+
+/**
+ * True if an AI article write clearly FAILED — an empty/too-short body, or the
+ * model emitted a refusal / "no source" message instead of an article. Such
+ * output must NEVER be published (this is the last-line guard for that rule).
+ */
+function scraper_ai_output_looks_failed(array $article): bool {
+    $title = (string)($article['title'] ?? '');
+    $body  = trim(preg_replace('/\s+/', ' ', strip_tags((string)($article['body_html'] ?? ''))));
+    if (mb_strlen($body) < 200) return true; // too short to be a genuine article
+    $hay = mb_strtolower($title . ' ' . $body);
+    // Specific AI-refusal / no-source phrasings only, to avoid false-positives on
+    // legitimate articles that merely contain a word like "cannot" or "source".
+    $sentinels = [
+        'no source material was provided', 'no source material', 'no factual source content',
+        'no factual source', 'no source content was', 'no factual details, figures',
+        'no such factual details', 'missing source information', 'without any source material',
+        'without source material', 'no content was provided',
+        'unable to produce a breaking', 'unable to produce this', 'unable to publish this',
+        'unable to generate this', 'was asked to prepare a breaking', 'was asked to prepare a news',
+        'based solely on facts supplied', 'editorial standards, articles must',
+        'as an ai language model', 'as an ai, i', "i'm unable to produce", 'i am unable to produce',
+        'please provide the source', 'provide the source material',
+    ];
+    foreach ($sentinels as $s) { if (mb_strpos($hay, $s) !== false) return true; }
+    return false;
+}
+
 function scraper_promote_items(int $pubSectionId, array $itemIds, ?bool $forcePublish = null): array {
     $section = scraper_get_section($pubSectionId);
     if (!$section) return [['ok' => false, 'error' => 'Section not found']];
@@ -1007,8 +1065,50 @@ function scraper_promote_items(int $pubSectionId, array $itemIds, ?bool $forcePu
             // Facts are fetched at promote time (not ingest), only for the items
             // actually being published. Fall back to the stored facts if present.
             $facts = trim((string)$item['facts']);
-            if ($facts === '') {
-                $facts = scraper_fetch_facts((string)$item['source_url']);
+            if (mb_strlen($facts) < 800) {
+                $fetched = trim((string)scraper_fetch_facts((string)$item['source_url'], 9000));
+                if (mb_strlen($fetched) > mb_strlen($facts)) $facts = $fetched;
+            }
+
+            // ---- BREAKING NEWS section: route through the faithful breaking pipeline
+            // (articles_breaking_news + rewrite + guards), never the normal writer/table,
+            // so it renders in the site's Breaking News section, not as an imageless article.
+            if (strcasecmp((string)$section['ten_section'], 'Breaking News') === 0) {
+                require_once __DIR__ . '/scraper_breaking.php';
+                $pubName = scraper_publication_display_name($section['publication_key']);
+                if (mb_strlen($facts) < 1000) {
+                    $results[] = ['id' => $itemId, 'ok' => false, 'error' => 'Not published — source text too thin for a breaking report (' . mb_strlen($facts) . ' chars). Never publish without real source.'];
+                    continue;
+                }
+                $article = scraper_ai_rewrite_breaking($ai['provider'], $ai['model'], (string)$item['title'], $facts, $pubName);
+                if (!$article || scraper_ai_output_looks_failed($article)) {
+                    $results[] = ['id' => $itemId, 'ok' => false, 'error' => 'Not published — the rewrite produced no usable article.'];
+                    continue;
+                }
+                $plain = trim(preg_replace('/\s+/', ' ', strip_tags($article['body_html'] ?? '')));
+                if (scraper_breaking_has_quote($plain) || scraper_breaking_has_quote((string)$article['title'])) {
+                    $results[] = ['id' => $itemId, 'ok' => false, 'error' => 'Not published — output reproduced a direct quotation.'];
+                    continue;
+                }
+                if (!scraper_breaking_is_grounded($article, $facts, (string)$item['title'])) {
+                    $results[] = ['id' => $itemId, 'ok' => false, 'error' => 'Not published — output not grounded in the source (possible hallucination).'];
+                    continue;
+                }
+                $state = $autoPublish ? 'published' : 'draft';
+                $artId = scraper_insert_breaking_article($article, $item, $journalistId, $inhouseName, $section['publication_key'], $state);
+                scraper_record_draft($conn, $itemId, $article, $ai, $journalistId, $artId);
+                $up = $conn->prepare("UPDATE ten_scraper_items SET status='promoted' WHERE id=?");
+                $up->bind_param('i', $itemId); $up->execute(); $up->close();
+                if ($state === 'published') { try { scraper_trigger_publication_cache($section['publication_key']); } catch (Throwable $e) {} }
+                $results[] = ['id' => $itemId, 'ok' => true, 'article_id' => $artId, 'title' => $article['title'], 'state' => $state, 'breaking' => true];
+                continue;
+            }
+
+            // ---- Normal article path. Refuse to publish with essentially no source.
+            $sourceLen = mb_strlen(trim($facts . ' ' . (string)$item['summary']));
+            if ($sourceLen < 120) {
+                $results[] = ['id' => $itemId, 'ok' => false, 'error' => 'Not published — no usable source material for this item.'];
+                continue;
             }
             $article = scraper_ai_write_article($ai['provider'], $ai['model'], $ai['prompt'], [
                 'source_title' => $item['title'],
@@ -1019,6 +1119,12 @@ function scraper_promote_items(int $pubSectionId, array $itemIds, ?bool $forcePu
                 'publication' => $section['publication_key'],
                 'target_language' => $lang,
             ]);
+
+            // Last-line guard: NEVER publish an AI refusal / empty / too-short body.
+            if (scraper_ai_output_looks_failed($article)) {
+                $results[] = ['id' => $itemId, 'ok' => false, 'error' => 'Not published — the AI did not return a usable article for this item.'];
+                continue;
+            }
 
             $articleId = scraper_insert_article($section, $article, $item, $journalistId, $autoPublish, $inhouseName);
             scraper_record_draft($conn, $itemId, $article, $ai, $journalistId, $articleId);

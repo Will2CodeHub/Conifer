@@ -45,9 +45,12 @@ def drain_run_requests(repo) -> dict:
         if pub_section_id is None:
             continue  # already claimed by another worker
         try:
-            result = ingest_section(repo, pub_section_id)
+            # A manual "run now" request is an explicit override — scrape even a
+            # disabled section (force=True); the scheduler's auto-sweep still skips
+            # disabled ones.
+            result = ingest_section(repo, pub_section_id, force=True)
             if result is None:
-                repo.finish_run_request(req_id, "done", "section inactive or not found")
+                repo.finish_run_request(req_id, "done", "section not found")
             else:
                 repo.finish_run_request(
                     req_id, "done",
@@ -61,11 +64,19 @@ def drain_run_requests(repo) -> dict:
     return {"ran": ran, "errors": errors}
 
 
-def ingest_section(repo, pub_section_id: int):
+def ingest_section(repo, pub_section_id: int, force: bool = False):
     """Run ingestion for one section id. Returns the IngestResult, or None if the
-    section is missing/inactive. Records a row in ten_scraper_runs either way."""
+    section is missing (or inactive and not forced). Records a row in
+    ten_scraper_runs when it runs.
+
+    force=True is used for MANUAL runs (the "Run now" button / run_ingest CLI):
+    a disabled section is only skipped by the scheduler's automatic sweep, but an
+    explicit manual request must scrape it anyway. Disabling a section therefore
+    stops scheduled scraping without blocking an on-demand run."""
     section = repo.load_section(pub_section_id)
-    if not section or not section.get("is_active"):
+    if not section:
+        return None
+    if not force and not section.get("is_active"):
         return None
 
     feeds = repo.load_feeds(pub_section_id)
@@ -85,6 +96,14 @@ def ingest_section(repo, pub_section_id: int):
                     )
 
         fetcher = RequestsFetcher()
+        # Daily per-section cap: never collect more than daily_count (N) items in a day.
+        daily_cap = int(section.get("daily_count") or 0)
+        already_today = 0
+        if daily_cap:
+            try:
+                already_today = repo.count_items_today(pub_section_id)
+            except Exception:
+                already_today = 0
         # NOTE: facts are NOT extracted here — fetching every article page at
         # ingest is far too slow across many sections/feeds. Facts are pulled at
         # PROMOTE time instead, only for the items actually being published.
@@ -96,6 +115,8 @@ def ingest_section(repo, pub_section_id: int):
             user_agent=user_agent,
             robots_fetcher=fetcher.fetch_robots,
             html_lister=extract_article_links,
+            daily_cap=daily_cap,
+            already_today=already_today,
         )
         log = (
             f"found={result.items_found} new={result.items_new} "

@@ -12,6 +12,7 @@ ini_set('display_errors', '0');
 require_once '../config.php';
 require_once __DIR__ . '/../scraper/lib/scraper_crud.php';
 require_once __DIR__ . '/../scraper/lib/scraper_refs.php';
+require_once __DIR__ . '/../scraper/lib/scraper_review.php'; // scraper_precompute_section for Run now
 requireLogin();
 
 header('Content-Type: application/json');
@@ -87,11 +88,57 @@ try {
             break;
         case 'section.run_now':
             scraper_require_manage($canManage);
+            @set_time_limit(180); // a single-section ingest is fast, but give it headroom
             $sid = (int)($_POST['id'] ?? 0);
             $uid = (int)($_SESSION['ten_user_id'] ?? 0) ?: null;
+            $section = scraper_get_section($sid);
+            if (!$section) { echo json_encode(['success' => false, 'message' => 'Section not found']); break; }
+
+            // Preferred path: run this one section NOW, synchronously, and report results.
+            // Works for disabled sections too (the worker forces a manual run).
+            $sync = scraper_run_section_now_sync($sid);
+            if (!empty($sync['ok'])) {
+                scraper_clear_pending_requests($sid);   // we just ran it — clear any stale queue
+                // Record the manual run (audit + makes a disabled section curatable for 48h).
+                scraper_record_manual_run($sid, $uid, 'found=' . $sync['found'] . ' new=' . $sync['new']);
+                // Translate + rank NOW, synchronously, so the fresh items appear in the
+                // "Curated pick" tab immediately (not just "All today"). The per-section
+                // daily cap keeps today's pool small, so this finishes in a pass or two;
+                // bounded by iterations + a time budget so Run now always returns.
+                $ranked = 0; $deadline = time() + 100;
+                for ($i = 0; $i < 10; $i++) {
+                    $pc = scraper_precompute_section($sid);
+                    if (!empty($pc['ranked'])) { $ranked = (int)$pc['ranked']; }
+                    if (empty($pc['more']) || time() >= $deadline) { break; }
+                }
+                logActivity('scraper_run_now', 'scraper_section', $sid,
+                    'Ran immediate scrape (found=' . $sync['found'] . ' new=' . $sync['new'] . ', ranked=' . $ranked . ')');
+                echo json_encode([
+                    'success'         => true,
+                    'mode'            => 'sync',
+                    'found'           => $sync['found'],
+                    'new'             => $sync['new'],
+                    'dupe'            => $sync['dupe'],
+                    'robots'          => $sync['robots'],
+                    'ranked'          => $ranked,
+                    'publication_key' => $section['publication_key'],
+                    'ten_section'     => $section['ten_section'],
+                ]);
+                break;
+            }
+
+            // Fallback: worker not reachable inline — queue it (now allowed for disabled
+            // sections) and best-effort background-spawn; the scheduler drains it.
             $r = scraper_request_section_run($sid, $uid);
-            if (!empty($r['ok'])) logActivity('scraper_run_now', 'scraper_section', $sid, 'Requested immediate scrape');
-            echo json_encode(array_merge(['success' => !empty($r['ok'])], $r));
+            if (!empty($r['ok']) && empty($r['already'])) $r['spawned'] = scraper_try_spawn_worker($sid);
+            if (!empty($r['ok'])) logActivity('scraper_run_now', 'scraper_section', $sid, 'Queued immediate scrape (async)');
+            echo json_encode(array_merge([
+                'success'         => !empty($r['ok']),
+                'mode'            => 'queued',
+                'publication_key' => $section['publication_key'],
+                'ten_section'     => $section['ten_section'],
+                'worker_note'     => $sync['error'] ?? '',
+            ], $r));
             break;
         case 'publication.run_now':
             scraper_require_manage($canManage);
