@@ -415,8 +415,9 @@ $currentPage = 'statistics';
                 <div class="control-group">
                     <label><i class="fas fa-globe"></i> Select Website</label>
                     <select id="siteSelector" onchange="loadTrafficStats()">
+                        <option value="" selected>&mdash; Select a publication &mdash;</option>
                         <?php foreach ($sites as $key => $site): ?>
-                            <option value="<?php echo $key; ?>" <?php echo $key === $defaultPublication ? 'selected' : ''; ?>>
+                            <option value="<?php echo $key; ?>">
                                 <?php echo htmlspecialchars($site['name']); ?>
                             </option>
                         <?php endforeach; ?>
@@ -452,6 +453,13 @@ $currentPage = 'statistics';
             </div>
             
             <!-- Monthly Summary Cards -->
+            <!-- Shown until the admin picks a publication (no default stats on load). -->
+            <div id="selectPrompt" style="text-align:center;padding:52px 16px;color:#64748b;">
+                <i class="fas fa-globe" style="font-size:34px;display:block;margin-bottom:12px;color:#94a3b8;"></i>
+                <div style="font-size:16px;font-weight:600;color:#475569;">Select a publication to view its statistics</div>
+                <div style="font-size:13px;margin-top:4px;">Choose a website from the dropdown above.</div>
+            </div>
+
             <div id="monthlySummary" class="summary-grid" style="display: none;">
                 <!-- Will be populated by JavaScript -->
             </div>
@@ -679,19 +687,15 @@ $currentPage = 'statistics';
         document.addEventListener('DOMContentLoaded', function() {
             loadSystemInfo();
 
-            // Restore this admin's last chosen filters (remembered per device).
-            // Falls back to the server-configured defaults (Settings → General),
-            // which are already pre-selected in the dropdowns.
+            // No publication is pre-selected — the admin must choose one, so no default
+            // stats are shown on load. Only the period preference is restored (convenience).
             try {
-                const savedSite = localStorage.getItem('ten_stats_site');
                 const savedPeriod = localStorage.getItem('ten_stats_period');
-                const siteSel = document.getElementById('siteSelector');
                 const perSel = document.getElementById('periodSelector');
-                if (savedSite && [...siteSel.options].some(o => o.value === savedSite)) siteSel.value = savedSite;
                 if (savedPeriod && [...perSel.options].some(o => o.value === savedPeriod)) perSel.value = savedPeriod;
             } catch (e) {}
 
-            loadTrafficStats();
+            // Deliberately do NOT auto-load; the #selectPrompt stays until a publication is picked.
 
             // Search functionality
             document.getElementById('pageSearch').addEventListener('input', function() {
@@ -729,6 +733,16 @@ $currentPage = 'statistics';
         function loadTrafficStats() {
             const siteKey = document.getElementById('siteSelector').value;
             const period = document.getElementById('periodSelector').value;
+
+            // No publication chosen yet → show the prompt, load nothing.
+            const prompt = document.getElementById('selectPrompt');
+            if (!siteKey) {
+                if (prompt) prompt.style.display = '';
+                document.getElementById('currentStats').style.display = 'none';
+                document.getElementById('monthlySummary').style.display = 'none';
+                return;
+            }
+            if (prompt) prompt.style.display = 'none';
 
             // Remember this admin's current filters for next time (per device).
             try {

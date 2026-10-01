@@ -26,6 +26,11 @@ function ten_stats_sites(): array {
         'tte'   => ['name' => 'The Tokyo Eye',      'domain' => 'thetokyoeye.com',      'log_path' => '/home/tteuser/private/unique_visitors_count.txt'],
         'tpe'   => ['name' => 'The Paris Eye',      'domain' => 'thepariseye.com',      'log_path' => '/home/tpeuser/private/unique_visitors_count.txt'],
         'tbere' => ['name' => 'The Berlin Eye',     'domain' => 'theberlineye.com',     'log_path' => '/home/tberuser/private/unique_visitors_count.txt'],
+        // GPHI is a standalone site (not an editorial "publication"). Data appears once
+        // the nightly collector runs for it (TEN_BASE_SITE_ABBREVIATION=gphi). log_path
+        // is the live-log tail path on the GPHI docroot — CONFIRM the real cPanel home
+        // dir (placeholder below) and that the site writes private/unique_visitors_count.txt.
+        'gphi'  => ['name' => 'German Private Health Insurance', 'domain' => 'germanprivatehealthinsurance.com', 'log_path' => '/home/gphiuser/private/unique_visitors_count.txt'],
     ];
 }
 
