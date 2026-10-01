@@ -323,7 +323,8 @@ while ($row = $result->fetch_assoc()) {
 
             $pubLinks[] = array(
                 'name' => $p,
-                'url' => $url
+                'url' => $url,
+                'canonical' => ($p === $canonicalPub)
             );
         }
     }
@@ -359,6 +360,8 @@ while ($row = $result->fetch_assoc()) {
         'journalist_name'   => $journalistName,
         'publications'      => $row['publications'],
         'publication_links' => $pubLinks,
+        'canonical'         => $canonicalPub,
+        'section'           => $row['section'] ?? '',
         'state'             => $row['state'],
         'submission_date'   => $row['submission_date'],
         'editable'          => $editable,

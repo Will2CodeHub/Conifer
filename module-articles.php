@@ -845,8 +845,12 @@ $pageTitle = 'Article Management';
                                             Author
                                         </th>
                                         <th data-col="publications"
-                                            style="padding:12px 10px;border-bottom:2px solid #334155;vertical-align:middle;text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;width:130px;">
+                                            style="padding:12px 10px;border-bottom:2px solid #334155;vertical-align:middle;text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;width:140px;">
                                             Publication
+                                        </th>
+                                        <th data-col="section"
+                                            style="padding:12px 10px;border-bottom:2px solid #334155;vertical-align:middle;text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;width:110px;">
+                                            Section
                                         </th>
                                         <th data-col="state" class="sortable"
                                             style="padding:12px 10px;border-bottom:2px solid #334155;vertical-align:middle;cursor:pointer;width:110px;text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">
@@ -952,6 +956,12 @@ $pageTitle = 'Article Management';
                         <div class="ed-tabwrap">
                             <div class="ed-tabpanel" data-edpanel="apub">
                                 <label class="ed-lbl">Publication <span style="color:#dc2626;">*</span> <span style="font-weight:400;text-transform:none;color:#94a3b8;">— tick each publication; choose one as the canonical (primary) site.</span></label>
+                                <div class="pub-applyall" data-for="add_article_publications" style="display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:6px 0 10px;padding:8px 10px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;font-size:12.5px;color:#475569;">
+                                    <strong style="font-weight:600;">Apply to all ticked publications:</strong>
+                                    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="pub-all" data-flag="frontpage"> 🔥 Front</label>
+                                    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="pub-all" data-flag="section_head"> ★ Section</label>
+                                    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="pub-all" data-flag="sponsored"> 💲 Sponsored</label>
+                                </div>
                                 <div id="add_article_publications"><span style="color:#9ca3af;font-size:13px;">Loading publications…</span></div>
                             </div>
                             <div class="ed-tabpanel" data-edpanel="aauthor">
@@ -1272,7 +1282,15 @@ $pageTitle = 'Article Management';
                         <button type="button" class="ed-tab" data-edtab="seo"><i class="fas fa-hashtag"></i> SEO &amp; Metadata</button>
                     </div>
                     <div class="ed-tabwrap">
-                        <div class="ed-tabpanel" data-edpanel="pub"><div id="modal_publications_container"></div></div>
+                        <div class="ed-tabpanel" data-edpanel="pub">
+                            <div class="pub-applyall" data-for="modal_publications_container" style="display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:0 0 10px;padding:8px 10px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;font-size:12.5px;color:#475569;">
+                                <strong style="font-weight:600;">Apply to all ticked publications:</strong>
+                                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="pub-all" data-flag="frontpage"> 🔥 Front</label>
+                                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="pub-all" data-flag="section_head"> ★ Section</label>
+                                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="pub-all" data-flag="sponsored"> 💲 Sponsored</label>
+                            </div>
+                            <div id="modal_publications_container"></div>
+                        </div>
 
                         <div class="ed-tabpanel" data-edpanel="author">
                             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
@@ -1483,6 +1501,24 @@ window.TEN_collectPubFlags = function (containerId, includeSelector) {
     });
     return out;
 };
+
+// "Apply to all ticked publications": toggling a .pub-all box sets that flag on every
+// CURRENTLY-TICKED publication row, so when they're all the same the user doesn't have
+// to tick each row. Delegated so it also covers the dynamically-built rows.
+document.addEventListener('change', function (e) {
+    var cb = e.target;
+    if (!cb || !cb.classList || !cb.classList.contains('pub-all')) return;
+    var wrap = cb.closest('.pub-applyall'); if (!wrap) return;
+    var containerId = wrap.getAttribute('data-for');
+    var flag = cb.getAttribute('data-flag');
+    var on = cb.checked;
+    document.querySelectorAll('#' + containerId + ' .pub-row').forEach(function (row) {
+        var inc = row.querySelector('input.add_pub_cb, input.modal_pub_cb');
+        if (!inc || !inc.checked) return;              // only publications that are selected
+        var fl = row.querySelector('.pubflag[data-flag="' + flag + '"]');
+        if (fl && !fl.disabled) fl.checked = on;
+    });
+});
 
 /* Settings tabs: keep the tab row fixed; open the chosen panel below it.
    Scoped per .ed-tabs group (its own .ed-tabwrap sibling + panels) so multiple
@@ -2967,7 +3003,7 @@ window.TEN_collectPubFlags = function (containerId, includeSelector) {
                     showSpinner(false);
 
                     if (!data || !Array.isArray(data.results)) {
-                        tbody.innerHTML = '<tr><td colspan="7" style="padding:12px;text-align:center;color:#dc3545;">Error loading data</td></tr>';
+                        tbody.innerHTML = '<tr><td colspan="8" style="padding:12px;text-align:center;color:#dc3545;">Error loading data</td></tr>';
                         paginationUL.innerHTML = '';
                         return;
                     }
@@ -2977,7 +3013,7 @@ window.TEN_collectPubFlags = function (containerId, includeSelector) {
                 })
                 .catch(function (err) {
                     showSpinner(false);
-                    tbody.innerHTML = '<tr><td colspan="7" style="padding:12px;text-align:center;color:#dc3545;">Error loading data</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="8" style="padding:12px;text-align:center;color:#dc3545;">Error loading data</td></tr>';
                     paginationUL.innerHTML = '';
                     console.error(err);
                 });
@@ -2993,16 +3029,22 @@ window.TEN_collectPubFlags = function (containerId, includeSelector) {
             noResults.style.display = 'none';
 
             rows.forEach(function (row, idx) {
-                // Publication badges - show just the names cleanly
+                // Publication badges — the canonical (primary) publication is highlighted
+                // in amber with a star so it's obvious which site the article belongs to.
+                function pubPill(name, isCanonical) {
+                    var st = isCanonical
+                        ? 'background:#fef3c7;color:#92400e;border:1px solid #f59e0b;'
+                        : 'background:#dbeafe;color:#1d4ed8;border:1px solid transparent;';
+                    return '<span title="' + (isCanonical ? 'Canonical (primary) publication' : '') + '" style="display:inline-block;' + st + 'padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;margin-right:4px;margin-bottom:2px;letter-spacing:0.3px;text-transform:uppercase;">' + (isCanonical ? '★ ' : '') + safeText(name) + '</span>';
+                }
                 let pubsHtml = '';
                 if (Array.isArray(row.publication_links) && row.publication_links.length) {
-                    row.publication_links.forEach(function (p) {
-                        pubsHtml += '<span style="display:inline-block;background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;margin-right:4px;margin-bottom:2px;letter-spacing:0.3px;text-transform:uppercase;">' + safeText(p.name) + '</span>';
-                    });
+                    row.publication_links.forEach(function (p) { pubsHtml += pubPill(p.name, !!p.canonical); });
                 } else if (row.publications) {
+                    var canon = (row.canonical || '').trim();
                     row.publications.split(',').forEach(function(p) {
                         p = p.trim();
-                        if (p) pubsHtml += '<span style="display:inline-block;background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;margin-right:4px;margin-bottom:2px;letter-spacing:0.3px;text-transform:uppercase;">' + safeText(p) + '</span>';
+                        if (p) pubsHtml += pubPill(p, p === canon);
                     });
                 }
 
@@ -3054,7 +3096,8 @@ window.TEN_collectPubFlags = function (containerId, includeSelector) {
                     '<td style="padding:12px 10px;vertical-align:middle;width:55px;font-size:12px;color:#94a3b8;font-weight:600;">' + safeText(row.id) + '</td>' +
                     '<td style="padding:12px 10px;vertical-align:middle;max-width:320px;"><span style="font-size:13px;font-weight:600;color:#1e293b;line-height:1.4;display:block;">' + safeText(row.title) + '</span></td>' +
                     '<td style="padding:12px 10px;vertical-align:middle;width:150px;"><span style="font-size:12px;color:#475569;">' + authorStr + '</span></td>' +
-                    '<td style="padding:12px 10px;vertical-align:middle;width:130px;">' + pubsHtml + '</td>' +
+                    '<td style="padding:12px 10px;vertical-align:middle;width:140px;">' + pubsHtml + '</td>' +
+                    '<td style="padding:12px 10px;vertical-align:middle;width:110px;"><span style="font-size:12px;color:#475569;text-transform:capitalize;">' + safeText(row.section || '—') + '</span></td>' +
                     '<td style="padding:12px 10px;vertical-align:middle;width:110px;">' + statusBadge + '</td>' +
                     '<td style="padding:12px 10px;vertical-align:middle;width:140px;font-size:12px;color:#64748b;white-space:nowrap;">' + dateStr + '</td>' +
                     '<td style="padding:12px 10px;vertical-align:middle;text-align:center;width:120px;">' +
