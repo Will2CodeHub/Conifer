@@ -777,8 +777,12 @@ $currentPage = 'users';
             }
         })();
 
-        document.getElementById('passwordGroup').style.display = 'none';
+        // Admins can set/reset this user's login password here (optional on edit).
+        document.getElementById('passwordGroup').style.display = 'block';
         document.getElementById('password').required = false;
+        document.getElementById('password').value = '';
+        document.getElementById('password').placeholder = 'Leave blank to keep current password';
+        (function(){ var l = document.querySelector('#passwordGroup label'); if (l) l.textContent = 'Set / reset password (optional)'; })();
         // Invites are for new users only.
         document.getElementById('inviteGroup').style.display = 'none';
         document.getElementById('send_invite').checked = false;
@@ -807,6 +811,8 @@ $currentPage = 'users';
         document.getElementById('formAction').value = 'create_user';
         document.getElementById('passwordGroup').style.display = 'block';
         document.getElementById('password').required = true;
+        document.getElementById('password').placeholder = '';
+        (function(){ var l = document.querySelector('#passwordGroup label'); if (l) l.textContent = 'Password *'; })();
         document.getElementById('inviteGroup').style.display = 'block';
         document.getElementById('send_invite').checked = false;
         document.getElementById('byline').value = '';

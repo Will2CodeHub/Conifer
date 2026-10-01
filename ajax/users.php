@@ -224,6 +224,20 @@ try {
             }
             $stmt->close();
 
+            // Admin-only: set/reset this user's LOGIN password (bcrypt, one-way).
+            // Blank = leave unchanged. Login passwords are never shown — they are hashed,
+            // not stored in the retrievable credential vault.
+            $newPw = (string)($_POST['password'] ?? '');
+            if ($newPw !== '') {
+                if (!isAdmin()) { throw new Exception('Only an administrator can set a password'); }
+                if (strlen($newPw) < 8) { throw new Exception('Password must be at least 8 characters'); }
+                $h = password_hash($newPw, PASSWORD_DEFAULT);
+                $pwStmt = $conn->prepare("UPDATE ten_users SET password = ? WHERE id = ?");
+                $pwStmt->bind_param("si", $h, $userId);
+                $pwStmt->execute(); $pwStmt->close();
+                logActivity('set_password', 'user', $userId, 'Admin set/reset login password');
+            }
+
             // Mirror byline/bio to the old admin_ten.users row (matched by email as
             // username) for any un-migrated publications that still read it.
             try {
