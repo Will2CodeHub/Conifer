@@ -322,7 +322,7 @@ try {
         // Venues/CRM) and legacy Broker/Viewer aren't article authors, so excluded.
         $authorRoles = "'Journalist','Section Editor','Editor','Managing Editor','General Editor',"
                      . "'Editor-in-Chief','Edition Editor-in-Chief','Administrator','Super User','Manager'";
-        $query = "SELECT DISTINCT u.id, u.full_name, u.username
+        $query = "SELECT DISTINCT u.id, u.full_name, u.username, u.publication, u.section
                   FROM ten_users u
                   JOIN ten_user_roles ur ON u.id = ur.user_id
                   JOIN ten_roles r ON ur.role_id = r.id
@@ -332,7 +332,23 @@ try {
 
         $result = $connManagement->query($query);
 
+        // A Section Editor may only credit a user who shares at least one of the
+        // editor's publication(s) AND one of the editor's section(s) — Section
+        // Editors are scoped to their assigned pub(s)+section(s). Higher roles
+        // (Editor and above, Admin/Super/Manager) can credit anyone eligible.
+        $restrictToSection = ($position === 'Section Editor');
+
         while($userRow = $result->fetch_assoc()) {
+            if ($restrictToSection) {
+                $candPubs = array_filter(array_map('trim', explode(',', (string)($userRow['publication'] ?? ''))));
+                $candSecs = array_filter(array_map('trim', explode(',', (string)($userRow['section'] ?? ''))));
+                $pubOk = $userPubs ? (bool) array_intersect($userPubs, $candPubs) : false;
+                $secOk = $userSections ? (bool) array_intersect($userSections, $candSecs) : false;
+                // Always allow the editor to credit themselves.
+                if (($userRow['id'] != $userId) && !($pubOk && $secOk)) {
+                    continue;
+                }
+            }
             $all_journalists[] = [
                 'id' => $userRow['id'],
                 'name' => $userRow['full_name'] . ' (' . $userRow['username'] . ')'

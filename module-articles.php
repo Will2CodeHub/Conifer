@@ -840,24 +840,24 @@ $pageTitle = 'Article Management';
                                             style="padding:12px 10px;border-bottom:2px solid #334155;vertical-align:middle;cursor:pointer;text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">
                                             Title <span class="sort-arrow" style="margin-left:4px;font-size:11px;opacity:0.7;"></span>
                                         </th>
-                                        <th data-col="journalist_name"
-                                            style="padding:12px 10px;border-bottom:2px solid #334155;vertical-align:middle;text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;width:150px;">
-                                            Author
+                                        <th data-col="journalist_name" class="sortable"
+                                            style="padding:12px 10px;border-bottom:2px solid #334155;vertical-align:middle;cursor:pointer;text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;width:150px;">
+                                            Author <span class="sort-arrow" style="margin-left:4px;font-size:11px;opacity:0.7;"></span>
                                         </th>
-                                        <th data-col="publications"
-                                            style="padding:12px 10px;border-bottom:2px solid #334155;vertical-align:middle;text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;width:140px;">
-                                            Publication
+                                        <th data-col="publications" class="sortable"
+                                            style="padding:12px 10px;border-bottom:2px solid #334155;vertical-align:middle;cursor:pointer;text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;width:140px;">
+                                            Publication <span class="sort-arrow" style="margin-left:4px;font-size:11px;opacity:0.7;"></span>
                                         </th>
-                                        <th data-col="section"
-                                            style="padding:12px 10px;border-bottom:2px solid #334155;vertical-align:middle;text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;width:110px;">
-                                            Section
+                                        <th data-col="section" class="sortable"
+                                            style="padding:12px 10px;border-bottom:2px solid #334155;vertical-align:middle;cursor:pointer;text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;width:110px;">
+                                            Section <span class="sort-arrow" style="margin-left:4px;font-size:11px;opacity:0.7;"></span>
                                         </th>
                                         <th data-col="state" class="sortable"
                                             style="padding:12px 10px;border-bottom:2px solid #334155;vertical-align:middle;cursor:pointer;width:110px;text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">
                                             Status <span class="sort-arrow" style="margin-left:4px;font-size:11px;opacity:0.7;"></span>
                                         </th>
-                                        <th data-col="submission_date" class="sortable"
-                                            style="padding:12px 10px;border-bottom:2px solid #334155;vertical-align:middle;cursor:pointer;width:140px;text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">
+                                        <th data-col="modified_date" class="sortable" title="Last modified"
+                                            style="padding:12px 10px;border-bottom:2px solid #334155;vertical-align:middle;cursor:pointer;width:160px;text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">
                                             Date <span class="sort-arrow" style="margin-left:4px;font-size:11px;opacity:0.7;"></span>
                                         </th>
                                         <th style="padding:12px 10px;border-bottom:2px solid #334155;vertical-align:middle;text-align:center;width:120px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">
@@ -2930,8 +2930,9 @@ document.addEventListener('change', function (e) {
     document.addEventListener('DOMContentLoaded', function () {
         // State
         let currentPage = 1;
-        let currentSortCol = 'submission_date';
+        let currentSortCol = 'modified_date';
         let currentSortDir = 'DESC';
+        var NEUTRAL_ARROW = '⇅'; // ⇅ — shown on every sortable header at rest
         let currentSearch = '';
         const limit = 10;
         const maxPageLinks = 10;
@@ -3072,13 +3073,29 @@ document.addEventListener('change', function (e) {
                     viewBtn = '<a href="' + safeText(row.preview_url) + '" target="_blank" style="display:inline-flex;align-items:center;gap:4px;background:#6b7280;color:#fff;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;text-decoration:none;" title="Preview article"><i class="fas fa-eye"></i> Preview</a>';
                 }
 
-                // Format date nicely
-                let dateStr = row.submission_date || '';
-                if (dateStr) {
+                // Date column shows the LAST-MODIFIED date + time (24h). When the
+                // article is scheduled (publish_now off + a future publish_from),
+                // add a small amber "Scheduled" badge beneath it.
+                function fmtDateTime(v, withYear) {
+                    if (!v || v.indexOf('0000-00-00') === 0) return '';
                     try {
-                        const d = new Date(dateStr.replace(' ', 'T'));
-                        dateStr = d.toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'});
-                    } catch(e) {}
+                        var d = new Date(String(v).replace(' ', 'T'));
+                        if (isNaN(d.getTime())) return safeText(v);
+                        var datePart = d.toLocaleDateString('en-GB', withYear
+                            ? {day:'2-digit', month:'short', year:'numeric'}
+                            : {day:'2-digit', month:'short'});
+                        var timePart = d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', hour12:false});
+                        return datePart + ', ' + timePart;
+                    } catch(e) { return safeText(v); }
+                }
+                let dateStr = fmtDateTime(row.modified_date || row.submission_date, true);
+                let scheduledBadge = '';
+                var pubFrom = row.publish_from;
+                if ((row.publish_now == 0 || row.publish_now === '0') && pubFrom && pubFrom.indexOf('0000-00-00') !== 0) {
+                    var pf = new Date(String(pubFrom).replace(' ', 'T'));
+                    if (!isNaN(pf.getTime()) && pf.getTime() > Date.now()) {
+                        scheduledBadge = '<div style="margin-top:4px;display:inline-flex;align-items:center;gap:3px;background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:700;white-space:nowrap;">⏱ Scheduled ' + fmtDateTime(pubFrom, false) + '</div>';
+                    }
                 }
 
                 // Author: show just name without username in parens if too long
@@ -3099,7 +3116,7 @@ document.addEventListener('change', function (e) {
                     '<td style="padding:12px 10px;vertical-align:middle;width:140px;">' + pubsHtml + '</td>' +
                     '<td style="padding:12px 10px;vertical-align:middle;width:110px;"><span style="font-size:12px;color:#475569;text-transform:capitalize;">' + safeText(row.section || '—') + '</span></td>' +
                     '<td style="padding:12px 10px;vertical-align:middle;width:110px;">' + statusBadge + '</td>' +
-                    '<td style="padding:12px 10px;vertical-align:middle;width:140px;font-size:12px;color:#64748b;white-space:nowrap;">' + dateStr + '</td>' +
+                    '<td style="padding:12px 10px;vertical-align:middle;width:160px;font-size:12px;color:#64748b;white-space:nowrap;">' + dateStr + scheduledBadge + '</td>' +
                     '<td style="padding:12px 10px;vertical-align:middle;text-align:center;width:120px;">' +
                         '<div style="display:flex;gap:6px;justify-content:center;flex-wrap:nowrap;">' + editBtn + viewBtn + '</div>' +
                     '</td>';
@@ -3330,15 +3347,29 @@ document.addEventListener('change', function (e) {
                         currentSortDir = 'ASC';
                     }
 
-                    // update arrows
-                    document.querySelectorAll('#articlesTable .sort-arrow').forEach(function (sp) { sp.textContent = ''; });
-                    const span = th.querySelector('.sort-arrow');
-                    if (span) span.textContent = (currentSortDir === 'ASC') ? '▲' : '▼';
+                    updateSortArrows();
 
                     // reload
                     currentPage = 1;
                     loadArticles();
                 });
+            });
+            updateSortArrows();
+        }
+
+        // Every sortable header shows a neutral ⇅ at rest (so users know it's
+        // orderable); the active column shows the current direction ▲/▼.
+        function updateSortArrows() {
+            document.querySelectorAll('#articlesTable thead th.sortable').forEach(function (th) {
+                var span = th.querySelector('.sort-arrow');
+                if (!span) return;
+                if (th.dataset.col === currentSortCol) {
+                    span.textContent = (currentSortDir === 'ASC') ? '▲' : '▼';
+                    span.style.opacity = '1';
+                } else {
+                    span.textContent = NEUTRAL_ARROW;
+                    span.style.opacity = '0.35';
+                }
             });
         }
 

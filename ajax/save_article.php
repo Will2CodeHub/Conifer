@@ -258,6 +258,45 @@ try {
             $conn->close();
             exit;
         }
+
+        // Journalists may only edit their own DRAFTS. Once an article is submitted
+        // for review or published they can view it but not change it (submitting a
+        // draft is still allowed because the STORED state is 'draft' at that point).
+        if ($position === 'Journalist' && ($existingArticle['state'] ?? '') !== 'draft') {
+            echo json_encode(['status' => 'error', 'message' => 'You can only edit your own drafts.']);
+            $conn->close();
+            exit;
+        }
+
+        // A Section Editor reassigning the author may only pick a user who shares
+        // at least one of the editor's publication(s) AND section(s). (Journalists
+        // are already forced to themselves below; higher roles are unrestricted.)
+        $postedAuthor = isset($_POST['author']) ? intval($_POST['author']) : 0;
+        if ($position === 'Section Editor'
+            && $postedAuthor > 0
+            && $postedAuthor != (int)$existingArticle['journalist_id']
+            && $postedAuthor != (int)$userId) {
+            $okAuthor = false;
+            try {
+                $mc = getDBConnection();
+                $as = $mc->prepare("SELECT publication, section FROM ten_users WHERE id = ?");
+                $as->bind_param('i', $postedAuthor);
+                $as->execute();
+                $ar = $as->get_result()->fetch_assoc();
+                $as->close(); $mc->close();
+                if ($ar) {
+                    $candPubs = array_filter(array_map('trim', explode(',', (string)($ar['publication'] ?? ''))));
+                    $candSecs = array_filter(array_map('trim', explode(',', (string)($ar['section'] ?? ''))));
+                    $okAuthor = (bool) array_intersect($userPubs, $candPubs)
+                             && (bool) array_intersect($userSecs, $candSecs);
+                }
+            } catch (Throwable $e) { $okAuthor = false; }
+            if (!$okAuthor) {
+                echo json_encode(['status' => 'error', 'message' => 'You can only assign authors in your own section(s) and publication(s).']);
+                $conn->close();
+                exit;
+            }
+        }
     }
     
     // Normalise the schedule inputs to a MySQL datetime. Accepts the calendar's
@@ -312,7 +351,8 @@ try {
             publish_now = ?,
             publish_from = ?,
             publish_to = ?,
-            state = ?
+            state = ?,
+            modified_date = NOW()
             WHERE id = ?";
 
         $stmt = $conn->prepare($query);

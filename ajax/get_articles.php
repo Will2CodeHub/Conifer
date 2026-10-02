@@ -21,7 +21,7 @@ header('Content-Type: application/json');
 $page       = isset($_GET['page']) ? (int) $_GET['page'] : 1;
 $limit      = isset($_GET['limit']) ? (int) $_GET['limit'] : 20;
 $search     = isset($_GET['search']) ? trim($_GET['search']) : '';
-$sortCol    = isset($_GET['sort_col']) ? $_GET['sort_col'] : 'submission_date';
+$sortCol    = isset($_GET['sort_col']) ? $_GET['sort_col'] : 'modified_date';
 $sortDir    = (isset($_GET['sort_dir']) && strtolower($_GET['sort_dir']) === 'asc') ? 'ASC' : 'DESC';
 $hide_imageless = isset($_GET['hide_imageless']) ? intval($_GET['hide_imageless']) : 0;
 $scrapedOnly = isset($_GET['scraped']) ? intval($_GET['scraped']) : 0;
@@ -36,10 +36,20 @@ $filterState = isset($_GET['state']) ? trim($_GET['state']) : '';
 $allowedStates = array('published', 'draft', 'under review', 'expired', 'deleted');
 $hasStateFilter = ($filterState !== '' && in_array($filterState, $allowedStates, true));
 
-$allowedSort = array('id', 'title', 'state', 'submission_date');
-if (!in_array($sortCol, $allowedSort)) {
-    $sortCol = 'submission_date';
-}
+// Map the client sort key to a safe, qualified ORDER BY expression. Every
+// displayed column is sortable; Author sorts by the joined ten_users.full_name,
+// everything else is an articles column. Unknown keys fall back to last-modified.
+$sortMap = array(
+    'id'              => 'a.id',
+    'title'           => 'a.title',
+    'journalist_name' => 'u.full_name',
+    'publications'    => 'a.publications',
+    'section'         => 'a.section',
+    'state'           => 'a.state',
+    'modified_date'   => 'a.modified_date',
+    'submission_date' => 'a.submission_date',
+);
+$sortExpr = isset($sortMap[$sortCol]) ? $sortMap[$sortCol] : $sortMap['modified_date'];
 
 $offset = ($page - 1) * $limit;
 
@@ -61,7 +71,7 @@ while ($row = $res->fetch_assoc()) {
 // -----------------------------------------------------------------------------
 // When a specific state is chosen, filter to it (this also allows viewing 'deleted');
 // otherwise keep the default of hiding deleted articles. The '?' is the FIRST bound param.
-$where = $hasStateFilter ? "state = ?" : "state != 'deleted'";
+$where = $hasStateFilter ? "a.state = ?" : "a.state != 'deleted'";
 
 // Add role-based filtering BEFORE user filters.
 // Editorial roles are scoped to their assigned publication(s); Section Editors
@@ -73,12 +83,12 @@ $userSections = array_values(array_filter(array_map('trim', explode(',', (string
 // SQL fragment: article belongs to at least one of the user's publications.
 $pubScope = '';
 if ($userPubs) {
-    $pubScope = '(' . implode(' OR ', array_map(fn($p) => "publications LIKE '%" . $conn->real_escape_string($p) . "%'", $userPubs)) . ')';
+    $pubScope = '(' . implode(' OR ', array_map(fn($p) => "a.publications LIKE '%" . $conn->real_escape_string($p) . "%'", $userPubs)) . ')';
 }
 // SQL fragment: article's section is one of the user's sections.
 $sectionScope = '';
 if ($userSections) {
-    $sectionScope = 'section IN (' . implode(',', array_map(fn($s) => "'" . $conn->real_escape_string($s) . "'", $userSections)) . ')';
+    $sectionScope = 'a.section IN (' . implode(',', array_map(fn($s) => "'" . $conn->real_escape_string($s) . "'", $userSections)) . ')';
 }
 
 $seeAllRoles = ['Admin', 'Super Admin', 'Super User', 'Administrator', 'Manager'];
@@ -88,64 +98,64 @@ if (isAdmin() || in_array($position, $seeAllRoles, true)) {
     // No restriction.
 } elseif ($position === 'Journalist') {
     // Own articles only.
-    $where .= " AND journalist_id = " . intval($userId);
+    $where .= " AND a.journalist_id = " . intval($userId);
 } elseif ($position === 'Section Editor') {
     // Their section(s) within their publication(s), non-draft only.
     if ($pubScope)     { $where .= " AND $pubScope"; } else { $where .= " AND 0"; }
     if ($sectionScope) { $where .= " AND $sectionScope"; }
-    $where .= " AND state <> 'draft'";
+    $where .= " AND a.state <> 'draft'";
 } elseif (in_array($position, $pubScopedEditorRoles, true)) {
     // All sections within their publication(s).
-    if ($pubScope) { $where .= " AND $pubScope"; } else { $where .= " AND journalist_id = " . intval($userId); }
+    if ($pubScope) { $where .= " AND $pubScope"; } else { $where .= " AND a.journalist_id = " . intval($userId); }
 } else {
     // Unknown/non-editorial position with no explicit access: own articles only.
-    $where .= " AND journalist_id = " . intval($userId);
+    $where .= " AND a.journalist_id = " . intval($userId);
 }
 
 $paramTypes = "";
 $paramValues = array();
 
 if ($search !== "") {
-    $where .= " AND (title LIKE ? OR id LIKE ?)";
+    $where .= " AND (a.title LIKE ? OR a.id LIKE ?)";
 }
 
 if ($hide_imageless == 1) {
-    $where .= " AND (imageless IS NULL OR imageless != 1)";
+    $where .= " AND (a.imageless IS NULL OR a.imageless != 1)";
 }
 
 // Scraped-only: articles the scraper wrote carry a source-URL hash (independent of imageless).
 if ($scrapedOnly == 1) {
-    $where .= " AND news_scrape_url_hash IS NOT NULL AND news_scrape_url_hash <> ''";
+    $where .= " AND a.news_scrape_url_hash IS NOT NULL AND a.news_scrape_url_hash <> ''";
 }
 
 // User/Author filter
 if ($filterUser > 0) {
-    $where .= " AND journalist_id = ?";
+    $where .= " AND a.journalist_id = ?";
 }
 
 // Section filter - only allow for non-Section Editors
 if ($filterSection !== "" && $position !== 'Section Editor') {
-    $where .= " AND section = ?";
+    $where .= " AND a.section = ?";
 }
 
 // Publication filter
 if ($filterPublication !== "") {
-    $where .= " AND publications LIKE ?";
+    $where .= " AND a.publications LIKE ?";
 }
 
 // Date range filters
 if ($filterDateFrom !== "") {
-    $where .= " AND submission_date >= ?";
+    $where .= " AND a.submission_date >= ?";
 }
 
 if ($filterDateTo !== "") {
-    $where .= " AND submission_date <= ?";
+    $where .= " AND a.submission_date <= ?";
 }
 
 // -----------------------------------------------------------------------------
 // Count Query
 // -----------------------------------------------------------------------------
-$countSql = "SELECT COUNT(*) AS total FROM articles WHERE $where";
+$countSql = "SELECT COUNT(*) AS total FROM articles a WHERE $where";
 $stmt = $conn->prepare($countSql);
 if (!$stmt) {
     error_log("get_articles.php count prepare failed: " . $conn->error);
@@ -213,11 +223,14 @@ $stmt->close();
 // -----------------------------------------------------------------------------
 // Main Query
 // -----------------------------------------------------------------------------
-// Use SELECT * so query doesn't break if canonical/article_alias columns don't exist
-$query = "SELECT *
-          FROM articles
+// SELECT a.* keeps every articles column (incl. canonical/url); the LEFT JOIN
+// pulls the author's display name from ten_users (cross-DB; admin_smyth1w has
+// SELECT on TEN_Management) so we can both show it and ORDER BY it across pages.
+$query = "SELECT a.*, u.full_name AS author_full_name, u.username AS author_username
+          FROM articles a
+          LEFT JOIN TEN_Management.ten_users u ON u.id = a.journalist_id
           WHERE $where
-          ORDER BY $sortCol $sortDir
+          ORDER BY $sortExpr $sortDir
           LIMIT ?, ?";
 
 $stmt = $conn->prepare($query);
@@ -285,26 +298,16 @@ $result = $stmt->get_result();
 
 $articles = array();
 
-// Get connection to TEN_Management database for user lookups
-$connManagement = getDBConnection();
-
 // -----------------------------------------------------------------------------
 // Process Rows
 // -----------------------------------------------------------------------------
 while ($row = $result->fetch_assoc()) {
 
-    // Journalist lookup from ten_users table in TEN_Management database
+    // Author display name comes from the LEFT JOIN on ten_users (no per-row query).
     $journalistName = '';
-    $sql2 = "SELECT full_name, username FROM ten_users WHERE id = ?";
-    $stmt2 = $connManagement->prepare($sql2);
-    $stmt2->bind_param('i', $row['journalist_id']);
-    $stmt2->execute();
-    $res2 = $stmt2->get_result();
-
-    if ($userRow = $res2->fetch_assoc()) {
-        $journalistName = $userRow['full_name'] . ' (' . $userRow['username'] . ')';
+    if (!empty($row['author_full_name'])) {
+        $journalistName = $row['author_full_name'] . ' (' . $row['author_username'] . ')';
     }
-    $stmt2->close();
 
     // Publications as links
     $pubLinks = array();
@@ -347,9 +350,13 @@ while ($row = $result->fetch_assoc()) {
     }
 
     // Editing allowed based on role. Journalists only ever receive their OWN
-    // rows (WHERE journalist_id = them, above), so their rows are editable —
-    // ajax/save_article.php independently re-checks ownership on save.
+    // rows (WHERE journalist_id = them, above) and may edit only their DRAFTS —
+    // once submitted or published they can view but not edit. Everyone else keeps
+    // their existing scope. save_article.php re-checks these rules on save.
     $canEdit = isAdmin() || in_array($position, ['Admin', 'Super Admin', 'Super User', 'Administrator', 'Manager', 'Editor-in-Chief', 'Managing Editor', 'General Editor', 'Edition Editor-in-Chief', 'Editor', 'Section Editor', 'Journalist']);
+    if ($position === 'Journalist' && $row['state'] !== 'draft') {
+        $canEdit = false;
+    }
     $editable = $canEdit ? 1 : 0;
 
     // Add row
@@ -364,6 +371,9 @@ while ($row = $result->fetch_assoc()) {
         'section'           => $row['section'] ?? '',
         'state'             => $row['state'],
         'submission_date'   => $row['submission_date'],
+        'modified_date'     => $row['modified_date'] ?? $row['submission_date'],
+        'publish_now'       => $row['publish_now'] ?? 1,
+        'publish_from'      => $row['publish_from'] ?? null,
         'editable'          => $editable,
         'preview_url'       => $previewUrl,
         'live_url'          => $liveUrl
@@ -371,7 +381,6 @@ while ($row = $result->fetch_assoc()) {
 }
 
 $stmt->close();
-$connManagement->close();
 $conn->close();
 
 // OUTPUT JSON

@@ -134,18 +134,26 @@ real copy, per the Savannah precedent). Done via a token-protected script run on
 the live server against the localhost DB, then deleted. The resolver fallback (5a)
 already makes the name show even before any backfill.
 
-### 6. Persistent orderable arrows (UI)
+### 6. All columns orderable, with persistent orderable arrows (UI + server)
 
-- `module-articles.php`: render a neutral `⇅` (dimmed) in every `.sort-arrow`
-  span at rest so sortable headers advertise themselves. The active column shows
-  `▲`/`▼`; on sort, reset the others back to the neutral `⇅` rather than blank.
-  Initialise the active column's arrow on load to match the default sort
-  (`modified_date` DESC → `▼`). Only the four already-sortable columns (ID, Title,
-  Status, Date) carry an arrow; Author/Publication/Section remain unsorted.
+- `ajax/get_articles.php`: make every displayed column sortable. The main query
+  gains `LEFT JOIN TEN_Management.ten_users u ON u.id = a.journalist_id` (the
+  `admin_smyth1w` article connection has SELECT on `TEN_Management`), so Author
+  sorts by `u.full_name`. A whitelist map translates the client sort key to a
+  qualified, injection-safe ORDER BY expression: `id→a.id`, `title→a.title`,
+  `journalist_name→u.full_name`, `publications→a.publications`, `section→a.section`,
+  `state→a.state`, `modified_date→a.modified_date`, `submission_date→a.submission_date`.
+  All `$where` fragments are qualified with `a.` (both tables have `id`/`section`).
+  The per-row N+1 `ten_users` lookup is removed — the join supplies the name.
+- `module-articles.php`: every column header (`ID, Title, Author, Publication,
+  Section, Status, Date`) becomes `sortable` with a `.sort-arrow` span. Render a
+  neutral dimmed `⇅` in every arrow span at rest so the headers advertise that
+  they're orderable. The active column shows `▲`/`▼`; on sort, the others reset to
+  the neutral `⇅` (not blank). On load, the active column's arrow is initialised to
+  the default sort (`modified_date` DESC → `▼`).
 
 ## Out of scope
 
-- No new sortable columns (Author/Publication/Section stay as they are).
 - No redirect table for changed URLs (unchanged from prior decision).
 - `byline`/`bio` prose authoring (William supplies).
 - Legacy site generators that read the single flag columns (unchanged).
