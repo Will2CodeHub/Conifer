@@ -5,1700 +5,1477 @@ if (!hasModulePermission('crm.view') && !isAdmin()) {
     header('Location: dashboard.php?error=unauthorized');
     exit();
 }
+require_once 'lib/crm_core.php';
+$cConn = crm_db();
+crm_ensure_schema($cConn);
+$cConn->close();
+
 $currentUser = getCurrentUser();
 $currentPage = 'crm';
 $canManage = hasModulePermission('crm.manage') || isAdmin();
+$pkvVisible = crm_pkv_visible();
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CRM - TEN Management</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <title>CRM — TEN Management</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <link rel="stylesheet" href="css/backend-style.css">
+    <link rel="stylesheet" href="css/crm.css?v=<?php echo @filemtime('css/crm.css'); ?>">
     <style>
-        :root { --primary:#667eea; --primary-dark:#5a6fd6; --bg:#f8fafc; --card:#fff; --border:#e5e7eb; --text:#111827; --muted:#6b7280; }
-        body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); }
-        /* ── Layout ── */
-        .crm-wrapper { display:flex; height:calc(100vh - 64px); overflow:hidden; }
-        .crm-sidebar { width:280px; min-width:280px; background:var(--card); border-right:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden; }
-        .crm-main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
-        /* ── Page Header ── */
-        .page-header { padding:20px 28px 0; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; }
-        .page-header h1 { font-size:26px; font-weight:700; color:var(--text); margin:0; }
-        .breadcrumb { font-size:13px; color:var(--muted); margin-top:2px; }
-        .header-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-        /* ── Stats Bar ── */
-        .stats-bar { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; padding:16px 28px; }
-        .stat-card { background:var(--card); border-radius:12px; padding:16px 20px; box-shadow:0 1px 3px rgba(0,0,0,.08); display:flex; align-items:center; gap:14px; }
-        .stat-icon { width:44px; height:44px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:18px; }
-        .stat-label { font-size:12px; color:var(--muted); font-weight:500; }
-        .stat-value { font-size:22px; font-weight:700; color:var(--text); line-height:1.2; }
-        /* ── Two-panel ── */
-        .two-panel { display:flex; flex:1; overflow:hidden; }
-        /* ── Fullscreen ── */
-        .two-panel.crm-expanded { position:fixed; top:0; left:0; right:0; bottom:0; z-index:10001; background:var(--card); }
-        .two-panel.crm-expanded .left-panel { height:100%; max-height:none; }
-        .two-panel.crm-expanded .right-panel { height:100%; }
-        /* ── Left Panel ── */
-        .left-panel { width:280px; min-width:280px; border-right:1px solid var(--border); background:var(--card); display:flex; flex-direction:column; overflow:hidden; }
-        .left-panel-header { padding:16px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); }
-        .left-panel-header h3 { font-size:14px; font-weight:600; margin:0; }
-        .projects-list { flex:1; overflow-y:auto; padding:8px 0; }
-        .project-item { padding:0; }
-        .project-header { display:flex; align-items:center; gap:8px; padding:10px 16px; cursor:pointer; transition:background .15s; font-size:14px; font-weight:600; }
-        .project-header:hover { background:#f9fafb; }
-        .project-header .proj-icon { width:28px; height:28px; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:12px; flex-shrink:0; }
-        .project-header .proj-arrow { margin-left:auto; color:var(--muted); font-size:11px; transition:transform .2s; }
-        .project-header.open .proj-arrow { transform:rotate(90deg); }
-        .subproject-list { display:none; padding:0 0 4px 16px; }
-        .subproject-list.open { display:block; }
-        .subproject-item { display:flex; align-items:center; gap:8px; padding:8px 12px; cursor:pointer; border-radius:8px; margin:2px 8px; transition:background .15s; font-size:13px; }
-        .subproject-item:hover { background:#f3f4f6; }
-        .subproject-item.active { background:#ede9fe; color:var(--primary); font-weight:600; }
-        .subproject-item .sp-type { font-size:10px; padding:2px 6px; border-radius:4px; margin-left:auto; white-space:nowrap; font-weight:600; }
-        /* ── Right Panel ── */
-        .right-panel { flex:1; display:flex; flex-direction:column; overflow:hidden; }
-        .welcome-card { margin:40px auto; max-width:480px; text-align:center; padding:48px 32px; background:var(--card); border-radius:16px; box-shadow:0 1px 4px rgba(0,0,0,.08); }
-        .welcome-card i { font-size:48px; color:#c4b5fd; margin-bottom:16px; }
-        .welcome-card h2 { font-size:22px; font-weight:700; margin-bottom:8px; }
-        .welcome-card p { color:var(--muted); font-size:14px; }
-        /* ── Subproject Header ── */
-        .sp-header { padding:16px 24px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
-        .sp-title { font-size:18px; font-weight:700; }
-        .sp-badge { font-size:11px; padding:3px 10px; border-radius:20px; font-weight:600; }
-        .sp-stats { display:flex; gap:20px; margin-left:auto; }
-        .sp-stat { text-align:center; }
-        .sp-stat-val { font-size:18px; font-weight:700; }
-        .sp-stat-lbl { font-size:11px; color:var(--muted); }
-        .view-toggle { display:flex; background:#f3f4f6; border-radius:8px; padding:3px; }
-        .view-btn { padding:6px 14px; border:none; background:transparent; border-radius:6px; cursor:pointer; font-size:13px; font-weight:500; color:var(--muted); transition:all .15s; }
-        .view-btn.active { background:#fff; color:var(--primary); box-shadow:0 1px 3px rgba(0,0,0,.1); }
-        /* ── Pipeline ── */
-        .pipeline-outer { flex:1; overflow:hidden; display:flex; flex-direction:column; }
-        .pipeline-scroll { flex:1; overflow-x:auto; overflow-y:hidden; padding:16px 24px; display:flex; gap:16px; align-items:stretch; }
-        .stage-col { min-width:260px; max-width:260px; display:flex; flex-direction:column; }
-        .stage-col-header { padding:12px 14px; border-radius:10px 10px 0 0; display:flex; align-items:center; gap:8px; }
-        .stage-col-header .stage-title { font-size:13px; font-weight:600; flex:1; }
-        .stage-col-header .stage-count { font-size:12px; background:rgba(0,0,0,.08); padding:2px 8px; border-radius:10px; font-weight:600; }
-        .stage-cards { background:#f3f4f6; border-radius:0 0 10px 10px; flex:1; min-height:0; overflow-y:auto; padding:8px; display:flex; flex-direction:column; gap:8px; min-height:80px; }
-        .lead-card { background:#fff; border-radius:8px; padding:12px; box-shadow:0 1px 3px rgba(0,0,0,.08); cursor:pointer; transition:box-shadow .15s; border-left:3px solid transparent; }
-        .lead-card:hover { box-shadow:0 3px 10px rgba(0,0,0,.12); }
-        .lead-name { font-size:13px; font-weight:600; margin-bottom:2px; }
-        .lead-company { font-size:12px; color:var(--muted); }
-        .lead-email { font-size:11px; color:var(--muted); margin-top:4px; }
-        .lead-actions { display:flex; gap:4px; margin-top:8px; justify-content:flex-end; }
-        .lead-actions button { padding:3px 8px; border:1px solid var(--border); background:#fff; border-radius:5px; cursor:pointer; font-size:11px; color:var(--muted); transition:all .15s; }
-        .lead-actions button:hover { background:var(--primary); color:#fff; border-color:var(--primary); }
-        .add-lead-btn { margin:8px; padding:8px; border:2px dashed var(--border); background:transparent; border-radius:8px; cursor:pointer; font-size:13px; color:var(--muted); width:calc(100% - 16px); transition:all .15s; }
-        .add-lead-btn:hover { border-color:var(--primary); color:var(--primary); }
-        /* ── List View ── */
-        .list-view-wrap { flex:1; overflow:auto; padding:0 24px 24px; }
-        .data-table { width:100%; border-collapse:collapse; font-size:13px; }
-        .data-table th { padding:10px 14px; text-align:left; font-weight:600; font-size:12px; color:var(--muted); border-bottom:2px solid var(--border); background:#f9fafb; position:sticky; top:0; }
-        .data-table td { padding:10px 14px; border-bottom:1px solid var(--border); vertical-align:middle; }
-        .data-table tr:hover td { background:#f9fafb; }
-        .stage-badge { font-size:11px; padding:2px 8px; border-radius:10px; font-weight:600; }
-        .status-badge { font-size:11px; padding:2px 8px; border-radius:10px; font-weight:600; }
-        .status-active { background:#dcfce7; color:#166534; }
-        .status-converted { background:#dbeafe; color:#1e40af; }
-        .status-lost { background:#fee2e2; color:#991b1b; }
-        .status-unsubscribed { background:#f3f4f6; color:#6b7280; }
-        /* ── Stats Section ── */
-        .stats-section { padding:16px 24px; border-top:1px solid var(--border); background:#f9fafb; }
-        .stats-section h4 { font-size:13px; font-weight:600; margin-bottom:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
-        .bar-chart { display:flex; gap:12px; align-items:flex-end; height:80px; }
-        .bar-wrap { flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; }
-        .bar { width:100%; border-radius:4px 4px 0 0; transition:height .3s; min-height:4px; }
-        .bar-label { font-size:10px; color:var(--muted); text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:60px; }
-        .bar-val { font-size:10px; font-weight:600; color:var(--text); }
-        /* ── Buttons ── */
-        .btn { padding:8px 16px; border:none; border-radius:8px; cursor:pointer; font-size:13px; font-weight:600; display:inline-flex; align-items:center; gap:6px; transition:all .15s; }
-        .btn-primary { background:#667eea; color:#fff; }
-        .btn-primary:hover { background:#5a6fd6; }
-        .btn-secondary { background:#f3f4f6; color:var(--text); border:1px solid var(--border); }
-        .btn-secondary:hover { background:#e5e7eb; }
-        .btn-danger { background:#fee2e2; color:#991b1b; }
-        .btn-danger:hover { background:#fecaca; }
-        .btn-sm { padding:5px 10px; font-size:12px; }
-        .btn-icon { width:32px; height:32px; padding:0; justify-content:center; border-radius:8px; }
-        /* ── Modals ── */
-        .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:10100; display:flex; align-items:center; justify-content:center; opacity:0; pointer-events:none; transition:opacity .2s; }
-        .modal-overlay.open { opacity:1; pointer-events:all; }
-        .modal { background:#fff; border-radius:16px; box-shadow:0 20px 60px rgba(0,0,0,.2); width:580px; max-width:95vw; max-height:90vh; display:flex; flex-direction:column; transform:translateY(20px); transition:transform .2s; }
-        .modal-overlay.open .modal { transform:translateY(0); }
-        .modal-lg { width:780px; }
-        .modal-xl { width:960px; }
-        .modal-header { padding:20px 24px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
-        .modal-header h3 { font-size:18px; font-weight:700; margin:0; }
-        .modal-close { width:32px; height:32px; border:none; background:#f3f4f6; border-radius:8px; cursor:pointer; font-size:16px; color:var(--muted); display:flex; align-items:center; justify-content:center; transition:all .15s; }
-        .modal-close:hover { background:#e5e7eb; color:var(--text); }
-        .modal-body { padding:24px; overflow-y:auto; flex:1; }
-        .modal-footer { padding:16px 24px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px; }
-        /* ── Forms ── */
-        .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-        .form-grid.cols-1 { grid-template-columns:1fr; }
-        .form-group { display:flex; flex-direction:column; gap:6px; }
-        .form-group.span-2 { grid-column:span 2; }
-        .form-group label { font-size:13px; font-weight:500; color:var(--text); }
-        .form-group input, .form-group select, .form-group textarea {
-            padding:9px 12px; border:2px solid var(--border); border-radius:8px; font-size:13px; font-family:inherit; transition:border-color .15s; width:100%; box-sizing:border-box;
-        }
-        .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline:none; border-color:var(--primary); }
-        .form-group textarea { resize:vertical; min-height:80px; }
-        /* ── Lead Detail ── */
-        .lead-detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
-        .detail-section h4 { font-size:13px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid var(--border); }
-        .detail-field { display:flex; gap:8px; margin-bottom:10px; font-size:13px; }
-        .detail-field .label { color:var(--muted); min-width:90px; flex-shrink:0; }
-        .detail-field .value { color:var(--text); font-weight:500; word-break:break-word; }
-        .activity-timeline { display:flex; flex-direction:column; gap:12px; }
-        .activity-item { display:flex; gap:12px; padding:12px; background:#f9fafb; border-radius:8px; }
-        .activity-icon { width:36px; height:36px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; }
-        .activity-content { flex:1; }
-        .activity-subject { font-size:13px; font-weight:600; margin-bottom:2px; }
-        .activity-body { font-size:12px; color:var(--muted); }
-        .activity-meta { font-size:11px; color:#9ca3af; margin-top:4px; }
-        .stage-history { display:flex; flex-direction:column; gap:8px; }
-        .history-item { display:flex; align-items:center; gap:10px; font-size:13px; padding:8px 12px; background:#f9fafb; border-radius:8px; }
-        .history-arrow { color:var(--muted); }
-        /* ── Settings Panel ── */
-        .settings-tabs { display:flex; gap:2px; padding:0 24px; border-bottom:1px solid var(--border); }
-        .settings-tab { padding:12px 18px; cursor:pointer; font-size:13px; font-weight:500; color:var(--muted); border-bottom:2px solid transparent; transition:all .15s; }
-        .settings-tab.active { color:var(--primary); border-bottom-color:var(--primary); }
-        .settings-content { padding:24px; overflow-y:auto; flex:1; }
-        .settings-item { display:flex; align-items:center; gap:12px; padding:12px; border:1px solid var(--border); border-radius:10px; margin-bottom:10px; background:#fff; }
-        .settings-item-icon { width:38px; height:38px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:15px; flex-shrink:0; }
-        .settings-item-info { flex:1; }
-        .settings-item-name { font-size:14px; font-weight:600; }
-        .settings-item-meta { font-size:12px; color:var(--muted); }
-        .settings-item-actions { display:flex; gap:6px; }
-        .stage-order-badge { width:24px; height:24px; background:#f3f4f6; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; color:var(--muted); flex-shrink:0; }
-        /* ── Misc ── */
-        .empty-state { text-align:center; padding:40px; color:var(--muted); }
-        .empty-state i { font-size:32px; margin-bottom:12px; opacity:.4; }
-        .empty-state p { font-size:14px; }
-        .color-preview { width:20px; height:20px; border-radius:4px; display:inline-block; vertical-align:middle; margin-right:6px; }
-        .color-row { display:flex; align-items:center; gap:8px; }
-        .loading-spinner { text-align:center; padding:40px; color:var(--muted); }
-        .win-badge { background:#dcfce7; color:#166534; font-size:10px; padding:1px 5px; border-radius:4px; margin-left:4px; font-weight:600; }
-        .loss-badge { background:#fee2e2; color:#991b1b; font-size:10px; padding:1px 5px; border-radius:4px; margin-left:4px; font-weight:600; }
-        .swal2-container { z-index:10200 !important; }
-        @media(max-width:900px){
-            .stats-bar { grid-template-columns:repeat(2,1fr); }
-            .two-panel { flex-direction:column; }
-            .left-panel { width:100%; min-width:0; border-right:none; border-bottom:1px solid var(--border); max-height:180px; }
-            .form-grid { grid-template-columns:1fr; }
-            .form-group.span-2 { grid-column:span 1; }
-        }
-        @media(max-width:600px){
-            .stats-bar { display:none; }
-            .page-header { padding:12px 16px 0; }
-            .page-header h1 { font-size:20px; }
-            .left-panel { max-height:150px; }
-            .pipeline-scroll { padding:8px 12px; gap:10px; }
-            .stage-col { min-width:220px; max-width:220px; }
-        }
+        .swal2-container { z-index: 11000 !important; }
+        .swal2-styled.swal2-confirm { background: #1f4e79 !important; border-radius: 3px !important; font-weight: 600 !important; }
+        .swal2-styled.swal2-cancel { border-radius: 3px !important; font-weight: 600 !important; }
+        .swal2-popup { font-family: "Public Sans", system-ui, sans-serif !important; border-radius: 5px !important; }
     </style>
 </head>
 <body>
 <?php include 'includes/sidebar.php'; ?>
-<div class="main-content" style="padding:0;overflow:hidden;display:flex;flex-direction:column;height:100vh;">
+<div class="main-content" style="padding:0;display:flex;flex-direction:column;height:100vh;overflow:hidden;">
 <?php include 'includes/header.php'; ?>
 
-    <!-- Page Header -->
-    <div class="page-header">
-        <div>
-            <h1><i class="fa-solid fa-chart-network" style="color:var(--primary);margin-right:10px;"></i>CRM</h1>
-            <div class="breadcrumb">Dashboard &rsaquo; CRM</div>
+<div class="crm-app" id="crmApp">
+
+    <div class="crm-topbar">
+        <div class="crm-titlerow">
+            <h1 class="crm-title">CRM<span class="sub" id="crmSubtitle">Dashboard</span></h1>
+            <div class="spacer"></div>
+            <div id="crmTopActions"></div>
         </div>
-        <div class="header-actions">
-            <?php if ($canManage): ?>
-            <button class="btn btn-secondary" onclick="openImportModal()"><i class="fas fa-file-import"></i> Import CSV</button>
-            <button class="btn btn-primary" onclick="openNewLeadModal()"><i class="fas fa-plus"></i> New Lead</button>
-            <?php endif; ?>
-            <button class="btn btn-secondary btn-icon" onclick="openSettingsModal()" title="Settings"><i class="fas fa-cog"></i></button>
+        <div class="crm-tabs">
+            <button class="crm-tab active" data-tab="overview" onclick="crmTab('overview')">Overview</button>
+            <button class="crm-tab" data-tab="projects" onclick="crmTab('projects')">Projects</button>
+            <button class="crm-tab" data-tab="contacts" onclick="crmTab('contacts')">All contacts</button>
+            <button class="crm-tab" data-tab="settings" onclick="crmTab('settings')">Settings</button>
         </div>
     </div>
 
-    <!-- Stats Bar -->
-    <div class="stats-bar">
-        <div class="stat-card">
-            <div class="stat-icon" style="background:rgba(102,126,234,0.12)"><i class="fas fa-folder" style="color:#667eea"></i></div>
-            <div><div class="stat-label">Active Projects</div><div class="stat-value" id="stat-projects">—</div></div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon" style="background:rgba(6,182,212,0.12)"><i class="fas fa-users" style="color:#06b6d4"></i></div>
-            <div><div class="stat-label">Active Leads</div><div class="stat-value" id="stat-leads">—</div></div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon" style="background:rgba(16,185,129,0.12)"><i class="fas fa-trophy" style="color:#10b981"></i></div>
-            <div><div class="stat-label">Won This Month</div><div class="stat-value" id="stat-won">—</div></div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon" style="background:rgba(245,158,11,0.12)"><i class="fas fa-percent" style="color:#f59e0b"></i></div>
-            <div><div class="stat-label">Conversion Rate</div><div class="stat-value" id="stat-conv">—</div></div>
-        </div>
-    </div>
+    <div class="crm-view" id="view-overview"></div>
+    <div class="crm-view" id="view-projects" style="display:none;"></div>
+    <div class="crm-view" id="view-contacts" style="display:none;"></div>
+    <div class="crm-view" id="view-settings" style="display:none;"></div>
 
-    <!-- Two-Panel -->
-    <div class="two-panel">
+</div>
+</div>
 
-        <!-- Left Panel: Projects & Subprojects -->
-        <div class="left-panel">
-            <div class="left-panel-header">
-                <h3><i class="fas fa-layer-group" style="color:var(--primary);margin-right:6px;"></i>Projects</h3>
-                <div style="display:flex;gap:6px;align-items:center;">
-                    <?php if ($canManage): ?>
-                    <button class="btn btn-primary btn-sm btn-icon" onclick="openProjectModal()" title="Add Project"><i class="fas fa-plus"></i></button>
-                    <?php endif; ?>
-                    <button class="btn btn-secondary btn-sm btn-icon" id="fullscreen-btn" onclick="toggleFullscreen()" title="Fullscreen"><i class="fas fa-expand" id="fullscreen-icon"></i></button>
-                </div>
-            </div>
-            <div class="projects-list" id="projects-list">
-                <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>
-            </div>
-        </div>
+<div class="crm-overlay" id="crmOverlay" onclick="crmCloseDrawer()"></div>
+<div class="crm-drawer" id="crmDrawer" aria-hidden="true"></div>
 
-        <!-- Right Panel -->
-        <div class="right-panel" id="right-panel">
-            <div style="display:flex;flex:1;align-items:center;justify-content:center;">
-                <div class="welcome-card">
-                    <i class="fas fa-hand-pointer"></i>
-                    <h2>Select a campaign</h2>
-                    <p>Choose a project and subproject from the left panel to view its pipeline and manage leads.</p>
-                </div>
-            </div>
-        </div>
-
+<div class="crm-modal-ov" id="crmModalOv">
+    <div class="crm-modal" id="crmModal">
+        <div class="crm-modal-head"><h3 id="crmModalTitle"></h3><button class="crm-x" onclick="crmCloseModal()"><i class="fas fa-times"></i></button></div>
+        <div class="crm-modal-body" id="crmModalBody"></div>
+        <div class="crm-modal-foot" id="crmModalFoot"></div>
     </div>
 </div>
 
-<!-- ══════════════════════════════════════════════════════════
-     MODALS
-══════════════════════════════════════════════════════════ -->
-
-<!-- Project Modal -->
-<div class="modal-overlay" id="modal-project">
-    <div class="modal">
-        <div class="modal-header">
-            <h3 id="modal-project-title">New Project</h3>
-            <button class="modal-close" onclick="closeModal('modal-project')"><i class="fas fa-times"></i></button>
+<!-- Wide contact modal -->
+<div class="crm-modal-ov" id="crmBigOv">
+    <div class="crm-modal crm-modal-wide" id="crmBig">
+        <div class="crm-modal-head">
+            <div style="flex:1;min-width:0;"><h3 id="crmBigTitle"></h3><div class="crm-dim" id="crmBigSub" style="font-size:12.5px;"></div></div>
+            <button class="crm-x" onclick="crmCloseBig()"><i class="fas fa-times"></i></button>
         </div>
-        <div class="modal-body">
-            <input type="hidden" id="proj-id">
-            <div class="form-grid">
-                <div class="form-group span-2">
-                    <label>Project Name *</label>
-                    <input type="text" id="proj-name" placeholder="e.g. Q3 Outreach Campaign">
-                </div>
-                <div class="form-group span-2">
-                    <label>Description</label>
-                    <textarea id="proj-desc" placeholder="Brief description..."></textarea>
-                </div>
-                <div class="form-group">
-                    <label>Color</label>
-                    <div class="color-row">
-                        <input type="color" id="proj-color" value="#667eea" style="width:48px;height:38px;padding:2px;cursor:pointer;border-radius:6px;">
-                        <span id="proj-color-preview" style="font-size:13px;color:var(--muted);">#667eea</span>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Icon (Font Awesome class)</label>
-                    <input type="text" id="proj-icon" placeholder="fa-folder" value="fa-folder">
-                </div>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-project')">Cancel</button>
-            <button class="btn btn-primary" onclick="saveProject()">Save Project</button>
-        </div>
-    </div>
-</div>
-
-<!-- Subproject Modal -->
-<div class="modal-overlay" id="modal-subproject">
-    <div class="modal">
-        <div class="modal-header">
-            <h3 id="modal-sp-title">New Campaign</h3>
-            <button class="modal-close" onclick="closeModal('modal-subproject')"><i class="fas fa-times"></i></button>
-        </div>
-        <div class="modal-body">
-            <input type="hidden" id="sp-id">
-            <input type="hidden" id="sp-project-id">
-            <div class="form-grid">
-                <div class="form-group span-2">
-                    <label>Campaign Name *</label>
-                    <input type="text" id="sp-name" placeholder="e.g. LinkedIn Outreach April 2025">
-                </div>
-                <div class="form-group">
-                    <label>Type *</label>
-                    <select id="sp-type-id">
-                        <option value="">Loading types...</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Status</label>
-                    <select id="sp-status">
-                        <option value="active">Active</option>
-                        <option value="paused">Paused</option>
-                        <option value="completed">Completed</option>
-                    </select>
-                </div>
-                <div class="form-group span-2">
-                    <label>Goal</label>
-                    <input type="text" id="sp-goal" placeholder="e.g. Generate 50 qualified leads">
-                </div>
-                <div class="form-group span-2">
-                    <label>Description</label>
-                    <textarea id="sp-desc" placeholder="Campaign description..."></textarea>
-                </div>
-                <div class="form-group">
-                    <label>Target Leads</label>
-                    <input type="number" id="sp-target" placeholder="50" min="0">
-                </div>
-                <div class="form-group">
-                    <!-- empty -->
-                </div>
-                <div class="form-group">
-                    <label>Start Date</label>
-                    <input type="date" id="sp-start">
-                </div>
-                <div class="form-group">
-                    <label>End Date</label>
-                    <input type="date" id="sp-end">
-                </div>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-subproject')">Cancel</button>
-            <button class="btn btn-primary" onclick="saveSubproject()">Save Campaign</button>
-        </div>
-    </div>
-</div>
-
-<!-- Lead Modal -->
-<div class="modal-overlay" id="modal-lead">
-    <div class="modal modal-lg">
-        <div class="modal-header">
-            <h3 id="modal-lead-title">Add Lead</h3>
-            <button class="modal-close" onclick="closeModal('modal-lead')"><i class="fas fa-times"></i></button>
-        </div>
-        <div class="modal-body">
-            <input type="hidden" id="lead-id">
-            <input type="hidden" id="lead-subproject-id">
-            <div class="form-grid">
-                <div class="form-group">
-                    <label>First Name *</label>
-                    <input type="text" id="lead-fname" placeholder="John">
-                </div>
-                <div class="form-group">
-                    <label>Last Name</label>
-                    <input type="text" id="lead-lname" placeholder="Doe">
-                </div>
-                <div class="form-group">
-                    <label>Email</label>
-                    <input type="email" id="lead-email" placeholder="john@example.com">
-                </div>
-                <div class="form-group">
-                    <label>Phone</label>
-                    <input type="text" id="lead-phone" placeholder="+49 123 456789">
-                </div>
-                <div class="form-group">
-                    <label>Company</label>
-                    <input type="text" id="lead-company" placeholder="Acme Corp">
-                </div>
-                <div class="form-group">
-                    <label>Position</label>
-                    <input type="text" id="lead-position" placeholder="Marketing Director">
-                </div>
-                <div class="form-group">
-                    <label>Country</label>
-                    <input type="text" id="lead-country" placeholder="Germany">
-                </div>
-                <div class="form-group">
-                    <label>City</label>
-                    <input type="text" id="lead-city" placeholder="Berlin">
-                </div>
-                <div class="form-group">
-                    <label>Website</label>
-                    <input type="text" id="lead-website" placeholder="https://example.com">
-                </div>
-                <div class="form-group">
-                    <label>LinkedIn</label>
-                    <input type="text" id="lead-linkedin" placeholder="linkedin.com/in/johndoe">
-                </div>
-                <div class="form-group">
-                    <label>Source</label>
-                    <select id="lead-source">
-                        <option value="">— Select source —</option>
-                        <option value="linkedin">LinkedIn</option>
-                        <option value="email">Email</option>
-                        <option value="referral">Referral</option>
-                        <option value="website">Website</option>
-                        <option value="cold_call">Cold Call</option>
-                        <option value="event">Event</option>
-                        <option value="import">Import</option>
-                        <option value="other">Other</option>
-                    </select>
-                </div>
-                <div class="form-group span-2">
-                    <label>Notes</label>
-                    <textarea id="lead-notes" placeholder="Additional notes..."></textarea>
-                </div>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-lead')">Cancel</button>
-            <button class="btn btn-primary" onclick="saveLead()">Save Lead</button>
-        </div>
-    </div>
-</div>
-
-<!-- Lead Detail Modal -->
-<div class="modal-overlay" id="modal-lead-detail">
-    <div class="modal modal-xl">
-        <div class="modal-header">
-            <h3 id="modal-ld-name">Lead Detail</h3>
-            <div style="display:flex;gap:8px;align-items:center;">
-                <span id="modal-ld-stage-badge" class="stage-badge"></span>
-                <button class="modal-close" onclick="closeModal('modal-lead-detail')"><i class="fas fa-times"></i></button>
-            </div>
-        </div>
-        <div class="modal-body" id="lead-detail-body">
-            <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>
-        </div>
-    </div>
-</div>
-
-<!-- Import Modal -->
-<div class="modal-overlay" id="modal-import">
-    <div class="modal">
-        <div class="modal-header">
-            <h3>Import Leads from CSV</h3>
-            <button class="modal-close" onclick="closeModal('modal-import')"><i class="fas fa-times"></i></button>
-        </div>
-        <div class="modal-body">
-            <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#0369a1;">
-                <strong>CSV Format:</strong> The first row must be a header. Required columns: <code>first_name</code>. Optional: <code>last_name, email, phone, company, position, country</code>
-            </div>
-            <div class="form-grid cols-1">
-                <div class="form-group">
-                    <label>Campaign</label>
-                    <select id="import-sp-id">
-                        <option value="">— Select campaign —</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Paste CSV Data *</label>
-                    <textarea id="import-csv" placeholder="first_name,last_name,email,phone,company&#10;John,Doe,john@example.com,+49123,Acme Corp" style="min-height:200px;font-family:monospace;font-size:12px;"></textarea>
-                </div>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-import')">Cancel</button>
-            <button class="btn btn-primary" onclick="runImport()"><i class="fas fa-file-import"></i> Import</button>
-        </div>
-    </div>
-</div>
-
-<!-- Settings Modal -->
-<div class="modal-overlay" id="modal-settings">
-    <div class="modal modal-lg" style="height:85vh;">
-        <div class="modal-header">
-            <h3><i class="fas fa-cog" style="margin-right:8px;color:var(--primary);"></i>CRM Settings</h3>
-            <button class="modal-close" onclick="closeModal('modal-settings')"><i class="fas fa-times"></i></button>
-        </div>
-        <div style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
-            <div class="settings-tabs">
-                <div class="settings-tab active" onclick="switchSettingsTab('types',this)">Project Types</div>
-                <div class="settings-tab" onclick="switchSettingsTab('stages',this)">Pipeline Stages</div>
-            </div>
-            <!-- Types Tab -->
-            <div class="settings-content" id="settings-tab-types">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-                    <p style="font-size:13px;color:var(--muted);margin:0;">Define project types (e.g. LinkedIn Outreach, Email Campaign). Each type can have its own pipeline stages.</p>
-                    <?php if ($canManage): ?>
-                    <button class="btn btn-primary btn-sm" onclick="openTypeForm()"><i class="fas fa-plus"></i> Add Type</button>
-                    <?php endif; ?>
-                </div>
-                <div id="settings-type-form" style="display:none;background:#f9fafb;border-radius:10px;padding:16px;margin-bottom:16px;">
-                    <input type="hidden" id="stype-id">
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label>Type Name *</label>
-                            <input type="text" id="stype-name" placeholder="LinkedIn Outreach">
-                        </div>
-                        <div class="form-group">
-                            <label>Icon (FA class)</label>
-                            <input type="text" id="stype-icon" placeholder="fa-linkedin" value="fa-tag">
-                        </div>
-                        <div class="form-group">
-                            <label>Color</label>
-                            <input type="color" id="stype-color" value="#667eea" style="height:38px;cursor:pointer;border-radius:6px;padding:2px;">
-                        </div>
-                        <div class="form-group">
-                            <label>Description</label>
-                            <input type="text" id="stype-desc" placeholder="Brief description">
-                        </div>
-                    </div>
-                    <div style="display:flex;gap:8px;margin-top:8px;">
-                        <button class="btn btn-primary btn-sm" onclick="saveType()">Save</button>
-                        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('settings-type-form').style.display='none'">Cancel</button>
-                    </div>
-                </div>
-                <div id="settings-types-list">
-                    <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>
-                </div>
-            </div>
-            <!-- Stages Tab -->
-            <div class="settings-content" id="settings-tab-stages" style="display:none;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;">
-                    <div style="display:flex;align-items:center;gap:10px;">
-                        <label style="font-size:13px;font-weight:500;">Filter by Type:</label>
-                        <select id="stages-filter-type" onchange="loadStagesForSettings()" style="padding:6px 10px;border:2px solid var(--border);border-radius:8px;font-size:13px;">
-                            <option value="">Global Stages</option>
-                        </select>
-                    </div>
-                    <?php if ($canManage): ?>
-                    <button class="btn btn-primary btn-sm" onclick="openStageForm()"><i class="fas fa-plus"></i> Add Stage</button>
-                    <?php endif; ?>
-                </div>
-                <div id="settings-stage-form" style="display:none;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:10px;padding:16px;margin-bottom:16px;">
-                    <input type="hidden" id="sstage-id">
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label>Stage Name *</label>
-                            <input type="text" id="sstage-name" placeholder="Contacted">
-                        </div>
-                        <div class="form-group">
-                            <label>Color</label>
-                            <input type="color" id="sstage-color" value="#667eea" style="height:38px;cursor:pointer;border-radius:6px;padding:2px;">
-                        </div>
-                        <div class="form-group">
-                            <label>Display Order</label>
-                            <input type="number" id="sstage-order" value="1" min="1">
-                        </div>
-                        <div class="form-group">
-                            <label>Description</label>
-                            <input type="text" id="sstage-desc" placeholder="Stage description">
-                        </div>
-                        <div class="form-group">
-                            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                                <input type="checkbox" id="sstage-win" style="width:auto;"> Win Stage
-                            </label>
-                        </div>
-                        <div class="form-group">
-                            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                                <input type="checkbox" id="sstage-loss" style="width:auto;"> Loss Stage
-                            </label>
-                        </div>
-                    </div>
-                    <div style="display:flex;gap:8px;margin-top:8px;">
-                        <button class="btn btn-primary btn-sm" onclick="saveStage()">Save</button>
-                        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('settings-stage-form').style.display='none'">Cancel</button>
-                    </div>
-                </div>
-                <div id="settings-stages-list">
-                    <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Add Activity Modal -->
-<div class="modal-overlay" id="modal-activity">
-    <div class="modal">
-        <div class="modal-header">
-            <h3>Add Activity</h3>
-            <button class="modal-close" onclick="closeModal('modal-activity')"><i class="fas fa-times"></i></button>
-        </div>
-        <div class="modal-body">
-            <input type="hidden" id="act-lead-id">
-            <div class="form-grid cols-1">
-                <div class="form-group">
-                    <label>Activity Type</label>
-                    <select id="act-type">
-                        <option value="email">Email</option>
-                        <option value="call">Call</option>
-                        <option value="meeting">Meeting</option>
-                        <option value="note" selected>Note</option>
-                        <option value="task">Task</option>
-                        <option value="other">Other</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Subject *</label>
-                    <input type="text" id="act-subject" placeholder="e.g. Follow-up email sent">
-                </div>
-                <div class="form-group">
-                    <label>Date</label>
-                    <input type="datetime-local" id="act-date">
-                </div>
-                <div class="form-group">
-                    <label>Content</label>
-                    <textarea id="act-content" placeholder="Details..."></textarea>
-                </div>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('modal-activity')">Cancel</button>
-            <button class="btn btn-primary" onclick="saveActivity()"><i class="fas fa-plus"></i> Add Activity</button>
-        </div>
+        <div style="display:flex;gap:18px;border-bottom:1px solid var(--line);padding:0 22px;" id="crmBigTabs"></div>
+        <div class="crm-modal-body" id="crmBigBody" style="min-height:280px;"></div>
+        <div class="crm-modal-foot" id="crmBigFoot"></div>
     </div>
 </div>
 
 <script>
-// ══════════════════════════════════════════════════════════
-// STATE
-// ══════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════
+// CRM front-end (rebuilt). See lib/crm_core.php + ajax/crm.php.
+// ════════════════════════════════════════════════════════════════════════
 const AJAX = 'ajax/crm.php';
 const CAN_MANAGE = <?php echo $canManage ? 'true' : 'false'; ?>;
-let state = {
-    projects: [],
-    subprojects: {},
-    types: [],
-    currentProjectId: null,
-    currentSubprojectId: null,
-    currentView: 'pipeline',
-    pipelineData: null,
-    activeLeadId: null,
+const PKV_VISIBLE = <?php echo $pkvVisible ? 'true' : 'false'; ?>;
+
+const S = {
+    tab: 'overview',
+    vocab: { categories: [], countries: [] },
+    users: [],
+    pipelines: [],
+    contacts: { q:'', category:'', country:'', has_email:false, hide_suppressed:false, page:1, per:50, total:0, sort:'created', dir:'desc', f_name:'', f_company:'', f_email:'' },
+    sel: { ids:new Set(), allFilter:false },
+    _pageIds: [],
+    leads: { q:'', pipeline_id:'', status:'', page:1, per:50, total:0 },
+    board: null,
+    currentPipeline: null,
+    drawerContactId: null,
 };
 
-// ── AJAX helper ──
 async function api(action, data = {}) {
     const fd = new FormData();
     fd.append('action', action);
-    for (const [k, v] of Object.entries(data)) fd.append(k, v);
-    const res = await fetch(AJAX, { method: 'POST', body: fd });
-    return res.json();
+    for (const [k, v] of Object.entries(data)) {
+        if (v === undefined || v === null) continue;
+        fd.append(k, v);
+    }
+    try {
+        const res = await fetch(AJAX, { method:'POST', body: fd });
+        const txt = await res.text();
+        try { return JSON.parse(txt); }
+        catch(e){ return { success:false, message:'Server error'+(res.status?' ('+res.status+')':'')+': '+txt.replace(/<[^>]+>/g,' ').trim().slice(0,240) }; }
+    } catch(e){ return { success:false, message:'Network error: '+e.message }; }
+}
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function money(v){ if(v===null||v===''||v===undefined) return ''; const n=parseFloat(v); if(isNaN(n)) return ''; return '€'+n.toLocaleString(undefined,{maximumFractionDigits:0}); }
+function toast(msg, ok=true){ Swal.fire({toast:true,position:'top-end',timer:2600,showConfirmButton:false,icon:ok?'success':'error',title:msg}); }
+function when(dt){
+    if(!dt) return '';
+    const d = new Date(String(dt).replace(' ','T'));
+    if(isNaN(d)) return esc(dt);
+    return d.toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'}) + ' ' + d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+}
+function dateOnly(dt){ if(!dt) return ''; const d=new Date(String(dt).replace(' ','T')); return isNaN(d)?esc(dt):d.toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'}); }
+
+// ── Tabs ────────────────────────────────────────────────────────────────
+function crmTab(tab){
+    S.tab = tab;
+    document.querySelectorAll('.crm-tab').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+    ['overview','projects','contacts','settings'].forEach(t=>{ const v=document.getElementById('view-'+t); if(v) v.style.display = (t===tab)?'':'none'; });
+    document.getElementById('crmSubtitle').textContent = {overview:'Command centre',projects:'Projects',contacts:'All contacts',settings:'Settings'}[tab];
+    document.getElementById('crmTopActions').innerHTML = topActions(tab);
+    if(tab==='overview') loadOverview();
+    if(tab==='projects') loadProjects();
+    if(tab==='contacts') loadContacts();
+    if(tab==='settings') loadSettings();
+}
+function topActions(tab){
+    if(!CAN_MANAGE) return '';
+    if(tab==='contacts') return `<button class="crm-btn primary" onclick="openContactForm()"><i class="fas fa-plus"></i> New contact</button>`;
+    if(tab==='projects') return `<button class="crm-btn primary" onclick="openPipelineForm()"><i class="fas fa-plus"></i> New project</button>`;
+    return '';
 }
 
-// ══════════════════════════════════════════════════════════
-// INIT
-// ══════════════════════════════════════════════════════════
-document.addEventListener('DOMContentLoaded', () => {
-    loadDashboard();
-    loadProjects();
-    // Set default activity date to now
-    const now = new Date();
-    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-    document.getElementById('act-date').value = now.toISOString().slice(0,16);
-    // Color preview
-    document.getElementById('proj-color').addEventListener('input', function() {
-        document.getElementById('proj-color-preview').textContent = this.value;
-    });
-});
+// ── Bootstrap caches ──────────────────────────────────────────────────────
+async function bootstrap(){
+    const [v,u,p] = await Promise.all([api('vocab'), api('users_list'), api('pipelines_list')]);
+    if(v.success) S.vocab = v.data;
+    if(u.success) S.users = u.data.users;
+    if(p.success) S.pipelines = p.data.pipelines;
+}
+async function loadPipelinesCache(){ const p = await api('pipelines_list'); if(p.success) S.pipelines = p.data.pipelines; }
+async function ensureVocab(){ if(!S.vocab.countries || !S.vocab.countries.length){ const v = await api('vocab'); if(v.success) S.vocab = v.data; } }
+function openCategoriesManager(){
+    const list = S.vocab.categories.length ? S.vocab.categories.map(c=>`<div style="padding:7px 12px;border-bottom:1px solid var(--line-2);">${esc(c)}</div>`).join('') : '<div class="crm-empty" style="padding:16px;">No categories yet.</div>';
+    openModal('Contact categories', `
+      <div class="crm-note">Categories are shared with the Email Campaign Manager — anything you add here appears there too.</div>
+      <div class="crm-field" style="margin-top:12px;"><label>New category</label>
+        <div style="display:flex;gap:8px;"><input class="crm-input" id="newcat" placeholder="e.g. Hotels" onkeydown="if(event.key==='Enter')saveNewCategory()"><button class="crm-btn primary" onclick="saveNewCategory()">Add</button></div></div>
+      <div class="crm-section-label">Existing categories</div>
+      <div style="max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:3px;">${list}</div>`,
+      `<button class="crm-btn" onclick="crmCloseModal()">Done</button>`);
+}
+async function saveNewCategory(){
+    const name = document.getElementById('newcat').value.trim();
+    if(!name){ toast('Enter a category name',false); return; }
+    const r = await api('vocab_add', { kind:'category', name });
+    if(!r.success){ toast(r.message,false); return; }
+    if(S.vocab.categories.indexOf(name)<0){ S.vocab.categories.push(name); S.vocab.categories.sort(); }
+    toast('Category added'); openCategoriesManager();
+    if(S.tab==='contacts') loadContacts(true);
+}
 
-// ══════════════════════════════════════════════════════════
-// DASHBOARD
-// ══════════════════════════════════════════════════════════
-async function loadDashboard() {
-    const r = await api('get_dashboard');
-    if (!r.success) return;
+// ════════════════════════════════════════════════════════════════════════
+// OVERVIEW
+// ════════════════════════════════════════════════════════════════════════
+function kpiNum(n){ return (n===null||n===undefined)?'—':(typeof n==='number'?n.toLocaleString():n); }
+function areaCard(a){
+    const stats = (a.stats||[]).map(s=>`<div style="flex:1;"><div class="crm-stat-num" style="font-size:20px;">${kpiNum(s[1])}</div><div class="crm-stat-label">${esc(s[0])}</div></div>`).join('');
+    const openAct = a.pipeline ? `onclick="openBoard('${a.pipeline}')" ` : `onclick="window.location='${a.url}'" `;
+    return `<div class="crm-panel crm-row-click" ${openAct} style="margin:0;">
+        <div class="crm-panel-head"><i class="fas ${esc(a.icon)}" style="color:var(--accent);"></i><h3 style="letter-spacing:0;text-transform:none;font-size:14px;color:var(--ink);">${esc(a.name)}</h3><div class="spacer"></div>${a.pipeline?'<span class="crm-badge is-muted">live board</span>':`<i class="fas fa-arrow-up-right-from-square crm-dim" style="font-size:11px;"></i>`}</div>
+        <div class="crm-panel-body" style="display:flex;gap:10px;">${stats}</div>
+    </div>`;
+}
+function projCardOv(p){
+    const chips = (p.states||[]).slice(0,6).map(s=>`<span class="crm-badge ${s.won?'is-won':(s.lost?'is-lost':'is-muted')}" style="margin:0 6px 6px 0;"><span class="dot"></span>${esc(s.label)} ${s.count}</span>`).join('');
+    const srcLabel = {pkv:'PhiCRM / GPHI · read-only', wne:'WNE ATS · read-only', native:'CRM project'}[p.source]||'';
+    return `<div class="crm-panel crm-row-click" onclick="goToProject('${p.key}')" style="margin:0;">
+        <div class="crm-panel-head"><i class="fas ${p.source==='pkv'?'fa-heart-pulse':(p.source==='wne'?'fa-user-tie':'fa-diagram-project')}" style="color:var(--accent);"></i>
+          <h3 style="letter-spacing:0;text-transform:none;font-size:14px;color:var(--ink);">${esc(p.name)}</h3>
+          <div class="spacer"></div><span class="crm-badge is-muted">${esc(srcLabel)}</span></div>
+        <div class="crm-panel-body"><div style="font-size:22px;font-weight:700;">${(p.count||0).toLocaleString()} <span style="font-size:12px;font-weight:400;color:var(--ink-3);">contacts</span></div>
+          <div style="margin-top:10px;">${chips||'<span class="crm-dim" style="font-size:12px;">No status breakdown</span>'}</div></div>
+    </div>`;
+}
+async function loadOverview(){
+    const el = document.getElementById('view-overview');
+    el.innerHTML = '<div class="crm-spin"><i class="fas fa-spinner fa-spin fa-lg"></i></div>';
+    const [r, pr] = await Promise.all([api('overview'), api('projects_list')]);
+    if(!r.success){ el.innerHTML = `<div class="crm-empty">${esc(r.message)}</div>`; return; }
     const d = r.data;
-    document.getElementById('stat-projects').textContent = d.total_projects;
-    document.getElementById('stat-leads').textContent = d.total_leads;
-    document.getElementById('stat-won').textContent = d.won_this_month;
-    document.getElementById('stat-conv').textContent = d.conversion_rate + '%';
-}
+    const projects = pr.success ? pr.data.projects : [];
+    const stat = (label,num,sub)=>`<div class="crm-stat"><div class="crm-stat-label">${label}</div><div class="crm-stat-num">${num}</div>${sub?`<div class="crm-stat-sub">${sub}</div>`:''}</div>`;
+    let html = `<div class="crm-stats">
+        ${stat('Contacts', (d.total_contacts||0).toLocaleString(), (d.with_email||0).toLocaleString()+' with email')}
+        ${stat('Projects', projects.length, 'across every tool')}
+        ${d.pkv?stat('PKV open', d.pkv.open||0, 'PhiCRM / GPHI'):''}
+        ${stat('Emails sent (30d)', (d.sent_30d||0).toLocaleString(), '')}
+        ${stat('Suppressed', (d.suppressed||0).toLocaleString(), 'opted out / bounced')}
+    </div>`;
 
-// ══════════════════════════════════════════════════════════
-// PROJECTS
-// ══════════════════════════════════════════════════════════
-async function loadProjects() {
-    const r = await api('get_projects');
-    if (!r.success) return;
-    state.projects = r.data;
-    renderProjectsList();
-    populateImportSelect();
-}
+    html += `<p class="crm-section-label" style="margin:4px 0 12px;">Projects — who's in them &amp; what state they're in</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;margin-bottom:24px;">
+      ${projects.length ? projects.map(projCardOv).join('') : '<div class="crm-empty">No projects.</div>'}</div>`;
 
-function renderProjectsList() {
-    const el = document.getElementById('projects-list');
-    if (!state.projects.length) {
-        el.innerHTML = '<div class="empty-state"><i class="fas fa-folder-open"></i><p>No projects yet.</p></div>';
-        return;
-    }
-    el.innerHTML = state.projects.map(p => `
-        <div class="project-item">
-            <div class="project-header ${state.subprojects[p.id] ? 'open' : ''}" onclick="toggleProject(${p.id}, this)">
-                <div class="proj-icon" style="background:${hexToRgba(p.color,0.12)};color:${p.color}"><i class="fas ${p.icon}"></i></div>
-                <span style="flex:1;">${esc(p.project_name)}</span>
-                <span style="font-size:11px;color:var(--muted);font-weight:400;">${p.sub_count}</span>
-                ${CAN_MANAGE ? `<button class="btn btn-sm btn-icon" style="margin-left:4px;" onclick="event.stopPropagation();openProjectModal(${p.id})" title="Edit"><i class="fas fa-pen" style="font-size:10px;"></i></button>` : ''}
-                <i class="fas fa-chevron-right proj-arrow"></i>
-            </div>
-            <div class="subproject-list ${state.subprojects[p.id] ? 'open' : ''}" id="sp-list-${p.id}">
-                ${renderSubprojectList(p.id)}
-                ${CAN_MANAGE ? `<div style="padding:4px 8px;">
-                    <button class="btn btn-secondary btn-sm" style="width:100%;font-size:11px;" onclick="openSubprojectModal(${p.id})">
-                        <i class="fas fa-plus"></i> Add Campaign
-                    </button>
-                </div>` : ''}
-            </div>
-        </div>
-    `).join('');
-}
-
-function renderSubprojectList(projectId) {
-    const sps = state.subprojects[projectId];
-    if (!sps) return '<div style="padding:8px 12px;font-size:12px;color:var(--muted);">Loading...</div>';
-    if (!sps.length) return '<div style="padding:8px 12px;font-size:12px;color:var(--muted);">No campaigns yet.</div>';
-    return sps.map(sp => `
-        <div class="subproject-item ${state.currentSubprojectId == sp.id ? 'active' : ''}" onclick="selectSubproject(${sp.id}, ${projectId})">
-            <i class="fas ${sp.type_icon || 'fa-tag'}" style="color:${sp.type_color || '#667eea'};font-size:12px;"></i>
-            <span style="flex:1;">${esc(sp.subproject_name)}</span>
-            <span class="sp-type" style="background:${hexToRgba(sp.type_color||'#667eea',0.12)};color:${sp.type_color||'#667eea'}">${esc(sp.type_name || '')}</span>
-        </div>
-    `).join('');
-}
-
-async function toggleProject(projectId, headerEl) {
-    headerEl.classList.toggle('open');
-    const listEl = document.getElementById('sp-list-' + projectId);
-    listEl.classList.toggle('open');
-    if (!state.subprojects[projectId]) {
-        await loadSubprojects(projectId);
-    }
-}
-
-async function loadSubprojects(projectId) {
-    const r = await api('get_subprojects', { project_id: projectId });
-    if (!r.success) return;
-    state.subprojects[projectId] = r.data;
-    const listEl = document.getElementById('sp-list-' + projectId);
-    if (listEl) {
-        const addBtn = listEl.querySelector('button.btn-secondary')?.closest('div');
-        listEl.innerHTML = renderSubprojectList(projectId);
-        if (addBtn) listEl.appendChild(addBtn);
-    }
-}
-
-function selectSubproject(subprojectId, projectId) {
-    state.currentSubprojectId = subprojectId;
-    state.currentProjectId = projectId;
-    // Update active state in sidebar
-    document.querySelectorAll('.subproject-item').forEach(el => el.classList.remove('active'));
-    event.currentTarget.classList.add('active');
-    loadPipeline(subprojectId);
-    loadDashboard();
-}
-
-// ══════════════════════════════════════════════════════════
-// PIPELINE / LIST VIEW
-// ══════════════════════════════════════════════════════════
-async function loadPipeline(subprojectId) {
-    const rpanel = document.getElementById('right-panel');
-    rpanel.innerHTML = '<div class="loading-spinner" style="padding:60px;text-align:center;"><i class="fas fa-spinner fa-spin fa-2x"></i></div>';
-
-    // Find subproject info
-    let sp = null;
-    for (const pid in state.subprojects) {
-        const found = state.subprojects[pid].find(s => s.id == subprojectId);
-        if (found) { sp = found; break; }
-    }
-
-    const [pipelineRes, statsRes] = await Promise.all([
-        api('get_leads', { subproject_id: subprojectId }),
-        api('get_subproject_stats', { subproject_id: subprojectId })
-    ]);
-
-    if (!pipelineRes.success) {
-        rpanel.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>${pipelineRes.message}</p></div>`;
-        return;
-    }
-
-    state.pipelineData = pipelineRes.data;
-    const { stages, leads } = pipelineRes.data;
-    const stats = statsRes.success ? statsRes.data : null;
-
-    // Group leads by stage
-    const leadsByStage = {};
-    stages.forEach(s => leadsByStage[s.id] = []);
-    leads.forEach(l => {
-        if (leadsByStage[l.current_stage_id] !== undefined) {
-            leadsByStage[l.current_stage_id].push(l);
-        } else {
-            // Unassigned
-            if (!leadsByStage['_unassigned']) leadsByStage['_unassigned'] = [];
-            leadsByStage['_unassigned'].push(l);
-        }
-    });
-
-    const spName = sp ? sp.subproject_name : 'Campaign';
-    const spType = sp ? sp.type_name : '';
-    const spColor = sp ? (sp.type_color || '#667eea') : '#667eea';
-
-    rpanel.innerHTML = `
-        <div class="sp-header">
-            <div>
-                <div class="sp-title">${esc(spName)}</div>
-                <div style="margin-top:4px;display:flex;align-items:center;gap:8px;">
-                    <span class="sp-badge" style="background:${hexToRgba(spColor,0.12)};color:${spColor}">${esc(spType)}</span>
-                    ${sp ? `<span style="font-size:12px;color:var(--muted);">${sp.status}</span>` : ''}
-                </div>
-            </div>
-            <div class="sp-stats">
-                <div class="sp-stat"><div class="sp-stat-val">${leads.length}</div><div class="sp-stat-lbl">Total Leads</div></div>
-                ${stats ? `<div class="sp-stat"><div class="sp-stat-val">${stats.won_leads}</div><div class="sp-stat-lbl">Won</div></div>
-                <div class="sp-stat"><div class="sp-stat-val">${stats.conversion_rate}%</div><div class="sp-stat-lbl">Conv. Rate</div></div>` : ''}
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;">
-                <div class="view-toggle">
-                    <button class="view-btn ${state.currentView==='pipeline'?'active':''}" onclick="switchView('pipeline')"><i class="fas fa-columns"></i> Pipeline</button>
-                    <button class="view-btn ${state.currentView==='list'?'active':''}" onclick="switchView('list')"><i class="fas fa-list"></i> List</button>
-                </div>
-                ${CAN_MANAGE ? `
-                <button class="btn btn-secondary btn-sm" onclick="openSubprojectModal(${state.currentProjectId}, ${subprojectId})" title="Edit campaign"><i class="fas fa-pen"></i></button>
-                ` : ''}
-            </div>
-        </div>
-        <div id="view-container" style="flex:1;display:flex;flex-direction:column;overflow:hidden;"></div>
-        ${stats ? renderStatsSection(stats) : ''}
-    `;
-
-    renderCurrentView(stages, leadsByStage, leads);
-}
-
-function switchView(view) {
-    state.currentView = view;
-    document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
-    event.currentTarget.classList.add('active');
-    if (state.pipelineData) {
-        const { stages, leads } = state.pipelineData;
-        const leadsByStage = {};
-        stages.forEach(s => leadsByStage[s.id] = []);
-        leads.forEach(l => {
-            if (leadsByStage[l.current_stage_id] !== undefined) leadsByStage[l.current_stage_id].push(l);
+    html += `<div class="crm-grid-2">`;
+    // Recent email activity
+    html += `<div class="crm-panel"><div class="crm-panel-head"><h3>Recent email activity</h3><div class="spacer"></div><a class="crm-link" href="module-email-campaigns.php">Email tool</a></div><div class="crm-panel-body flush">`;
+    if((d.recent_email||[]).length){
+        html += `<table class="crm-table"><tbody>`;
+        d.recent_email.forEach(e=>{
+            const who = (e.cname||'').trim() || e.email || '—';
+            const click = e.contact_id ? `class="crm-row-click" onclick="openContact(${e.contact_id})"` : '';
+            html += `<tr ${click}><td><div class="crm-strong">${esc(e.subject||'(no subject)')}</div><div class="crm-dim" style="font-size:12px;">${esc(who)}${e.campaign_name?' · '+esc(e.campaign_name):''}</div></td><td class="num crm-dim" style="white-space:nowrap;">${dateOnly(e.sent_at)}</td></tr>`;
         });
-        renderCurrentView(stages, leadsByStage, leads);
-    }
-}
+        html += `</tbody></table>`;
+    } else { html += `<div class="crm-empty" style="padding:28px;"><i class="far fa-paper-plane"></i>No emails sent yet.</div>`; }
+    html += `</div></div>`;
 
-function renderCurrentView(stages, leadsByStage, leads) {
-    const container = document.getElementById('view-container');
-    if (!container) return;
-    if (state.currentView === 'pipeline') {
-        renderPipelineView(container, stages, leadsByStage);
+    // Tasks due
+    html += `<div class="crm-panel"><div class="crm-panel-head"><h3>Tasks &amp; follow-ups due</h3></div><div class="crm-panel-body flush">`;
+    if((d.tasks||[]).length){
+        html += `<table class="crm-table"><tbody>`;
+        d.tasks.forEach(t=>{
+            html += `<tr class="crm-row-click" onclick="openContact(${t.contact_id})"><td><div class="crm-strong">${esc(t.subject||t.type)}</div><div class="crm-dim" style="font-size:12px;">${esc((t.cname||'').trim())}${t.company?' · '+esc(t.company):''}</div></td><td class="num crm-dim">${dateOnly(t.due_at)}</td></tr>`;
+        });
+        html += `</tbody></table>`;
     } else {
-        renderListView(container, stages, leads);
+        html += `<div class="crm-empty" style="padding:28px;"><i class="far fa-circle-check"></i>Nothing due. Add a task from any contact.</div>`;
     }
+    html += `</div></div></div>`;
+    el.innerHTML = html;
 }
 
-function renderPipelineView(container, stages, leadsByStage) {
-    if (!stages.length) {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>No pipeline stages defined for this type. Configure stages in Settings.</p></div>';
-        return;
-    }
-    container.innerHTML = `
-        <div class="pipeline-scroll" id="pipeline-board">
-            ${stages.map((stage, idx) => {
-                const stageLeads = leadsByStage[stage.id] || [];
-                const textColor = colorIsLight(stage.color) ? '#333' : '#fff';
-                return `
-                <div class="stage-col">
-                    <div class="stage-col-header" style="background:${hexToRgba(stage.color,0.10)};color:${stage.color};border-bottom:2px solid ${hexToRgba(stage.color,0.35)};">
-                        <span class="stage-title">
-                            ${esc(stage.stage_name)}
-                            ${stage.is_win_stage ? '<span style="font-size:10px;opacity:.8;">(Win)</span>' : ''}
-                            ${stage.is_loss_stage ? '<span style="font-size:10px;opacity:.8;">(Loss)</span>' : ''}
-                        </span>
-                        <span class="stage-count">${stageLeads.length}</span>
-                    </div>
-                    <div class="stage-cards" id="stage-cards-${stage.id}">
-                        ${stageLeads.map(l => renderLeadCard(l, stage, stages, idx)).join('')}
-                        ${!stageLeads.length ? '<div class="empty-state" style="padding:20px;"><i class="fas fa-inbox"></i><p>No leads</p></div>' : ''}
-                    </div>
-                    ${CAN_MANAGE && idx === 0 ? `<button class="add-lead-btn" onclick="openNewLeadModal(${state.currentSubprojectId})"><i class="fas fa-plus"></i> Add Lead</button>` : ''}
-                </div>
-            `}).join('')}
-        </div>
-    `;
+// ════════════════════════════════════════════════════════════════════════
+// PROJECTS WORKSPACE  (pick a project → its people + their status)
+// ════════════════════════════════════════════════════════════════════════
+const PROJ = { list:[], current:null, meta:null, statuses:[], contacts:[], filter:'', q:'' };
+const SRC_GROUPS = [
+    { src:'native', label:'CRM projects', icon:'fa-diagram-project' },
+    { src:'pkv',    label:'Health insurance', icon:'fa-heart-pulse' },
+    { src:'wne',    label:'Recruitment', icon:'fa-user-tie' },
+    { src:'email',  label:'Email', icon:'fa-paper-plane' },
+];
+async function loadProjects(){
+    const r = await api('projects_list');
+    PROJ.list = r.success ? r.data.projects : [];
+    if(PROJ.view==='detail' && PROJ.current && PROJ.list.some(p=>p.key===PROJ.current)) openProject(PROJ.current);
+    else renderProjectsGrid();
 }
-
-function renderLeadCard(lead, stage, allStages, stageIdx) {
-    const prevStage = stageIdx > 0 ? allStages[stageIdx - 1] : null;
-    const nextStage = stageIdx < allStages.length - 1 ? allStages[stageIdx + 1] : null;
-    return `
-        <div class="lead-card" style="border-left-color:${stage.color};" onclick="openLeadDetail(${lead.id})">
-            <div class="lead-name">${esc(lead.first_name)} ${esc(lead.last_name)}</div>
-            ${lead.company ? `<div class="lead-company"><i class="fas fa-building" style="font-size:10px;"></i> ${esc(lead.company)}</div>` : ''}
-            ${lead.email ? `<div class="lead-email"><i class="fas fa-envelope" style="font-size:10px;"></i> ${esc(lead.email)}</div>` : ''}
-            ${CAN_MANAGE ? `<div class="lead-actions">
-                ${prevStage ? `<button onclick="event.stopPropagation();moveLead(${lead.id},${prevStage.id},'${esc(prevStage.stage_name)}')" title="Move to ${esc(prevStage.stage_name)}"><i class="fas fa-arrow-left"></i></button>` : ''}
-                <button onclick="event.stopPropagation();openLeadModal(${lead.id})" title="Edit"><i class="fas fa-pen"></i></button>
-                <button onclick="event.stopPropagation();deleteLead(${lead.id})" title="Delete" style="color:#ef4444;"><i class="fas fa-trash"></i></button>
-                ${nextStage ? `<button onclick="event.stopPropagation();moveLead(${lead.id},${nextStage.id},'${esc(nextStage.stage_name)}')" title="Move to ${esc(nextStage.stage_name)}"><i class="fas fa-arrow-right"></i></button>` : ''}
-            </div>` : ''}
-        </div>
-    `;
+function projName(key){ const p = PROJ.list.find(x=>x.key===key); return p?p.name:''; }
+function projCard(p){
+    const chips = (p.states||[]).slice(0,5).map(s=>`<span class="crm-badge ${s.won?'is-won':(s.lost?'is-lost':'is-muted')}" style="margin:0 5px 5px 0;"><span class="dot"></span>${esc(s.label)} ${s.count}</span>`).join('');
+    const icon = p.source==='pkv'?'fa-heart-pulse':(p.source==='wne'?'fa-user-tie':(p.source==='email'?'fa-paper-plane':'fa-diagram-project'));
+    const crumb = p.parent ? `<span class="crm-dim" style="font-size:11.5px;"><i class="fas fa-angle-right" style="font-size:9px;"></i> ${esc(projName(p.parent))}</span>`
+        : (p.sub ? `<span class="crm-dim" style="font-size:11.5px;">${esc(p.sub)}</span>` : '');
+    return `<div class="crm-pcard crm-row-click" onclick="openProject('${p.key}')">
+        <div class="crm-pcard-top"><i class="fas ${icon}" style="color:var(--accent);"></i><span class="crm-pcard-name">${esc(p.name)}</span>${p.editable?'':'<span class="crm-badge is-muted" style="margin-left:auto;">read-only</span>'}</div>
+        ${crumb}
+        <div class="crm-pcard-count">${(p.count||0).toLocaleString()} <span>contact${p.count==1?'':'s'}</span></div>
+        <div style="margin-top:8px;min-height:22px;">${chips}</div>
+    </div>`;
 }
-
-function renderListView(container, stages, leads) {
-    const stageMap = {};
-    stages.forEach(s => stageMap[s.id] = s);
-    container.innerHTML = `
-        <div class="list-view-wrap">
-            ${CAN_MANAGE ? `<div style="margin-bottom:12px;"><button class="btn btn-primary btn-sm" onclick="openNewLeadModal(${state.currentSubprojectId})"><i class="fas fa-plus"></i> Add Lead</button></div>` : ''}
-            ${!leads.length ? '<div class="empty-state"><i class="fas fa-users"></i><p>No leads in this campaign.</p></div>' : `
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Company</th>
-                        <th>Email</th>
-                        <th>Phone</th>
-                        <th>Stage</th>
-                        <th>Status</th>
-                        <th>Source</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${leads.map(l => {
-                        const s = stageMap[l.current_stage_id];
-                        return `<tr>
-                            <td style="font-weight:600;cursor:pointer;" onclick="openLeadDetail(${l.id})">${esc(l.first_name)} ${esc(l.last_name)}</td>
-                            <td>${esc(l.company || '—')}</td>
-                            <td>${l.email ? `<a href="mailto:${esc(l.email)}" style="color:var(--primary);">${esc(l.email)}</a>` : '—'}</td>
-                            <td>${esc(l.phone || '—')}</td>
-                            <td>${s ? `<span class="stage-badge" style="background:${hexToRgba(s.color,0.12)};color:${s.color}">${esc(s.stage_name)}</span>` : '—'}</td>
-                            <td><span class="status-badge status-${l.status}">${l.status}</span></td>
-                            <td>${esc(l.source || '—')}</td>
-                            <td>
-                                ${CAN_MANAGE ? `<div style="display:flex;gap:4px;">
-                                    <button class="btn btn-secondary btn-sm btn-icon" onclick="openLeadModal(${l.id})" title="Edit"><i class="fas fa-pen" style="font-size:11px;"></i></button>
-                                    <button class="btn btn-danger btn-sm btn-icon" onclick="deleteLead(${l.id})" title="Delete"><i class="fas fa-trash" style="font-size:11px;"></i></button>
-                                </div>` : `<button class="btn btn-secondary btn-sm btn-icon" onclick="openLeadDetail(${l.id})" title="View"><i class="fas fa-eye" style="font-size:11px;"></i></button>`}
-                            </td>
-                        </tr>`;
-                    }).join('')}
-                </tbody>
-            </table>`}
-        </div>
-    `;
-}
-
-function renderStatsSection(stats) {
-    if (!stats.leads_by_stage || !stats.leads_by_stage.length) return '';
-    const maxCnt = Math.max(1, ...stats.leads_by_stage.map(s => parseInt(s.cnt) || 0));
-    return `
-        <div class="stats-section">
-            <h4><i class="fas fa-chart-bar" style="margin-right:6px;"></i>Lead Distribution by Stage</h4>
-            <div class="bar-chart">
-                ${stats.leads_by_stage.map(s => {
-                    const pct = Math.max(4, Math.round(((parseInt(s.cnt)||0) / maxCnt) * 72));
-                    return `<div class="bar-wrap">
-                        <div class="bar-val">${s.cnt}</div>
-                        <div class="bar" style="background:${s.color || '#667eea'};height:${pct}px;"></div>
-                        <div class="bar-label" title="${esc(s.stage_name)}">${esc(s.stage_name)}</div>
-                    </div>`;
-                }).join('')}
-            </div>
-        </div>
-    `;
-}
-
-// ══════════════════════════════════════════════════════════
-// LEAD ACTIONS
-// ══════════════════════════════════════════════════════════
-async function moveLead(leadId, toStageId, stageName) {
-    const result = await Swal.fire({
-        title: `Move to "${stageName}"?`,
-        input: 'text',
-        inputLabel: 'Add a note (optional)',
-        inputPlaceholder: 'e.g. Replied to email',
-        showCancelButton: true,
-        confirmButtonText: 'Move Lead',
-        confirmButtonColor: '#667eea',
-        cancelButtonText: 'Cancel',
+function renderProjectsGrid(){
+    PROJ.view='grid';
+    const el = document.getElementById('view-projects');
+    el.style.padding='20px 24px';
+    if(!PROJ.list.length){ el.innerHTML = '<div class="crm-empty" style="margin-top:40px;"><i class="fas fa-folder-open"></i>No projects yet. Use “New project” (top-right) to create one.</div>'; return; }
+    let html='';
+    SRC_GROUPS.forEach(g=>{
+        const items = PROJ.list.filter(p=>p.source===g.src);
+        if(!items.length) return;
+        html += `<p class="crm-section-label" style="margin:6px 0 12px;"><i class="fas ${g.icon}"></i> ${g.label}</p>
+          <div class="crm-pgrid">${items.map(projCard).join('')}</div>`;
     });
-    if (!result.isConfirmed) return;
-    const r = await api('move_lead', { lead_id: leadId, to_stage_id: toStageId, notes: result.value || '' });
-    if (r.success) {
-        showToast('Lead moved successfully', 'success');
-        await loadPipeline(state.currentSubprojectId);
-        loadDashboard();
-    } else {
-        showToast(r.message, 'error');
-    }
+    el.innerHTML = html;
 }
-
-async function deleteLead(leadId) {
-    const result = await Swal.fire({
-        title: 'Delete Lead?',
-        text: 'This will permanently delete the lead and all its activities.',
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonText: 'Delete',
-        confirmButtonColor: '#ef4444',
-        cancelButtonText: 'Cancel',
-    });
-    if (!result.isConfirmed) return;
-    const r = await api('delete_lead', { id: leadId });
-    if (r.success) {
-        showToast('Lead deleted', 'success');
-        await loadPipeline(state.currentSubprojectId);
-        loadDashboard();
-    } else {
-        showToast(r.message, 'error');
-    }
+// From Overview (or anywhere off the Projects tab): switch to Projects, then open it.
+function goToProject(key){
+    PROJ.current = key; PROJ.view = 'detail';
+    if(S.tab==='projects') openProject(key); else crmTab('projects');
 }
-
-// ══════════════════════════════════════════════════════════
-// PROJECT MODAL
-// ══════════════════════════════════════════════════════════
-function openProjectModal(id = null) {
-    document.getElementById('proj-id').value = id || '';
-    document.getElementById('modal-project-title').textContent = id ? 'Edit Project' : 'New Project';
-    if (id) {
-        const proj = state.projects.find(p => p.id == id);
-        if (proj) {
-            document.getElementById('proj-name').value = proj.project_name;
-            document.getElementById('proj-desc').value = proj.description || '';
-            document.getElementById('proj-color').value = proj.color || '#667eea';
-            document.getElementById('proj-color-preview').textContent = proj.color || '#667eea';
-            document.getElementById('proj-icon').value = proj.icon || 'fa-folder';
+async function openProject(key){
+    PROJ.current = key; PROJ.filter=''; PROJ.view='detail';
+    const el = document.getElementById('view-projects');
+    el.style.padding='20px 24px';
+    el.innerHTML = '<div class="crm-spin" style="margin-top:60px;"><i class="fas fa-spinner fa-spin fa-lg"></i></div>';
+    const r = await api('project_view', { key });
+    if(!r.success){ el.innerHTML = `<div style="margin-bottom:12px;"><a class="crm-link" onclick="renderProjectsGrid()"><i class="fas fa-arrow-left"></i> All projects</a></div><div class="crm-empty">${esc(r.message)}</div>`; return; }
+    PROJ.meta = r.data.meta; PROJ.statuses = r.data.statuses; PROJ.contacts = r.data.contacts;
+    renderProjectDetail();
+}
+function projFilter(k){ PROJ.filter=k; renderProjectDetail(); }
+function renderProjectDetail(){
+    const m = PROJ.meta, el = document.getElementById('view-projects');
+    const counts = {}; PROJ.contacts.forEach(c=> counts[c.status]=(counts[c.status]||0)+1);
+    const srcBadge = {pkv:'PhiCRM / GPHI · read-only', wne:'WNE ATS · read-only', email:'Email Campaign Manager · read-only', native:'CRM project · editable'}[m.source]||'';
+    let actions='';
+    if(m.editable && CAN_MANAGE){
+        actions = `<button class="crm-btn" onclick="projAddContact()"><i class="fas fa-user-plus"></i> Add contact</button>
+                   <button class="crm-btn" onclick="openPipelineStages(${m.key.split(':')[1]})"><i class="fas fa-sliders"></i> Statuses</button>
+                   <button class="crm-btn" onclick="openSubProjectForm(${m.key.split(':')[1]})"><i class="fas fa-plus"></i> Sub-project</button>
+                   <button class="crm-btn icon" onclick="confirmDeleteProject('${m.key}')" title="Delete project"><i class="fas fa-trash crm-dim"></i></button>`;
+    }
+    if(m.url){ const ext = /^https?:/i.test(m.url); actions += ` <a class="crm-btn primary" href="${m.url}" ${ext?'target="_blank" rel="noopener"':''}><i class="fas fa-arrow-up-right-from-square"></i> ${esc(m.open_label||'Open in tool')}</a>`; }
+    let chips = `<span class="crm-pchip ${PROJ.filter===''?'active':''}" onclick="projFilter('')">All ${PROJ.contacts.length}</span>`;
+    PROJ.statuses.forEach(s=>{ const n=counts[s.key]||0; if(n>0||m.editable) chips += `<span class="crm-pchip ${PROJ.filter===String(s.key)?'active':''} ${s.is_won?'won':(s.is_lost?'lost':'')}" onclick="projFilter('${esc(String(s.key))}')">${esc(s.label)} ${n}</span>`; });
+    el.innerHTML = `
+      <div style="margin-bottom:12px;"><a class="crm-link" onclick="renderProjectsGrid()"><i class="fas fa-arrow-left"></i> All projects</a></div>
+      <div class="crm-projhead">
+        <div style="flex:1;min-width:0;"><div class="crm-projtitle">${esc(m.name)}</div><div class="crm-projsub">${esc(m.sub||'')}</div></div>
+        <span class="crm-badge is-muted">${esc(srcBadge)}</span>
+      </div>
+      <div class="crm-pchips" style="margin:6px 0 12px;">${chips}</div>
+      ${actions?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;justify-content:flex-end;">${actions}</div>`:''}
+      <div id="projTable"></div>`;
+    renderProjTable();
+}
+function renderProjTable(){
+    const m = PROJ.meta;
+    const rows = PROJ.contacts.filter(c=> PROJ.filter===''||String(c.status)===String(PROJ.filter));
+    const statusCell = (c)=>{
+        if(m.editable && CAN_MANAGE){
+            return `<select class="crm-select" style="padding:3px 6px;font-size:12px;width:auto;" onclick="event.stopPropagation()" onchange="projMove(${c.lead_id}, this.value)">`
+                + PROJ.statuses.map(s=>`<option value="${s.key}" ${String(c.status)===String(s.key)?'selected':''}>${esc(s.label)}</option>`).join('')+`</select>`;
         }
-    } else {
-        document.getElementById('proj-name').value = '';
-        document.getElementById('proj-desc').value = '';
-        document.getElementById('proj-color').value = '#667eea';
-        document.getElementById('proj-color-preview').textContent = '#667eea';
-        document.getElementById('proj-icon').value = 'fa-folder';
-    }
-    openModal('modal-project');
-}
-
-async function saveProject() {
-    const id = document.getElementById('proj-id').value;
-    const name = document.getElementById('proj-name').value.trim();
-    if (!name) { showToast('Project name is required', 'error'); return; }
-    const data = {
-        project_name: name,
-        description: document.getElementById('proj-desc').value,
-        color: document.getElementById('proj-color').value,
-        icon: document.getElementById('proj-icon').value || 'fa-folder',
+        const s = PROJ.statuses.find(x=>x.key===c.status);
+        return `<span class="crm-badge ${s&&s.is_won?'is-won':(s&&s.is_lost?'is-lost':'is-open')}"><span class="dot"></span>${esc(c.status_label||c.status)}</span>`;
     };
-    if (id) data.id = id;
-    const r = await api(id ? 'update_project' : 'create_project', data);
-    if (r.success) {
-        showToast(r.message, 'success');
-        closeModal('modal-project');
-        await loadProjects();
-    } else {
-        showToast(r.message, 'error');
-    }
-}
-
-// ══════════════════════════════════════════════════════════
-// SUBPROJECT MODAL
-// ══════════════════════════════════════════════════════════
-async function openSubprojectModal(projectId, subprojectId = null) {
-    document.getElementById('sp-project-id').value = projectId;
-    document.getElementById('sp-id').value = subprojectId || '';
-    document.getElementById('modal-sp-title').textContent = subprojectId ? 'Edit Campaign' : 'New Campaign';
-
-    // Load types into select
-    if (!state.types.length) {
-        const tr = await api('get_types');
-        if (tr.success) state.types = tr.data;
-    }
-    const sel = document.getElementById('sp-type-id');
-    sel.innerHTML = '<option value="">— Select type —</option>' +
-        state.types.map(t => `<option value="${t.id}">${esc(t.type_name)}</option>`).join('');
-
-    if (subprojectId) {
-        const sps = state.subprojects[projectId] || [];
-        const sp = sps.find(s => s.id == subprojectId);
-        if (sp) {
-            document.getElementById('sp-name').value = sp.subproject_name;
-            document.getElementById('sp-type-id').value = sp.type_id;
-            document.getElementById('sp-status').value = sp.status;
-            document.getElementById('sp-goal').value = sp.goal || '';
-            document.getElementById('sp-desc').value = sp.description || '';
-            document.getElementById('sp-target').value = sp.target_leads || '';
-            document.getElementById('sp-start').value = sp.start_date || '';
-            document.getElementById('sp-end').value = sp.end_date || '';
-        }
-    } else {
-        document.getElementById('sp-name').value = '';
-        document.getElementById('sp-type-id').value = '';
-        document.getElementById('sp-status').value = 'active';
-        document.getElementById('sp-goal').value = '';
-        document.getElementById('sp-desc').value = '';
-        document.getElementById('sp-target').value = '';
-        document.getElementById('sp-start').value = '';
-        document.getElementById('sp-end').value = '';
-    }
-    openModal('modal-subproject');
-}
-
-async function saveSubproject() {
-    const id = document.getElementById('sp-id').value;
-    const pid = document.getElementById('sp-project-id').value;
-    const name = document.getElementById('sp-name').value.trim();
-    const typeId = document.getElementById('sp-type-id').value;
-    if (!name || !typeId) { showToast('Name and Type are required', 'error'); return; }
-    const data = {
-        project_id: pid,
-        type_id: typeId,
-        subproject_name: name,
-        description: document.getElementById('sp-desc').value,
-        goal: document.getElementById('sp-goal').value,
-        target_leads: document.getElementById('sp-target').value || 0,
-        start_date: document.getElementById('sp-start').value,
-        end_date: document.getElementById('sp-end').value,
-        status: document.getElementById('sp-status').value,
-    };
-    if (id) data.id = id;
-    const r = await api(id ? 'update_subproject' : 'create_subproject', data);
-    if (r.success) {
-        showToast(r.message, 'success');
-        closeModal('modal-subproject');
-        await loadSubprojects(pid);
-        renderProjectsList();
-        if (id && state.currentSubprojectId == id) loadPipeline(id);
-    } else {
-        showToast(r.message, 'error');
-    }
-}
-
-// ══════════════════════════════════════════════════════════
-// LEAD MODAL (Add/Edit)
-// ══════════════════════════════════════════════════════════
-function openNewLeadModal(spId = null) {
-    const subId = spId || state.currentSubprojectId;
-    if (!subId) { showToast('Please select a campaign first', 'error'); return; }
-    document.getElementById('lead-id').value = '';
-    document.getElementById('lead-subproject-id').value = subId;
-    document.getElementById('modal-lead-title').textContent = 'Add Lead';
-    ['fname','lname','email','phone','company','position','website','linkedin','country','city','notes'].forEach(f => {
-        document.getElementById('lead-' + f).value = '';
+    // Columns are defined per project by the backend (meta.fields).
+    const fields = m.fields || [
+        {key:'name',label:'Name',filter:true,sort:true},{key:'email',label:'Email',filter:true,sort:true},{key:'status',label:'Status',filter:true,sort:true,kind:'status'}
+    ];
+    const cols = fields.map(f=>{
+        let col;
+        if(f.kind==='status') col = {key:f.key, label:f.label, filter:f.filter, sort:f.sort, val:c=>c.status_label||'', cell:statusCell};
+        else if(f.kind==='date') col = {key:f.key, label:f.label, filter:f.filter, sort:f.sort, val:c=>c[f.key]||'', cell:c=>`<span class="crm-dim">${c[f.key]?when(c[f.key]):'—'}</span>`};
+        else if(f.key==='name') col = {key:f.key, label:f.label, filter:f.filter, sort:f.sort, val:c=>c.name||'', cell:c=>`<span class="crm-strong">${esc(c.name)||'<span class=crm-dim>—</span>'}</span>`};
+        else col = {key:f.key, label:f.label, filter:f.filter, sort:f.sort, val:c=>c[f.key]||'', cell:c=> (c[f.key]!==undefined&&c[f.key]!=='')?`<span class="crm-dim">${esc(c[f.key])}</span>`:'<span class="crm-dim">—</span>'};
+        if(f.options) col.filterOptions = f.options;
+        return col;
     });
-    document.getElementById('lead-source').value = '';
-    openModal('modal-lead');
+    if(m.editable && CAN_MANAGE) cols.push({key:'act', label:'', num:true, cell:c=>`<button class="crm-btn sm danger" onclick="event.stopPropagation();projRemove(${c.lead_id})" title="Remove from project"><i class="fas fa-xmark"></i></button>`});
+    makeTable(document.getElementById('projTable'), { cols, rows, pageSize:25, empty:'No contacts in this view.',
+        onRow:(c)=>{ if(c.kind==='native') openContact(c.contact_id); else projPersonInfo(c.row_id); } });
 }
 
-async function openLeadModal(leadId) {
-    // Load lead data for editing
-    const r = await api('get_lead_detail', { lead_id: leadId });
-    if (!r.success) { showToast(r.message, 'error'); return; }
-    const lead = r.data.lead;
-    document.getElementById('lead-id').value = lead.id;
-    document.getElementById('lead-subproject-id').value = lead.subproject_id;
-    document.getElementById('modal-lead-title').textContent = 'Edit Lead';
-    document.getElementById('lead-fname').value = lead.first_name || '';
-    document.getElementById('lead-lname').value = lead.last_name || '';
-    document.getElementById('lead-email').value = lead.email || '';
-    document.getElementById('lead-phone').value = lead.phone || '';
-    document.getElementById('lead-company').value = lead.company || '';
-    document.getElementById('lead-position').value = lead.position || '';
-    document.getElementById('lead-website').value = lead.website || '';
-    document.getElementById('lead-linkedin').value = lead.linkedin || '';
-    document.getElementById('lead-country').value = lead.country || '';
-    document.getElementById('lead-city').value = lead.city || '';
-    document.getElementById('lead-notes').value = lead.notes || '';
-    document.getElementById('lead-source').value = lead.source || '';
-    openModal('modal-lead');
+// ── Reusable data table: sortable + per-column filter + pagination + page-size ──
+function makeTable(mount, opts){ mount._dt = { sortKey:null, sortDir:1, filters:{}, page:1, pageSize:opts.pageSize||25, opts }; renderDT(mount); }
+function dtWrap(node){ let n=node; while(n && !n._dt) n=n.parentElement; return n; }
+function dtFiltered(st){
+    let rows = st.opts.rows.slice(); const cols = st.opts.cols;
+    Object.entries(st.filters).forEach(([k,v])=>{ if(!v) return; const col=cols.find(c=>c.key===k); if(!col||!col.val) return;
+        const q=v.toLowerCase(); rows=rows.filter(r=> String(col.val(r)).toLowerCase().includes(q)); });
+    if(st.sortKey){ const col=cols.find(c=>c.key===st.sortKey); if(col&&col.val){ rows.sort((a,b)=> String(col.val(a)).localeCompare(String(col.val(b)),undefined,{numeric:true})*st.sortDir); } }
+    return rows;
 }
-
-async function saveLead() {
-    const id = document.getElementById('lead-id').value;
-    const fname = document.getElementById('lead-fname').value.trim();
-    if (!fname) { showToast('First name is required', 'error'); return; }
-    const data = {
-        subproject_id: document.getElementById('lead-subproject-id').value,
-        first_name: fname,
-        last_name: document.getElementById('lead-lname').value,
-        email: document.getElementById('lead-email').value,
-        phone: document.getElementById('lead-phone').value,
-        company: document.getElementById('lead-company').value,
-        position: document.getElementById('lead-position').value,
-        website: document.getElementById('lead-website').value,
-        linkedin: document.getElementById('lead-linkedin').value,
-        country: document.getElementById('lead-country').value,
-        city: document.getElementById('lead-city').value,
-        notes: document.getElementById('lead-notes').value,
-        source: document.getElementById('lead-source').value,
-    };
-    if (id) data.id = id;
-    const r = await api(id ? 'update_lead' : 'create_lead', data);
-    if (r.success) {
-        showToast(r.message, 'success');
-        closeModal('modal-lead');
-        if (state.currentSubprojectId) {
-            await loadPipeline(state.currentSubprojectId);
-            loadDashboard();
+function renderDT(mount){
+    const st = mount._dt, cols = st.opts.cols;
+    const all = dtFiltered(st); mount._rows = all;
+    const total = all.length;
+    const pageSize = st.pageSize==='All' ? (total||1) : st.pageSize;
+    const pages = Math.max(1, Math.ceil(total/pageSize));
+    if(st.page>pages) st.page=pages;
+    const start=(st.page-1)*pageSize, pageRows = all.slice(start, start+pageSize);
+    const arrow = c => st.sortKey===c.key ? ` <i class="fas fa-caret-${st.sortDir>0?'up':'down'}"></i>` : (c.sort?' <i class="fas fa-sort" style="opacity:.3;"></i>':'');
+    const head = cols.map(c=>`<th class="${c.num?'num ':''}${c.sort?'crm-row-click':''}" ${c.sort?`onclick="dtSort(this,'${c.key}')"`:''} style="user-select:none;">${esc(c.label)}${arrow(c)}</th>`).join('');
+    const filt = cols.map(c=>{
+        if(!c.filter) return '<th></th>';
+        if(c.filterOptions){
+            const opts = ['<option value="">(all)</option>'].concat(c.filterOptions.map(o=>`<option ${String(st.filters[c.key]||'')===String(o)?'selected':''}>${esc(o)}</option>`)).join('');
+            return `<th style="padding:4px 8px;"><select class="crm-select" data-fk="${c.key}" onchange="dtFilter(this)" style="padding:4px 6px;font-size:12px;width:100%;">${opts}</select></th>`;
         }
-    } else {
-        showToast(r.message, 'error');
-    }
+        return `<th style="padding:4px 8px;"><input class="crm-input" data-fk="${c.key}" value="${esc(st.filters[c.key]||'')}" oninput="dtFilter(this)" placeholder="filter…" style="padding:4px 7px;font-size:12px;"></th>`;
+    }).join('');
+    const body = pageRows.length ? pageRows.map((r,i)=>`<tr class="crm-row-click" data-i="${start+i}" onclick="dtRow(this)">${cols.map(c=>`<td class="${c.num?'num':''}">${c.cell(r)}</td>`).join('')}</tr>`).join('')
+        : `<tr><td colspan="${cols.length}"><div class="crm-empty">${esc(st.opts.empty||'No rows.')}</div></td></tr>`;
+    const from = total? start+1:0, to = Math.min(total, start+pageSize);
+    mount.innerHTML = `
+      <div class="crm-dt-bar">
+        <label class="crm-dim" style="font-size:12.5px;">Show
+          <select class="crm-select" style="width:auto;display:inline-block;padding:4px 8px;" onchange="dtPageSize(this)">
+            ${[10,25,50,100,'All'].map(n=>`<option ${String(st.pageSize)===String(n)?'selected':''}>${n}</option>`).join('')}
+          </select> per page</label>
+        <div class="spacer" style="flex:1;"></div>
+        <span class="crm-dim" style="font-size:12.5px;">${total? from+'–'+to : 0} of ${total.toLocaleString()}</span>
+        <button class="crm-btn sm" ${st.page<=1?'disabled':''} onclick="dtPage(this,-1)"><i class="fas fa-chevron-left"></i></button>
+        <span class="crm-dim" style="font-size:12.5px;">${st.page}/${pages}</span>
+        <button class="crm-btn sm" ${st.page>=pages?'disabled':''} onclick="dtPage(this,1)"><i class="fas fa-chevron-right"></i></button>
+      </div>
+      <div class="crm-panel" style="margin-top:0;"><div class="crm-panel-body flush" style="overflow:auto;">
+        <table class="crm-table"><thead><tr>${head}</tr><tr class="crm-filterrow">${filt}</tr></thead><tbody>${body}</tbody></table>
+      </div></div>`;
 }
-
-// ══════════════════════════════════════════════════════════
-// LEAD DETAIL MODAL
-// ══════════════════════════════════════════════════════════
-async function openLeadDetail(leadId) {
-    state.activeLeadId = leadId;
-    openModal('modal-lead-detail');
-    document.getElementById('lead-detail-body').innerHTML = '<div class="loading-spinner" style="padding:40px;"><i class="fas fa-spinner fa-spin fa-2x"></i></div>';
-    const r = await api('get_lead_detail', { lead_id: leadId });
-    if (!r.success) {
-        document.getElementById('lead-detail-body').innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>${r.message}</p></div>`;
-        return;
-    }
-    const { lead, activities, history } = r.data;
-    document.getElementById('modal-ld-name').textContent = `${lead.first_name} ${lead.last_name}`;
-    const badge = document.getElementById('modal-ld-stage-badge');
-    badge.textContent = lead.stage_name || '';
-    const _sc = lead.stage_color || '#667eea';
-    badge.style.background = hexToRgba(_sc, 0.12);
-    badge.style.color = _sc;
-
-    const activityTypeIcons = { email:'fa-envelope', call:'fa-phone', meeting:'fa-handshake', note:'fa-sticky-note', task:'fa-check-square', other:'fa-circle' };
-    const activityTypeColors = { email:'#3b82f6', call:'#10b981', meeting:'#f59e0b', note:'#8b5cf6', task:'#ec4899', other:'#6b7280' };
-
-    document.getElementById('lead-detail-body').innerHTML = `
-        <div class="lead-detail-grid">
-            <!-- Left: Lead Info -->
-            <div>
-                <div class="detail-section">
-                    <h4>Contact Information</h4>
-                    ${field('Name', `${lead.first_name} ${lead.last_name}`)}
-                    ${field('Email', lead.email ? `<a href="mailto:${esc(lead.email)}" style="color:var(--primary);">${esc(lead.email)}</a>` : '—')}
-                    ${field('Phone', lead.phone || '—')}
-                    ${field('Company', lead.company || '—')}
-                    ${field('Position', lead.position || '—')}
-                    ${field('Country', [lead.city, lead.country].filter(Boolean).join(', ') || '—')}
-                    ${lead.website ? field('Website', `<a href="${esc(lead.website)}" target="_blank" style="color:var(--primary);">${esc(lead.website)}</a>`) : ''}
-                    ${lead.linkedin ? field('LinkedIn', `<a href="${esc(lead.linkedin)}" target="_blank" style="color:var(--primary);">View Profile</a>`) : ''}
-                    ${field('Source', lead.source || '—')}
-                    ${field('Status', `<span class="status-badge status-${lead.status}">${lead.status}</span>`)}
-                    ${field('Last Contacted', lead.last_contacted ? formatDate(lead.last_contacted) : 'Never')}
-                </div>
-                ${lead.notes ? `<div class="detail-section"><h4>Notes</h4><p style="font-size:13px;color:var(--text);line-height:1.6;">${esc(lead.notes)}</p></div>` : ''}
-                <!-- Stage History -->
-                ${history.length ? `
-                <div class="detail-section" style="margin-top:16px;">
-                    <h4>Stage History</h4>
-                    <div class="stage-history">
-                        ${history.map(h => `
-                            <div class="history-item">
-                                <span style="color:var(--muted);font-size:11px;">${formatDate(h.created_at)}</span>
-                                <span>${esc(h.from_stage || 'Start')}</span>
-                                <span class="history-arrow"><i class="fas fa-arrow-right"></i></span>
-                                <span class="stage-badge" style="background:${hexToRgba(h.to_color||'#667eea',0.12)};color:${h.to_color||'#667eea'}">${esc(h.to_stage||'')}</span>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>` : ''}
-            </div>
-            <!-- Right: Activities -->
-            <div>
-                <div class="detail-section">
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);">
-                        <h4 style="margin:0;padding:0;border:none;">Activities (${activities.length})</h4>
-                        ${CAN_MANAGE ? `<button class="btn btn-primary btn-sm" onclick="openActivityModal(${leadId})"><i class="fas fa-plus"></i> Add</button>` : ''}
-                    </div>
-                    ${activities.length ? `
-                    <div class="activity-timeline">
-                        ${activities.map(a => `
-                            <div class="activity-item">
-                                <div class="activity-icon" style="background:${hexToRgba(activityTypeColors[a.activity_type]||'#6b7280',0.12)};color:${activityTypeColors[a.activity_type]||'#6b7280'}">
-                                    <i class="fas ${activityTypeIcons[a.activity_type]||'fa-circle'}"></i>
-                                </div>
-                                <div class="activity-content">
-                                    <div class="activity-subject">${esc(a.subject)}</div>
-                                    ${a.content ? `<div class="activity-body">${esc(a.content)}</div>` : ''}
-                                    <div class="activity-meta">${formatDate(a.activity_date)} · ${a.activity_type}</div>
-                                </div>
-                                ${CAN_MANAGE ? `<button class="btn btn-danger btn-sm btn-icon" onclick="deleteActivity(${a.id})" title="Delete"><i class="fas fa-trash" style="font-size:10px;"></i></button>` : ''}
-                            </div>
-                        `).join('')}
-                    </div>` : `<div class="empty-state"><i class="fas fa-comment-slash"></i><p>No activities recorded yet.</p></div>`}
-                </div>
-            </div>
+function dtSort(th,key){ const m=dtWrap(th), st=m._dt; if(st.sortKey===key) st.sortDir*=-1; else {st.sortKey=key; st.sortDir=1;} st.page=1; renderDT(m); }
+function dtFilter(inp){ const m=dtWrap(inp), st=m._dt, fk=inp.dataset.fk; st.filters[fk]=inp.value.trim(); st.page=1; renderDT(m); const n=m.querySelector(`input[data-fk="${fk}"]`); if(n){ n.focus(); try{n.setSelectionRange(n.value.length,n.value.length);}catch(e){} } }
+function dtPageSize(sel){ const m=dtWrap(sel), st=m._dt; st.pageSize = sel.value==='All'?'All':parseInt(sel.value); st.page=1; renderDT(m); }
+function dtPage(btn,d){ const m=dtWrap(btn), st=m._dt; st.page+=d; renderDT(m); }
+function dtRow(tr){ const m=dtWrap(tr), i=parseInt(tr.dataset.i), r=m._rows[i]; if(r && m._dt.opts.onRow) m._dt.opts.onRow(r); }
+async function projMove(leadId, stageId){
+    const r = await api('lead_move', { lead_id:leadId, to_stage_id:stageId });
+    if(!r.success){ toast(r.message,false); return; }
+    toast('Status updated'); openProject(PROJ.current);
+}
+async function projRemove(leadId){
+    const res = await Swal.fire({title:'Remove from project?',text:'The contact stays in the database; only this project link is removed.',icon:'warning',showCancelButton:true,confirmButtonText:'Remove'});
+    if(!res.isConfirmed) return;
+    const r = await api('lead_delete', { lead_id:leadId });
+    if(r.success){ toast('Removed'); openProject(PROJ.current); } else toast(r.message,false);
+}
+function projAddContact(){
+    window._papPid = PROJ.meta.key.split(':')[1];
+    const cats = ['<option value="">Any category</option>'].concat(S.vocab.categories.map(c=>`<option>${esc(c)}</option>`)).join('');
+    const countries = ['<option value="">Any country</option>'].concat(S.vocab.countries.map(c=>`<option>${esc(c)}</option>`)).join('');
+    const otherProjects = S.pipelines.filter(p=>p.type==='manual' && String(p.id)!==String(window._papPid)).map(p=>`<option value="${p.id}">${esc(p.name)} (${p.lead_count||0})</option>`).join('');
+    openModal('Add contacts to project', `
+      <div class="crm-tabs" style="margin-bottom:14px;">
+        <button class="crm-tab active" data-apm="search" onclick="apMode('search')">Search &amp; pick</button>
+        <button class="crm-tab" data-apm="filter" onclick="apMode('filter')">By category / filter</button>
+        <button class="crm-tab" data-apm="project" onclick="apMode('project')">From another project</button>
+      </div>
+      <div id="ap_search">
+        <div class="crm-searchbox"><i class="fas fa-search"></i><input class="crm-input" id="pap_q" placeholder="Search contacts…" oninput="papSearch()"></div>
+        <div id="pap_results" style="max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:3px;margin-top:10px;"></div>
+      </div>
+      <div id="ap_filter" style="display:none;">
+        <div class="crm-note">Add every contact matching a filter at once.</div>
+        <div class="crm-form-grid" style="margin-top:12px;">
+          <div class="crm-field"><label>Category</label><select class="crm-select" id="apf_cat" onchange="apCount()">${cats}</select></div>
+          <div class="crm-field"><label>Country</label><select class="crm-select" id="apf_country" onchange="apCount()">${countries}</select></div>
         </div>
-        ${CAN_MANAGE ? `
-        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:flex;gap:10px;">
-            <button class="btn btn-secondary" onclick="closeModal('modal-lead-detail');openLeadModal(${leadId})"><i class="fas fa-pen"></i> Edit Lead</button>
-            <button class="btn btn-danger" onclick="closeModal('modal-lead-detail');deleteLead(${leadId})"><i class="fas fa-trash"></i> Delete Lead</button>
-        </div>` : ''}
-    `;
+        <div class="crm-field"><label>Search (name / company / email)</label><input class="crm-input" id="apf_q" oninput="apCount()" placeholder="optional"></div>
+        <label class="crm-chk" style="margin-bottom:10px;"><input type="checkbox" id="apf_hasemail" onchange="apCount()"> Only contacts with an email</label>
+        <div style="display:flex;align-items:center;gap:12px;"><span id="apf_count" class="crm-dim">—</span>
+          <div class="spacer" style="flex:1;"></div>
+          <button class="crm-btn primary" id="apf_add" onclick="apFilterAdd()">Add all matching</button></div>
+      </div>
+      <div id="ap_project" style="display:none;">
+        <div class="crm-note">Copy everyone from another CRM project into this one.</div>
+        <div class="crm-field" style="margin-top:12px;"><label>Source project</label>
+          <select class="crm-select" id="apr_proj">${otherProjects||'<option value="">— no other CRM projects —</option>'}</select></div>
+        <button class="crm-btn primary" onclick="apProjectAdd()">Add all its contacts</button>
+      </div>`,
+      `<button class="crm-btn" onclick="crmCloseModal()">Close</button>`);
+    apMode('search'); papSearch();
 }
-
-function field(label, value) {
-    return `<div class="detail-field"><span class="label">${label}:</span><span class="value">${value}</span></div>`;
+function apMode(m){
+    ['search','filter','project'].forEach(x=>{ const el=document.getElementById('ap_'+x); if(el) el.style.display = x===m?'block':'none'; });
+    document.querySelectorAll('#crmModal .crm-tabs .crm-tab').forEach(b=>b.classList.toggle('active', b.dataset.apm===m));
+    if(m==='filter') apCount();
 }
-
-// ══════════════════════════════════════════════════════════
-// ACTIVITY MODAL
-// ══════════════════════════════════════════════════════════
-function openActivityModal(leadId) {
-    document.getElementById('act-lead-id').value = leadId;
-    document.getElementById('act-type').value = 'note';
-    document.getElementById('act-subject').value = '';
-    document.getElementById('act-content').value = '';
-    const now = new Date();
-    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-    document.getElementById('act-date').value = now.toISOString().slice(0,16);
-    openModal('modal-activity');
+let _papTimer=null, _apcTimer=null;
+function papSearch(){
+    clearTimeout(_papTimer);
+    _papTimer = setTimeout(async ()=>{
+        const q = document.getElementById('pap_q').value.trim();
+        const r = await api('contact_pick', { q });
+        const box = document.getElementById('pap_results');
+        if(!r.success||!r.data.rows.length){ box.innerHTML='<div class="crm-empty" style="padding:18px;">No matches.</div>'; return; }
+        box.innerHTML = r.data.rows.map(c=>{
+            const name=((c.first_name||'')+' '+(c.last_name||'')).trim()||'(no name)';
+            return `<div class="crm-row-click" style="padding:9px 12px;border-bottom:1px solid var(--line-2);display:flex;gap:10px;align-items:center;" onclick="papAdd(${c.id})">
+                <div style="flex:1;"><div class="crm-strong">${esc(name)}</div><div class="crm-dim" style="font-size:12px;">${esc(c.company||'')}${c.email?' · '+esc(c.email):''}</div></div>
+                <i class="fas fa-plus crm-sbtn"></i></div>`;
+        }).join('');
+    }, 220);
 }
-
-async function saveActivity() {
-    const leadId = document.getElementById('act-lead-id').value;
-    const subject = document.getElementById('act-subject').value.trim();
-    if (!subject) { showToast('Subject is required', 'error'); return; }
-    const r = await api('add_activity', {
-        lead_id: leadId,
-        activity_type: document.getElementById('act-type').value,
-        subject: subject,
-        content: document.getElementById('act-content').value,
-        activity_date: document.getElementById('act-date').value,
-    });
-    if (r.success) {
-        showToast('Activity added', 'success');
-        closeModal('modal-activity');
-        openLeadDetail(leadId); // Refresh detail
+async function papAdd(cid){
+    const r = await api('lead_create', { pipeline_id:window._papPid, contact_id:cid });
+    if(!r.success){ toast(r.message,false); return; }
+    toast('Added'); loadPipelinesCache();
+}
+function apFilterParams(){
+    return { category:document.getElementById('apf_cat').value, country:document.getElementById('apf_country').value,
+             q:document.getElementById('apf_q').value.trim(), has_email:document.getElementById('apf_hasemail').checked?1:'' };
+}
+function apCount(){
+    clearTimeout(_apcTimer);
+    document.getElementById('apf_count').textContent = 'counting…';
+    _apcTimer = setTimeout(async ()=>{
+        const r = await api('contacts_list', Object.assign(apFilterParams(), { page:1, per_page:1 }));
+        document.getElementById('apf_count').textContent = r.success ? (r.data.total.toLocaleString()+' contacts match') : 'error';
+    }, 300);
+}
+async function apFilterAdd(){
+    const btn=document.getElementById('apf_add'); btn.disabled=true; const old=btn.textContent; btn.textContent='Adding…';
+    const r = await api('bulk_add_to_pipeline', Object.assign(apFilterParams(), { select_all:1, pipeline_id:window._papPid }));
+    btn.disabled=false; btn.textContent=old;
+    if(!r.success){ toast(r.message,false); return; }
+    crmCloseModal(); toast(`${r.data.added} added to project`); openProject(PROJ.current); loadPipelinesCache();
+}
+async function apProjectAdd(){
+    const src=document.getElementById('apr_proj').value;
+    if(!src){ toast('No source project',false); return; }
+    const r = await api('bulk_add_to_pipeline', { from_pipeline:src, pipeline_id:window._papPid });
+    if(!r.success){ toast(r.message,false); return; }
+    crmCloseModal(); toast(`${r.data.added} added to project`); openProject(PROJ.current); loadPipelinesCache();
+}
+function projPersonInfo(rowId){
+    const c = PROJ.contacts.find(x=>x.row_id===rowId); if(!c) return;
+    const ext = PROJ.meta.url && /^https?:/i.test(PROJ.meta.url);
+    const extra = PROJ.meta.url ? `<a class="crm-btn" href="${PROJ.meta.url}" ${ext?'target="_blank" rel="noopener"':''}><i class="fas fa-arrow-up-right-from-square"></i> ${esc(PROJ.meta.open_label||'Open in tool')}</a>` : '';
+    const row = (dt,dd)=> dd ? `<dt>${dt}</dt><dd>${dd}</dd>` : '';
+    bigReadonly(esc(c.name)||'Record', esc(c.status_label||'')+' · '+esc(PROJ.meta.name), `
+        <div class="crm-note">Managed in ${esc(PROJ.meta.name)} — shown read-only here.</div>
+        <dl class="crm-dl" style="margin-top:16px;">
+          ${row('Email', c.email?`<a class="crm-link" href="mailto:${esc(c.email)}">${esc(c.email)}</a>`:'')}
+          ${row('Phone', esc(c.phone||''))}
+          ${row('Broker', esc(c.broker||''))}
+          ${row('Site', esc(c.source_site||''))}
+          ${row('Insurance', esc(c.insurance||''))}
+          ${row('Location', esc(c.sub||''))}
+          ${row('Date of enquiry', c.enq_date?when(c.enq_date):'')}
+          ${row('Last action', c.last_action?when(c.last_action):(c.applied?when(c.applied):''))}
+          ${row('Status', esc(c.status_label||''))}
+        </dl>
+        ${c.kind==='gphi'?'<div id="pkvExtra" style="margin-top:6px;"><div class="crm-dim" style="padding:10px 0;"><i class="fas fa-spinner fa-spin"></i> Loading history…</div></div>':''}`, extra);
+    if(c.kind==='gphi') loadPkvExtra(String(c.row_id).replace(/^g/,''));
+}
+const PKV_STATUS_MEANING = {
+    submitted:'Enquiry submitted via the PhiCRM/GPHI website, not yet assigned.',
+    broker_assigned:'Assigned to a broker to handle.',
+    accepted:'Broker accepted and is working the enquiry.',
+    withdrawn:'The enquiry was withdrawn (by the client or a broker/admin) — see who and why below.',
+    closed:'Closed.', declined:'Declined.'
+};
+async function loadPkvExtra(eid){
+    const r = await api('pkv_enquiry_detail', { id: eid });
+    const box = document.getElementById('pkvExtra'); if(!box) return;
+    if(!r.success){ box.innerHTML = `<div class="crm-dim">${esc(r.message)}</div>`; return; }
+    const e = r.data.enquiry || {}, hist = r.data.history || [];
+    const meaning = PKV_STATUS_MEANING[(e.status||'').toLowerCase()];
+    let html = '';
+    if(meaning) html += `<div class="crm-note" style="margin-top:4px;"><strong>${esc(e.status||'')}</strong> — ${esc(meaning)}</div>`;
+    if(e.close_reason_text || e.close_reason_code) html += `<div class="crm-section-label">Reason</div><div class="crm-dim">${esc(e.close_reason_text||e.close_reason_code)}</div>`;
+    if(e.client_message) html += `<div class="crm-section-label">Enquiry message</div><div class="crm-tl-body">${esc(e.client_message)}</div>`;
+    html += `<div class="crm-section-label">Status history</div>`;
+    if(hist.length){
+        html += `<ul class="crm-tl">` + hist.map(h=>`
+            <li class="crm-tl-item k-sent">
+              <div class="crm-tl-title">${h.from?esc(h.from)+' → ':''}${esc(h.to||'')}</div>
+              <div class="crm-tl-meta">${when(h.at)} · by ${esc(h.who||'—')}</div>
+              ${h.note?`<div class="crm-tl-body">${esc(h.note)}</div>`:''}
+            </li>`).join('') + `</ul>`;
     } else {
-        showToast(r.message, 'error');
+        html += `<div class="crm-dim">No status changes recorded.</div>`;
     }
+    box.innerHTML = html;
+}
+function bigReadonly(title, sub, bodyHtml, footExtra){
+    document.getElementById('crmBigTitle').textContent = title;
+    document.getElementById('crmBigSub').textContent = sub||'';
+    document.getElementById('crmBigTabs').innerHTML = '';
+    document.getElementById('crmBigBody').innerHTML = bodyHtml;
+    document.getElementById('crmBigFoot').innerHTML = (footExtra||'') + `<button class="crm-btn" onclick="crmCloseBig()">Close</button>`;
+    document.getElementById('crmBigOv').classList.add('open');
 }
 
-async function deleteActivity(actId) {
-    const result = await Swal.fire({
-        title: 'Delete activity?',
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonText: 'Delete',
-        confirmButtonColor: '#ef4444',
-    });
-    if (!result.isConfirmed) return;
-    const r = await api('delete_activity', { id: actId });
-    if (r.success) {
-        showToast('Activity deleted', 'success');
-        if (state.activeLeadId) openLeadDetail(state.activeLeadId);
+// ════════════════════════════════════════════════════════════════════════
+// PROJECTS & TOOLS  (legacy tools launcher — kept for reference)
+// ════════════════════════════════════════════════════════════════════════
+async function loadProjectsTab(){
+    const el = document.getElementById('view-projects');
+    el.innerHTML = '<div class="crm-spin"><i class="fas fa-spinner fa-spin fa-lg"></i></div>';
+    const r = await api('projects_overview');
+    if(!r.success){ el.innerHTML = `<div class="crm-empty">${esc(r.message)}</div>`; return; }
+    const d = r.data;
+    let html = '';
+
+    // Business areas
+    if((d.areas||[]).length){
+        html += `<p class="crm-section-label" style="margin:0 0 12px;">Business areas</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;margin-bottom:26px;">
+          ${d.areas.map(areaCard).join('')}</div>`;
+    }
+
+    // Active projects (project-management module)
+    html += `<p class="crm-section-label" style="margin:0 0 12px;">Active projects</p><div class="crm-panel"><div class="crm-panel-body flush">`;
+    if((d.projects||[]).length){
+        html += `<table class="crm-table"><thead><tr><th>Project</th><th class="num">Tasks</th><th>Progress</th><th></th></tr></thead><tbody>`;
+        d.projects.forEach(p=>{
+            const done = parseInt(p.tasks_done)||0, total = parseInt(p.tasks)||0;
+            const pct = total? Math.round(done/total*100):0;
+            html += `<tr class="crm-row-click" onclick="window.location='module-project-management.php'">
+                <td class="crm-strong">${esc(p.name)}</td>
+                <td class="num crm-dim">${done}/${total}</td>
+                <td style="min-width:140px;"><div style="height:6px;background:var(--line-2);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:var(--accent);"></div></div></td>
+                <td class="num"><i class="fas fa-arrow-up-right-from-square crm-dim" style="font-size:11px;"></i></td></tr>`;
+        });
+        html += `</tbody></table>`;
     } else {
-        showToast(r.message, 'error');
+        html += `<div class="crm-empty" style="padding:26px;"><i class="fas fa-diagram-project"></i>No active projects. <a class="crm-link" href="module-project-management.php">Open project management →</a></div>`;
     }
-}
+    html += `</div></div>`;
 
-// ══════════════════════════════════════════════════════════
-// IMPORT MODAL
-// ══════════════════════════════════════════════════════════
-function openImportModal() {
-    populateImportSelect();
-    document.getElementById('import-csv').value = '';
-    openModal('modal-import');
-}
-
-function populateImportSelect() {
-    const sel = document.getElementById('import-sp-id');
-    sel.innerHTML = '<option value="">— Select campaign —</option>';
-    for (const pid in state.subprojects) {
-        const proj = state.projects.find(p => p.id == pid);
-        const projName = proj ? proj.project_name : 'Project';
-        state.subprojects[pid].forEach(sp => {
-            const opt = document.createElement('option');
-            opt.value = sp.id;
-            opt.textContent = `${projName} › ${sp.subproject_name}`;
-            sel.appendChild(opt);
+    // All tools launcher
+    if((d.tools||[]).length){
+        html += `<p class="crm-section-label" style="margin:26px 0 12px;">All tools</p>`;
+        d.tools.forEach(g=>{
+            html += `<div style="margin-bottom:18px;"><div class="crm-dim" style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;"><i class="fa ${esc(g.icon)}"></i> ${esc(g.group)}</div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;">`;
+            g.modules.forEach(m=>{
+                html += `<a href="${esc(m.module_url||'#')}" class="crm-panel" style="margin:0;display:flex;align-items:center;gap:10px;padding:12px 14px;text-decoration:none;color:var(--ink);">
+                    <i class="fa ${esc(m.module_icon||'fa-cube')}" style="color:var(--accent);width:18px;text-align:center;"></i>
+                    <span style="font-weight:600;font-size:13px;">${esc(m.module_name)}</span></a>`;
+            });
+            html += `</div></div>`;
         });
     }
+    el.innerHTML = html;
 }
 
-async function runImport() {
-    const spId = document.getElementById('import-sp-id').value;
-    const csv = document.getElementById('import-csv').value.trim();
-    if (!spId) { showToast('Select a campaign', 'error'); return; }
-    if (!csv) { showToast('Paste CSV data', 'error'); return; }
-    const r = await api('import_leads', { subproject_id: spId, csv_data: csv });
-    if (r.success) {
-        showToast(r.message, 'success');
-        closeModal('modal-import');
-        if (state.currentSubprojectId == spId) await loadPipeline(state.currentSubprojectId);
-        loadDashboard();
+// ════════════════════════════════════════════════════════════════════════
+// CONTACTS
+// ════════════════════════════════════════════════════════════════════════
+const C_COLS = [
+    {key:'name',      label:'Name',      sort:'name',      filter:'f_name'},
+    {key:'company',   label:'Company',   sort:'company',   filter:'f_company'},
+    {key:'email',     label:'Email',     sort:'email',     filter:'f_email'},
+    {key:'category',  label:'Category',  sort:'category'},
+    {key:'location',  label:'Location',  sort:'location'},
+    {key:'emails',    label:'Emails',    sort:'emails',    num:true},
+    {key:'pipelines', label:'Pipelines', sort:'pipelines', num:true},
+];
+function contactsToolbar(){
+    const cats = ['<option value="">All categories</option>'].concat(S.vocab.categories.map(c=>`<option value="${esc(c)}"${S.contacts.category===c?' selected':''}>${esc(c)}</option>`)).join('');
+    const countries = ['<option value="">All countries</option>'].concat(S.vocab.countries.map(c=>`<option value="${esc(c)}"${S.contacts.country===c?' selected':''}>${esc(c)}</option>`)).join('');
+    return `<div class="crm-toolbar">
+        <div class="crm-searchbox"><i class="fas fa-search"></i><input class="crm-input" id="cQ" placeholder="Search name, company, email, phone…" value="${esc(S.contacts.q)}" onkeydown="if(event.key==='Enter')applyContacts()"></div>
+        <select class="crm-select" id="cCat" onchange="applyContacts()">${cats}</select>
+        ${CAN_MANAGE?`<button class="crm-btn" onclick="openCategoriesManager()" title="Create / manage contact categories"><i class="fas fa-tags"></i> Categories</button>`:''}
+        <select class="crm-select" id="cCountry" onchange="applyContacts()">${countries}</select>
+        <label class="crm-chk"><input type="checkbox" id="cHasEmail" ${S.contacts.has_email?'checked':''} onchange="applyContacts()"> Has email</label>
+        <label class="crm-chk"><input type="checkbox" id="cHideSup" ${S.contacts.hide_suppressed?'checked':''} onchange="applyContacts()"> Hide suppressed</label>
+        <div class="spacer"></div>
+        <select class="crm-select" id="cPer" onchange="S.contacts.per=parseInt(this.value);S.contacts.page=1;loadContacts()">
+            ${[50,100,200].map(n=>`<option value="${n}"${S.contacts.per===n?' selected':''}>${n}/page</option>`).join('')}
+        </select>
+    </div>`;
+}
+function pageAllSelected(){ return S._pageIds.length>0 && S._pageIds.every(id=>S.sel.ids.has(id)); }
+function contactsHeadCells(){
+    const c = S.contacts;
+    const arrow = col => c.sort===col ? ` <i class="fas fa-caret-${c.dir==='asc'?'up':'down'}"></i>` : ' <i class="fas fa-sort" style="opacity:.3;"></i>';
+    const chk = `<th style="width:34px;text-align:center;"><input type="checkbox" id="cSelPage" ${pageAllSelected()?'checked':''} onclick="toggleSelectPage(this.checked)" title="Select all on this page"></th>`;
+    return chk + C_COLS.map(col=>`<th class="${col.num?'num ':''}crm-row-click" style="user-select:none;" onclick="contactSort('${col.sort}')">${esc(col.label)}${arrow(col.sort)}</th>`).join('') + '<th></th>';
+}
+function contactsHead(){
+    const c = S.contacts;
+    const filt = C_COLS.map(col=> col.filter
+        ? `<th style="padding:4px 10px;"><input class="crm-input" id="${col.filter}" value="${esc(c[col.filter]||'')}" oninput="cFilterChanged()" placeholder="filter…" style="padding:4px 7px;font-size:12px;"></th>`
+        : `<th></th>`).join('');
+    return `<thead><tr id="cHeadRow">${contactsHeadCells()}</tr><tr class="crm-filterrow"><th></th>${filt}<th></th></tr></thead>`;
+}
+function applyContacts(){
+    S.contacts.q = document.getElementById('cQ').value.trim();
+    S.contacts.category = document.getElementById('cCat').value;
+    S.contacts.country = document.getElementById('cCountry').value;
+    S.contacts.has_email = document.getElementById('cHasEmail').checked;
+    S.contacts.hide_suppressed = document.getElementById('cHideSup').checked;
+    S.contacts.page = 1;
+    clearSel();
+    loadContacts(true);
+}
+function contactSort(col){
+    const c = S.contacts;
+    if(c.sort===col){ c.dir = c.dir==='asc'?'desc':'asc'; } else { c.sort = col; c.dir = 'asc'; }
+    c.page = 1;
+    loadContacts();
+}
+let _cFilterTimer=null;
+function cFilterChanged(){
+    clearTimeout(_cFilterTimer);
+    _cFilterTimer = setTimeout(()=>{
+        ['f_name','f_company','f_email'].forEach(k=>{ const el=document.getElementById(k); if(el) S.contacts[k]=el.value.trim(); });
+        S.contacts.page = 1;
+        clearSel();
+        loadContacts();   // only tbody refreshes, filter inputs keep focus
+    }, 300);
+}
+
+// ── Contact selection + bulk actions ──
+function selCount(){ return S.sel.allFilter ? S.contacts.total : S.sel.ids.size; }
+function selPayload(){
+    if(S.sel.allFilter){
+        const c = S.contacts;
+        return { select_all:1, q:c.q, category:c.category, country:c.country, has_email:c.has_email?1:'', hide_suppressed:c.hide_suppressed?1:'', f_name:c.f_name||'', f_company:c.f_company||'', f_email:c.f_email||'' };
+    }
+    return { contact_ids:[...S.sel.ids].join(',') };
+}
+function toggleSel(id, on){ if(on) S.sel.ids.add(id); else { S.sel.ids.delete(id); S.sel.allFilter=false; } renderBulkBar(); syncSelPageChk(); }
+function toggleSelectPage(on){
+    S.sel.allFilter = false;
+    S._pageIds.forEach(id=>{ if(on) S.sel.ids.add(id); else S.sel.ids.delete(id); });
+    document.querySelectorAll('#cTbody .cChk').forEach(cb=>{ cb.checked = on; });
+    renderBulkBar();
+}
+function syncSelPageChk(){ const m=document.getElementById('cSelPage'); if(m) m.checked = pageAllSelected(); }
+function clearSel(){ S.sel.ids.clear(); S.sel.allFilter=false; renderBulkBar(); const m=document.getElementById('cSelPage'); if(m)m.checked=false; document.querySelectorAll('#cTbody .cChk').forEach(cb=>cb.checked=false); }
+function selectAllFilter(){ S.sel.allFilter = true; renderBulkBar(); }
+function renderBulkBar(){
+    const bar = document.getElementById('cBulk');
+    if(!bar) return;
+    const n = selCount();
+    if(n<=0){ bar.style.display='none'; bar.innerHTML=''; return; }
+    bar.style.display='flex';
+    const total = S.contacts.total;
+    let selText;
+    if(S.sel.allFilter){ selText = `<strong>All ${total.toLocaleString()}</strong> contacts matching the filter selected`; }
+    else {
+        selText = `<strong>${n.toLocaleString()}</strong> selected`;
+        if(pageAllSelected() && total > S._pageIds.length){ selText += ` · <a class="crm-link" onclick="selectAllFilter()">Select all ${total.toLocaleString()} matching the filter</a>`; }
+    }
+    bar.innerHTML = `<div style="flex:1;">${selText}</div>
+        <button class="crm-btn sm" onclick="openBulkPipeline()"><i class="fas fa-diagram-project"></i> Add to CRM project</button>
+        <button class="crm-btn sm primary" onclick="openBulkAudience()"><i class="fas fa-paper-plane"></i> Create / add to audience</button>
+        <button class="crm-btn sm" onclick="clearSel()">Clear</button>`;
+}
+async function loadContacts(rebuildShell){
+    const el = document.getElementById('view-contacts');
+    if(!el.dataset.init || rebuildShell){
+        await ensureVocab();
+        el.innerHTML = contactsToolbar()
+            + `<div id="cBulk" class="crm-bulkbar" style="display:none;"></div>`
+            + `<div class="crm-panel"><div class="crm-panel-body flush" style="overflow:auto;"><table class="crm-table" id="cTable">${contactsHead()}<tbody id="cTbody"></tbody></table></div></div><div id="cPager"></div>`;
+        el.dataset.init='1';
     } else {
-        showToast(r.message, 'error');
+        const hr = document.getElementById('cHeadRow');
+        if(hr) hr.innerHTML = contactsHeadCells();
     }
+    const tbody = document.getElementById('cTbody');
+    tbody.innerHTML = '<tr><td colspan="9"><div class="crm-spin"><i class="fas fa-spinner fa-spin"></i></div></td></tr>';
+    const c = S.contacts;
+    const r = await api('contacts_list', { q:c.q, category:c.category, country:c.country, has_email:c.has_email?1:'', hide_suppressed:c.hide_suppressed?1:'', f_name:c.f_name||'', f_company:c.f_company||'', f_email:c.f_email||'', page:c.page, per_page:c.per, sort:c.sort, dir:c.dir });
+    if(!r.success){ tbody.innerHTML = `<tr><td colspan="9"><div class="crm-empty">${esc(r.message)}</div></td></tr>`; return; }
+    c.total = r.data.total;
+    const rows = r.data.rows;
+    S._pageIds = rows.map(x=>parseInt(x.id));
+    if(!rows.length){ tbody.innerHTML = '<tr><td colspan="9"><div class="crm-empty"><i class="fas fa-address-book"></i>No contacts match.</div></td></tr>'; document.getElementById('cPager').innerHTML=''; renderBulkBar(); syncSelPageChk(); return; }
+    tbody.innerHTML = rows.map(ct=>{
+        const id = parseInt(ct.id);
+        const name = ((ct.first_name||'')+' '+(ct.last_name||'')).trim() || '<span class="crm-dim">— no name —</span>';
+        const checked = (S.sel.allFilter || S.sel.ids.has(id)) ? 'checked' : '';
+        return `<tr class="crm-row-click" onclick="openContact(${id})">
+            <td style="text-align:center;" onclick="event.stopPropagation();"><input type="checkbox" class="cChk" ${checked} onclick="toggleSel(${id}, this.checked)"></td>
+            <td class="crm-strong">${name}</td>
+            <td>${esc(ct.company||'')||'<span class="crm-dim">—</span>'}</td>
+            <td>${ct.email?esc(ct.email):'<span class="crm-dim">— none —</span>'}${parseInt(ct.suppressed)?' <span class="crm-badge is-lost" title="Suppressed"><span class="dot"></span></span>':''}</td>
+            <td>${esc(ct.category||'')||'<span class="crm-dim">—</span>'}</td>
+            <td class="crm-dim">${esc([ct.city,ct.country].filter(Boolean).join(', '))||'—'}</td>
+            <td class="num crm-dim">${ct.times_sent||0}</td>
+            <td class="num crm-dim">${ct.lead_count||0}</td>
+            <td class="num"><i class="fas fa-pen crm-dim" style="font-size:11px;" title="Edit"></i></td>
+        </tr>`;
+    }).join('');
+    renderPager('cPager', c, 'contacts', loadContacts);
+    renderBulkBar(); syncSelPageChk();
 }
 
-// ══════════════════════════════════════════════════════════
-// SETTINGS MODAL
-// ══════════════════════════════════════════════════════════
-async function openSettingsModal() {
-    openModal('modal-settings');
-    await loadTypes();
-    // Populate type filter for stages tab
-    const sel = document.getElementById('stages-filter-type');
-    sel.innerHTML = '<option value="">Global Stages</option>' +
-        state.types.map(t => `<option value="${t.id}">${esc(t.type_name)}</option>`).join('');
-    // Auto-select first real type so stages are visible by default
-    if (state.types.length > 0) {
-        sel.value = state.types[0].id;
-    }
-    await loadStagesForSettings();
+// ── Bulk: add selection to a pipeline ──
+function openBulkPipeline(){
+    const manual = S.pipelines.filter(p=>p.type==='manual');
+    if(!manual.length){ toast('Create a pipeline first (Pipelines tab).',false); return; }
+    const opts = manual.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+    openModal(`Add ${selCount().toLocaleString()} contact(s) to a pipeline`, `
+      <div class="crm-field"><label>Pipeline</label><select class="crm-select" id="bp_pipe" onchange="bpLoadStages()">${opts}</select></div>
+      <div class="crm-field"><label>Stage</label><select class="crm-select" id="bp_stage"></select></div>
+      <div class="crm-note">Each selected contact becomes a lead in this pipeline (duplicates are skipped).</div>`,
+      `<button class="crm-btn" onclick="crmCloseModal()">Cancel</button><button class="crm-btn primary" onclick="doBulkPipeline()">Add to pipeline</button>`);
+    bpLoadStages();
+}
+async function bpLoadStages(){
+    const pid = document.getElementById('bp_pipe').value;
+    const r = await api('pipeline_board',{pipeline:pid});
+    if(r.success) document.getElementById('bp_stage').innerHTML = r.data.stages.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('');
+}
+async function doBulkPipeline(){
+    const data = Object.assign(selPayload(), { pipeline_id:document.getElementById('bp_pipe').value, stage_id:document.getElementById('bp_stage').value });
+    const btn = event.target; btn.disabled = true; btn.textContent = 'Adding…';
+    const r = await api('bulk_add_to_pipeline', data);
+    if(!r.success){ toast(r.message,false); btn.disabled=false; btn.textContent='Add to pipeline'; return; }
+    crmCloseModal(); clearSel();
+    Swal.fire({icon:'success',title:'Added to pipeline',text:`${r.data.added} lead(s) created (${r.data.selected-r.data.added} already existed).`});
+    loadPipelinesCache();
 }
 
-function switchSettingsTab(tab, el) {
-    document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
-    el.classList.add('active');
-    document.getElementById('settings-tab-types').style.display = tab === 'types' ? '' : 'none';
-    document.getElementById('settings-tab-stages').style.display = tab === 'stages' ? '' : 'none';
+// ── Bulk: create / add to an email audience ──
+async function openBulkAudience(){
+    const r = await api('audiences_list');
+    const auds = r.success ? r.data.audiences : [];
+    const opts = ['<option value="0">— Create a new audience —</option>'].concat(auds.map(a=>`<option value="${a.id}">${esc(a.name)} (${a.members})</option>`)).join('');
+    openModal(`Add ${selCount().toLocaleString()} contact(s) to an audience`, `
+      <div class="crm-note">Creates or updates an audience in the Email Campaign Manager. Only contacts with an email and not suppressed are added.</div>
+      <div class="crm-field" style="margin-top:14px;"><label>Audience</label><select class="crm-select" id="ba_aud" onchange="document.getElementById('ba_newwrap').style.display=this.value==='0'?'block':'none'">${opts}</select></div>
+      <div class="crm-field" id="ba_newwrap"><label>New audience name</label><input class="crm-input" id="ba_name" placeholder="e.g. German brokers – no email yet excluded"></div>`,
+      `<button class="crm-btn" onclick="crmCloseModal()">Cancel</button><button class="crm-btn primary" onclick="doBulkAudience()">Add to audience</button>`);
+}
+async function doBulkAudience(){
+    const data = Object.assign(selPayload(), { audience_id:document.getElementById('ba_aud').value, new_name:(document.getElementById('ba_name')||{}).value||'' });
+    const btn = event.target; btn.disabled=true; btn.textContent='Adding…';
+    const r = await api('push_to_audience', data);
+    if(!r.success){ toast(r.message,false); btn.disabled=false; btn.textContent='Add to audience'; return; }
+    crmCloseModal(); clearSel();
+    Swal.fire({icon:'success',title:'Audience updated',html:`${r.data.added} contact(s) added · audience now has ${r.data.members}.<br><br><a class="crm-link" href="module-email-campaigns.php">Open Email Campaigns →</a>`});
+}
+function renderPager(id, st, key, reload){
+    const from = (st.page-1)*st.per + 1, to = Math.min(st.total, st.page*st.per);
+    const pages = Math.max(1, Math.ceil(st.total/st.per));
+    const box = document.getElementById(id);
+    box.innerHTML = `<div class="crm-pager">
+        <span>${st.total? from+'–'+to : 0} of ${st.total.toLocaleString()}</span><div class="spacer"></div>
+        <button class="crm-btn sm" ${st.page<=1?'disabled':''} data-dir="-1"><i class="fas fa-chevron-left"></i></button>
+        <span>Page ${st.page} / ${pages}</span>
+        <button class="crm-btn sm" ${st.page>=pages?'disabled':''} data-dir="1"><i class="fas fa-chevron-right"></i></button>
+    </div>`;
+    box.querySelectorAll('button[data-dir]').forEach(b=>b.addEventListener('click',()=>{
+        const np = st.page + parseInt(b.dataset.dir);
+        if(np>=1 && np<=pages){ st.page = np; reload(); }
+    }));
 }
 
-async function loadTypes() {
-    const r = await api('get_types');
-    if (!r.success) return;
-    state.types = r.data;
-    const el = document.getElementById('settings-types-list');
-    if (!r.data.length) {
-        el.innerHTML = '<div class="empty-state"><i class="fas fa-tags"></i><p>No types defined yet.</p></div>';
-        return;
-    }
-    el.innerHTML = r.data.map(t => `
-        <div class="settings-item">
-            <div class="settings-item-icon" style="background:${hexToRgba(t.color,0.12)};color:${t.color}"><i class="fas ${t.icon}"></i></div>
-            <div class="settings-item-info">
-                <div class="settings-item-name">${esc(t.type_name)}</div>
-                <div class="settings-item-meta">${t.stage_count} stages · ${t.sub_count} campaigns</div>
-            </div>
-            ${CAN_MANAGE ? `<div class="settings-item-actions">
-                <button class="btn btn-secondary btn-sm btn-icon" onclick="openTypeForm(${t.id})" title="Edit"><i class="fas fa-pen" style="font-size:11px;"></i></button>
-                <button class="btn btn-danger btn-sm btn-icon" onclick="deleteType(${t.id})" title="Delete"><i class="fas fa-trash" style="font-size:11px;"></i></button>
-            </div>` : ''}
-        </div>
-    `).join('');
+// ════════════════════════════════════════════════════════════════════════
+// CONTACT DRAWER
+// ════════════════════════════════════════════════════════════════════════
+async function openContact(id){
+    S.drawerContactId = id;
+    document.getElementById('crmBigTitle').textContent = 'Contact';
+    document.getElementById('crmBigSub').textContent = '';
+    document.getElementById('crmBigTabs').innerHTML = '';
+    document.getElementById('crmBigFoot').innerHTML = '';
+    document.getElementById('crmBigBody').innerHTML = '<div class="crm-spin" style="margin:60px;"><i class="fas fa-spinner fa-spin fa-lg"></i></div>';
+    document.getElementById('crmBigOv').classList.add('open');
+    const r = await api('contact_get', { id });
+    if(!r.success){ document.getElementById('crmBigBody').innerHTML = `<div class="crm-empty">${esc(r.message)}</div>`; return; }
+    renderContactModal(r.data);
 }
+function crmCloseBig(){ document.getElementById('crmBigOv').classList.remove('open'); }
+function renderContactModal(d){
+    const ct = d.contact;
+    const name = ((ct.first_name||'')+' '+(ct.last_name||'')).trim() || '(no name)';
+    document.getElementById('crmBigTitle').textContent = name;
+    const sup = d.suppression ? ` · Suppressed (${d.suppression})` : '';
+    document.getElementById('crmBigSub').textContent = [ct.company, ct.job_title].filter(Boolean).join(' · ') + (ct.category?(' · '+ct.category):'') + sup;
+    document.getElementById('crmBigTabs').innerHTML = `
+        <button class="crm-bigtab active" data-sub="overview" onclick="bigSub('overview')">Details</button>
+        <button class="crm-bigtab" data-sub="timeline" onclick="bigSub('timeline')">Timeline</button>
+        <button class="crm-bigtab" data-sub="activity" onclick="bigSub('activity')">Activity</button>`;
+    document.getElementById('crmBig')._data = d;
+    bigSub('overview');
+}
+function bigSub(sub){
+    document.querySelectorAll('#crmBigTabs .crm-bigtab').forEach(b=>b.classList.toggle('active', b.dataset.sub===sub));
+    const d = document.getElementById('crmBig')._data;
+    const ct = d.contact;
+    const body = document.getElementById('crmBigBody');
+    const foot = document.getElementById('crmBigFoot');
+    foot.innerHTML = CAN_MANAGE && sub==='overview'
+        ? `<button class="crm-btn" onclick="crmCloseBig()">Cancel</button><button class="crm-btn primary" onclick="saveDrawerContact(${ct.id})"><i class="fas fa-check"></i> Save changes</button>`
+        : `<button class="crm-btn" onclick="crmCloseBig()">Close</button>`;
+    if(sub==='overview'){
+        const leads = d.leads.length ? d.leads.map(l=>`<tr><td class="crm-strong">${esc(l.pipeline_name)}</td><td>${esc(l.stage_name||'—')}</td><td>${badgeStatus(l.status)}</td><td class="num crm-dim">${money(l.value)}</td></tr>`).join('') : `<tr><td class="crm-dim" colspan="4" style="padding:12px;">Not in any pipeline yet.</td></tr>`;
+        const ro = CAN_MANAGE ? '' : 'disabled';
+        const F = (fid,label,val,type='text',span)=>`<div class="crm-field${span?' span-2':''}"><label>${label}</label><input class="crm-input" id="${fid}" type="${type}" value="${esc(val||'')}" ${ro}></div>`;
+        const catOpts = ['<option value=""></option>'].concat(S.vocab.categories.map(x=>`<option${ct.category===x?' selected':''}>${esc(x)}</option>`)).join('');
+        const countryOpts = ['<option value=""></option>'].concat(S.vocab.countries.map(x=>`<option${ct.country===x?' selected':''}>${esc(x)}</option>`)).join('');
+        body.innerHTML = `
+          ${CAN_MANAGE?'<div class="crm-section-label" style="margin-top:4px;">Edit contact</div>':''}
+          <div class="crm-form-grid">
+            ${F('de_first_name','First name',ct.first_name)}
+            ${F('de_last_name','Last name',ct.last_name)}
+            ${F('de_email','Email',ct.email,'email')}
+            ${F('de_phone','Phone',ct.phone)}
+            ${F('de_company','Company',ct.company)}
+            ${F('de_job_title','Job title',ct.job_title)}
+            <div class="crm-field"><label>Category</label><input class="crm-input" id="de_category" list="de_catlist" value="${esc(ct.category||'')}" ${ro}><datalist id="de_catlist">${catOpts}</datalist></div>
+            <div class="crm-field"><label>Country</label><input class="crm-input" id="de_country" list="de_countrylist" value="${esc(ct.country||'')}" ${ro}><datalist id="de_countrylist">${countryOpts}</datalist></div>
+            ${F('de_city','City',ct.city)}
+            ${F('de_region','Region',ct.region)}
+            ${F('de_address','Address',ct.address,'text',true)}
+            ${F('de_postcode','Postcode',ct.postcode)}
+            ${F('de_website','Website',ct.website)}
+            ${F('de_source','Source',ct.source,'text',true)}
+          </div>
+          <div class="crm-section-label">In these projects</div>
+          <table class="crm-table" style="border:1px solid var(--line);border-radius:4px;"><tbody>${leads}</tbody></table>
+          ${CAN_MANAGE?`<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="crm-btn" onclick="openAddToPipeline(${ct.id})"><i class="fas fa-diagram-project"></i> Add to pipeline</button>
+            <button class="crm-btn" onclick="openPushAudience([${ct.id}])" ${ct.email?'':'disabled'}><i class="fas fa-paper-plane"></i> Add to email audience</button>
+          </div>`:''}`;
+    } else if(sub==='timeline'){
+        body.innerHTML = renderTimeline(d.timeline, d.activities);
+    } else if(sub==='activity'){
+        const list = d.activities.length ? d.activities.map(a=>`
+            <li class="crm-tl-item k-${esc(a.type)}">
+              <div class="crm-tl-title">${esc(a.subject||a.type)} <span class="crm-dim" style="font-weight:400;">· ${esc(a.type)}</span></div>
+              <div class="crm-tl-meta">${when(a.created_at)}${a.user_name?' · '+esc(a.user_name):''}${a.due_at?' · due '+dateOnly(a.due_at):''}</div>
+              ${a.body?`<div class="crm-tl-body">${esc(a.body)}</div>`:''}
+              ${CAN_MANAGE?`<div style="margin-top:4px;"><a class="crm-link" style="font-size:12px;" onclick="delActivity(${a.id})">Delete</a></div>`:''}
+            </li>`).join('') : '<div class="crm-empty" style="padding:20px;">No activity logged yet.</div>';
+        body.innerHTML = `${CAN_MANAGE?`<button class="crm-btn primary" style="margin-bottom:14px;" onclick="openActivityForm(${ct.id})"><i class="fas fa-plus"></i> Log activity</button>`:''}<ul class="crm-tl">${list}</ul>`;
+    }
+}
+function badgeStatus(st){
+    const map = {open:['is-open','Open'],won:['is-won','Won'],lost:['is-lost','Lost'],on_hold:['is-warn','On hold']};
+    const m = map[st]||['is-muted',st];
+    return `<span class="crm-badge ${m[0]}"><span class="dot"></span>${esc(m[1])}</span>`;
+}
+function renderTimeline(timeline, activities){
+    const items = [];
+    (timeline||[]).forEach(e=>items.push({at:e.at, kind:e.kind, title:e.title, meta:e.campaign?('Campaign: '+e.campaign):'', body:e.detail}));
+    (activities||[]).forEach(a=>items.push({at:a.created_at, kind:a.type, title:(a.subject||a.type), meta:(a.user_name||''), body:a.body}));
+    items.sort((a,b)=> (new Date(String(b.at||'').replace(' ','T'))) - (new Date(String(a.at||'').replace(' ','T'))) );
+    if(!items.length) return '<div class="crm-empty" style="padding:24px;"><i class="far fa-clock"></i>No email history or activity yet.</div>';
+    const labelKind = {sent:'Email sent',opened:'Email opened',clicked:'Link clicked',replied:'Replied',bounced:'Bounced',unsubscribed:'Unsubscribed',suppressed:'Suppressed'};
+    return `<ul class="crm-tl">` + items.map(it=>`
+        <li class="crm-tl-item k-${esc(it.kind)}">
+          <div class="crm-tl-title">${esc(it.title||labelKind[it.kind]||it.kind)}</div>
+          <div class="crm-tl-meta">${when(it.at)}${it.meta?' · '+esc(it.meta):''}</div>
+          ${it.body?`<div class="crm-tl-body">${esc(it.body)}</div>`:''}
+        </li>`).join('') + `</ul>`;
+}
+function openDrawer(){ document.getElementById('crmOverlay').classList.add('open'); document.getElementById('crmDrawer').classList.add('open'); }
+function crmCloseDrawer(){ document.getElementById('crmOverlay').classList.remove('open'); document.getElementById('crmDrawer').classList.remove('open'); }
+function drawerError(msg){ return `<div class="crm-drawer-head"><h2>Error</h2><div class="spacer"></div><button class="crm-x" onclick="crmCloseDrawer()"><i class="fas fa-times"></i></button></div><div class="crm-drawer-body"><div class="crm-empty">${esc(msg)}</div></div>`; }
 
-function openTypeForm(id = null) {
-    const form = document.getElementById('settings-type-form');
-    form.style.display = '';
-    document.getElementById('stype-id').value = id || '';
-    if (id) {
-        const t = state.types.find(x => x.id == id);
-        if (t) {
-            document.getElementById('stype-name').value = t.type_name;
-            document.getElementById('stype-icon').value = t.icon || 'fa-tag';
-            document.getElementById('stype-color').value = t.color || '#667eea';
-            document.getElementById('stype-desc').value = t.description || '';
-        }
-    } else {
-        document.getElementById('stype-name').value = '';
-        document.getElementById('stype-icon').value = 'fa-tag';
-        document.getElementById('stype-color').value = '#667eea';
-        document.getElementById('stype-desc').value = '';
-    }
-    document.getElementById('stype-name').focus();
+// ════════════════════════════════════════════════════════════════════════
+// LEADS
+// ════════════════════════════════════════════════════════════════════════
+function leadsToolbar(){
+    const pipes = ['<option value="">All pipelines</option>'].concat(S.pipelines.filter(p=>p.type==='manual').map(p=>`<option value="${p.id}"${S.leads.pipeline_id==p.id?' selected':''}>${esc(p.name)}</option>`)).join('');
+    const statuses = [['','Any status'],['open','Open'],['won','Won'],['lost','Lost'],['on_hold','On hold']].map(s=>`<option value="${s[0]}"${S.leads.status===s[0]?' selected':''}>${s[1]}</option>`).join('');
+    return `<div class="crm-toolbar">
+        <div class="crm-searchbox"><i class="fas fa-search"></i><input class="crm-input" id="lQ" placeholder="Search leads…" value="${esc(S.leads.q)}" onkeydown="if(event.key==='Enter')applyLeads()"></div>
+        <select class="crm-select" id="lPipe" onchange="applyLeads()">${pipes}</select>
+        <select class="crm-select" id="lStatus" onchange="applyLeads()">${statuses}</select>
+        <div class="spacer"></div>
+        ${CAN_MANAGE?`<button class="crm-btn" onclick="openPushAudience(null,'leads')"><i class="fas fa-paper-plane"></i> Push to audience</button>`:''}
+    </div>`;
 }
-
-async function saveType() {
-    const id = document.getElementById('stype-id').value;
-    const name = document.getElementById('stype-name').value.trim();
-    if (!name) { showToast('Type name required', 'error'); return; }
-    const data = {
-        type_name: name,
-        icon: document.getElementById('stype-icon').value || 'fa-tag',
-        color: document.getElementById('stype-color').value,
-        description: document.getElementById('stype-desc').value,
-    };
-    if (id) data.id = id;
-    const r = await api(id ? 'update_type' : 'create_type', data);
-    if (r.success) {
-        showToast(r.message, 'success');
-        document.getElementById('settings-type-form').style.display = 'none';
-        await loadTypes();
-        // Refresh type select in stages filter
-        const sel = document.getElementById('stages-filter-type');
-        sel.innerHTML = '<option value="">Global Stages</option>' +
-            state.types.map(t => `<option value="${t.id}">${esc(t.type_name)}</option>`).join('');
-    } else {
-        showToast(r.message, 'error');
-    }
+function applyLeads(){
+    S.leads.q = document.getElementById('lQ').value.trim();
+    S.leads.pipeline_id = document.getElementById('lPipe').value;
+    S.leads.status = document.getElementById('lStatus').value;
+    S.leads.page = 1;
+    loadLeads();
 }
-
-async function deleteType(id) {
-    const t = state.types.find(x => x.id == id);
-    if (t && parseInt(t.sub_count) > 0) {
-        showToast('Cannot delete: type is used by campaigns', 'error');
-        return;
-    }
-    const result = await Swal.fire({ title: 'Delete type?', text: 'This will also delete all its pipeline stages.', icon: 'warning', showCancelButton: true, confirmButtonColor: '#ef4444', confirmButtonText: 'Delete' });
-    if (!result.isConfirmed) return;
-    const r = await api('delete_type', { id });
-    if (r.success) {
-        showToast(r.message, 'success');
-        await loadTypes();
-    } else {
-        showToast(r.message, 'error');
-    }
-}
-
-async function loadStagesForSettings() {
-    const typeId = document.getElementById('stages-filter-type').value;
-    const data = typeId ? { type_id: typeId } : { type_id: '' };
-    const r = await api('get_stages', data);
-    const el = document.getElementById('settings-stages-list');
-    if (!r.success) { el.innerHTML = '<div class="empty-state"><p>Failed to load stages.</p></div>'; return; }
-    if (!r.data.length) {
-        el.innerHTML = '<div class="empty-state"><i class="fas fa-layer-group"></i><p>No stages defined for this type yet.</p></div>';
-        return;
-    }
-    el.innerHTML = r.data.map(s => `
-        <div class="settings-item">
-            <div class="stage-order-badge">${s.display_order}</div>
-            <div class="settings-item-icon" style="background:${s.color}"><i class="fas fa-circle" style="font-size:8px;"></i></div>
-            <div class="settings-item-info">
-                <div class="settings-item-name">
-                    ${esc(s.stage_name)}
-                    ${s.is_win_stage ? '<span class="win-badge">WIN</span>' : ''}
-                    ${s.is_loss_stage ? '<span class="loss-badge">LOSS</span>' : ''}
-                </div>
-                <div class="settings-item-meta">${s.description || 'No description'}</div>
-            </div>
-            ${CAN_MANAGE ? `<div class="settings-item-actions">
-                <button class="btn btn-secondary btn-sm btn-icon" onclick="openStageForm(${s.id})" title="Edit"><i class="fas fa-pen" style="font-size:11px;"></i></button>
-                <button class="btn btn-danger btn-sm btn-icon" onclick="deleteStage(${s.id})" title="Delete"><i class="fas fa-trash" style="font-size:11px;"></i></button>
-            </div>` : ''}
-        </div>
-    `).join('');
-}
-
-function openStageForm(id = null) {
-    const form = document.getElementById('settings-stage-form');
-    form.style.display = '';
-    form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    document.getElementById('sstage-id').value = id || '';
-    if (id) {
-        // Find in loaded list — we reload from DOM data attributes
-        const items = document.querySelectorAll('#settings-stages-list .settings-item');
-        // Just clear for now, user can re-fill
-    }
-    if (!id) {
-        document.getElementById('sstage-name').value = '';
-        document.getElementById('sstage-color').value = '#667eea';
-        document.getElementById('sstage-order').value = '1';
-        document.getElementById('sstage-desc').value = '';
-        document.getElementById('sstage-win').checked = false;
-        document.getElementById('sstage-loss').checked = false;
-    }
-    document.getElementById('sstage-name').focus();
-}
-
-async function saveStage() {
-    const id = document.getElementById('sstage-id').value;
-    const name = document.getElementById('sstage-name').value.trim();
-    if (!name) { showToast('Stage name required', 'error'); return; }
-    const typeId = document.getElementById('stages-filter-type').value;
-    const data = {
-        stage_name: name,
-        description: document.getElementById('sstage-desc').value,
-        color: document.getElementById('sstage-color').value,
-        display_order: document.getElementById('sstage-order').value || 1,
-        is_win_stage: document.getElementById('sstage-win').checked ? 1 : 0,
-        is_loss_stage: document.getElementById('sstage-loss').checked ? 1 : 0,
-        type_id: typeId,
-    };
-    if (id) data.id = id;
-    const r = await api(id ? 'update_stage' : 'create_stage', data);
-    if (r.success) {
-        showToast(r.message, 'success');
-        document.getElementById('settings-stage-form').style.display = 'none';
-        await loadStagesForSettings();
-    } else {
-        showToast(r.message, 'error');
-    }
-}
-
-async function deleteStage(id) {
-    const result = await Swal.fire({ title: 'Delete stage?', text: 'Cannot delete if leads are currently in this stage.', icon: 'warning', showCancelButton: true, confirmButtonColor: '#ef4444', confirmButtonText: 'Delete' });
-    if (!result.isConfirmed) return;
-    const r = await api('delete_stage', { id });
-    if (r.success) {
-        showToast(r.message, 'success');
-        await loadStagesForSettings();
-    } else {
-        showToast(r.message, 'error');
-    }
-}
-
-// ══════════════════════════════════════════════════════════
-// MODAL HELPERS
-// ══════════════════════════════════════════════════════════
-function openModal(id) {
-    document.getElementById(id).classList.add('open');
-    document.body.style.overflow = 'hidden';
-}
-function closeModal(id) {
-    document.getElementById(id).classList.remove('open');
-    document.body.style.overflow = '';
-}
-// Close on overlay click
-document.querySelectorAll('.modal-overlay').forEach(overlay => {
-    overlay.addEventListener('click', function(e) {
-        if (e.target === this) closeModal(this.id);
+async function loadLeads(){
+    const el = document.getElementById('view-leads');
+    if(!el.dataset.init){ el.innerHTML = leadsToolbar() + '<div class="crm-panel"><div class="crm-panel-body flush" id="lTableWrap"></div></div><div id="lPager"></div>'; el.dataset.init='1'; }
+    document.getElementById('lTableWrap').innerHTML = '<div class="crm-spin"><i class="fas fa-spinner fa-spin"></i></div>';
+    const l = S.leads;
+    const r = await api('leads_list', { q:l.q, pipeline_id:l.pipeline_id, status:l.status, page:l.page, per_page:l.per });
+    if(!r.success){ document.getElementById('lTableWrap').innerHTML = `<div class="crm-empty">${esc(r.message)}</div>`; return; }
+    l.total = r.data.total;
+    const rows = r.data.rows;
+    if(!rows.length){ document.getElementById('lTableWrap').innerHTML = '<div class="crm-empty"><i class="fas fa-user-tag"></i>No leads match. Add contacts to a pipeline to create leads.</div>'; document.getElementById('lPager').innerHTML=''; return; }
+    let h = `<table class="crm-table"><thead><tr><th>Name</th><th>Company</th><th>Pipeline</th><th>Stage</th><th>Status</th><th>Owner</th><th class="num">Value</th><th>Updated</th></tr></thead><tbody>`;
+    rows.forEach(ld=>{
+        const name = ((ld.first_name||'')+' '+(ld.last_name||'')).trim()||'<span class="crm-dim">—</span>';
+        h += `<tr class="crm-row-click" onclick="openContact(${ld.contact_id})">
+            <td class="crm-strong">${name}</td>
+            <td>${esc(ld.company||'')||'<span class="crm-dim">—</span>'}</td>
+            <td>${esc(ld.pipeline_name)}</td>
+            <td>${esc(ld.stage_name||'—')}</td>
+            <td>${badgeStatus(ld.status)}</td>
+            <td class="crm-dim">${esc(ld.owner_name||'')||'—'}</td>
+            <td class="num">${money(ld.value)}</td>
+            <td class="crm-dim">${dateOnly(ld.updated_at)}</td>
+        </tr>`;
     });
-});
-// ESC to close
-document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') {
-        document.querySelectorAll('.modal-overlay.open').forEach(m => closeModal(m.id));
-    }
-});
+    h += `</tbody></table>`;
+    document.getElementById('lTableWrap').innerHTML = h;
+    renderPager('lPager', l, 'leads', loadLeads);
+}
 
-// ══════════════════════════════════════════════════════════
-// UTILITIES
-// ══════════════════════════════════════════════════════════
-function esc(str) {
-    if (!str) return '';
-    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+// ════════════════════════════════════════════════════════════════════════
+// PIPELINES / BOARD
+// ════════════════════════════════════════════════════════════════════════
+async function loadPipelines(){
+    await loadPipelinesCache();
+    if((S.currentPipeline==null || !S.pipelines.some(p=>p.id==S.currentPipeline)) && S.pipelines.length){
+        // default to the pipeline with the most open items so the board isn't empty
+        const best = [...S.pipelines].sort((a,b)=>(parseInt(b.open_count)||0)-(parseInt(a.open_count)||0))[0];
+        S.currentPipeline = best.id;
+    }
+    renderPipelineShell();
+    if(S.currentPipeline!=null) openBoard(S.currentPipeline);
 }
-function formatDate(str) {
-    if (!str) return '';
-    const d = new Date(str);
-    return d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) + ' ' +
-           d.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
+function renderPipelineShell(){
+    const el = document.getElementById('view-pipelines');
+    const chips = S.pipelines.map(p=>`<button class="crm-tab ${S.currentPipeline==p.id?'active':''}" style="margin-right:16px;" onclick="openBoard('${p.id}')">${esc(p.name)} <span class="crm-dim" style="font-weight:400;">${p.open_count}</span></button>`).join('');
+    el.innerHTML = `
+      <div style="background:var(--panel);border-bottom:1px solid var(--line);padding:10px 24px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;flex-wrap:wrap;flex:1;">${chips||'<span class="crm-dim">No pipelines.</span>'}</div>
+        <div id="boardActions"></div>
+      </div>
+      <div class="crm-board-wrap" id="boardWrap"><div class="crm-spin" style="margin-top:60px;"><i class="fas fa-spinner fa-spin fa-lg"></i></div></div>`;
 }
-function colorIsLight(hex) {
-    if (!hex) return false;
-    const c = hex.replace('#','');
-    const r = parseInt(c.substr(0,2),16);
-    const g = parseInt(c.substr(2,2),16);
-    const b = parseInt(c.substr(4,2),16);
-    return (r*299 + g*587 + b*114) / 1000 > 155;
+async function openBoard(pid){
+    S.currentPipeline = pid;
+    if(S.tab!=='pipelines'){ crmTab('pipelines'); return; }
+    renderPipelineShell();
+    const wrap = document.getElementById('boardWrap');
+    wrap.innerHTML = '<div class="crm-spin" style="margin-top:60px;"><i class="fas fa-spinner fa-spin fa-lg"></i></div>';
+    const r = await api('pipeline_board', { pipeline: pid });
+    if(!r.success){ wrap.innerHTML = `<div class="crm-empty">${esc(r.message)}</div>`; return; }
+    S.board = r.data;
+    const isPkv = r.data.type==='pkv';
+    let actions = '';
+    if(!isPkv && CAN_MANAGE){
+        actions = `<button class="crm-btn" onclick="openAddLead()"><i class="fas fa-plus"></i> Add lead</button>
+                   <button class="crm-btn" onclick="openPipelineStages(${r.data.pipeline.id})"><i class="fas fa-sliders"></i> Stages</button>
+                   <button class="crm-btn icon" onclick="confirmDeletePipeline(${r.data.pipeline.id})" title="Delete pipeline"><i class="fas fa-trash crm-dim"></i></button>`;
+    } else if(isPkv){
+        actions = `<a class="crm-btn" href="module-pkv.php"><i class="fas fa-arrow-up-right-from-square"></i> Open PKV tool</a>`;
+    }
+    document.getElementById('boardActions').innerHTML = actions;
+    renderBoard(r.data, isPkv);
 }
-function hexToRgba(hex, alpha) {
-    if (!hex) return `rgba(102,126,234,${alpha})`;
-    const c = hex.replace('#','');
-    const r = parseInt(c.substr(0,2),16);
-    const g = parseInt(c.substr(2,2),16);
-    const b = parseInt(c.substr(4,2),16);
-    return `rgba(${r},${g},${b},${alpha})`;
-}
-function toggleFullscreen() {
-    const panel = document.querySelector('.two-panel');
-    const icon = document.getElementById('fullscreen-icon');
-    const expanded = panel.classList.toggle('crm-expanded');
-    icon.className = expanded ? 'fas fa-compress' : 'fas fa-expand';
-    document.getElementById('fullscreen-btn').title = expanded ? 'Exit Fullscreen' : 'Fullscreen';
-}
-function showToast(message, type = 'success') {
-    Swal.fire({
-        toast: true,
-        position: 'top-end',
-        icon: type,
-        title: message,
-        showConfirmButton: false,
-        timer: 3000,
-        timerProgressBar: true,
+function renderBoard(data, isPkv){
+    const wrap = document.getElementById('boardWrap');
+    const stages = data.stages;
+    const byStage = {};
+    stages.forEach(s=> byStage[isPkv?s.key:s.id] = []);
+    (data.leads||[]).forEach(l=>{
+        const key = isPkv ? l.stage_key : l.stage_id;
+        if(byStage[key]===undefined){ (byStage['_un']=byStage['_un']||[]).push(l); }
+        else byStage[key].push(l);
     });
+    const cols = stages.map(s=>{
+        const key = isPkv?s.key:s.id;
+        const list = byStage[key]||[];
+        const tick = s.is_won? 'won' : (s.is_lost?'lost':'');
+        const cards = list.map(l=> isPkv?pkvCard(l):leadCard(l)).join('') || '<div class="crm-empty" style="padding:16px;font-size:12px;"><i class="far fa-folder-open" style="font-size:18px;"></i>Empty</div>';
+        const dnd = (!isPkv && CAN_MANAGE) ? `ondragover="event.preventDefault();this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="dropLead(event, ${s.id})"` : '';
+        return `<div class="crm-col">
+            <div class="crm-col-head">${tick?`<span class="tick ${tick}"></span>`:''}<span class="name">${esc(s.name)}</span><span class="count">${list.length}</span></div>
+            <div class="crm-col-body" data-stage="${key}" ${dnd}>${cards}</div>
+          </div>`;
+    }).join('');
+    wrap.innerHTML = `<div class="crm-board">${cols}</div>`;
 }
+function leadCard(l){
+    const name = ((l.first_name||'')+' '+(l.last_name||'')).trim()||'(no name)';
+    const drag = CAN_MANAGE ? `draggable="true" ondragstart="dragLead(event, ${l.id})"` : '';
+    return `<div class="crm-card" ${drag} onclick="openContact(${l.contact_id})">
+        <div class="name">${esc(name)}</div>
+        ${l.company?`<div class="co">${esc(l.company)}</div>`:''}
+        <div class="meta">
+            ${l.value?`<span class="val">${money(l.value)}</span>`:''}
+            ${l.owner_name?`<span><i class="far fa-user"></i> ${esc(l.owner_name)}</span>`:''}
+            ${parseInt(l.suppressed)?`<span class="crm-badge is-lost" title="Suppressed"><span class="dot"></span></span>`:''}
+        </div>
+    </div>`;
+}
+function pkvCard(l){
+    const name = ((l.first_name||'')+' '+(l.last_name||'')).trim()||'(no name)';
+    return `<div class="crm-card" onclick="openPkvEnquiry(${l.enquiry_id})">
+        <div class="name">${esc(name)}</div>
+        ${l.broker_name?`<div class="co"><i class="far fa-building"></i> ${esc(l.broker_name)}</div>`:'<div class="co crm-dim">Unassigned</div>'}
+        <div class="meta">
+            ${l.email?`<span><i class="far fa-envelope"></i> ${esc(l.email)}</span>`:''}
+            ${l.contact_id?`<span class="crm-badge is-open" title="Linked contact"><span class="dot"></span>CRM</span>`:''}
+        </div>
+    </div>`;
+}
+let _dragLead = null;
+function dragLead(e, id){ _dragLead = id; e.dataTransfer.effectAllowed='move'; }
+async function dropLead(e, stageId){
+    e.preventDefault();
+    e.currentTarget.classList.remove('dragover');
+    if(!_dragLead) return;
+    const id = _dragLead; _dragLead = null;
+    const r = await api('lead_move', { lead_id:id, to_stage_id:stageId });
+    if(r.success){ openBoard(S.currentPipeline); } else toast(r.message,false);
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// PKV ENQUIRY DRAWER
+// ════════════════════════════════════════════════════════════════════════
+async function openPkvEnquiry(eid){
+    document.getElementById('crmBigTitle').textContent = 'PKV enquiry';
+    document.getElementById('crmBigSub').textContent = '';
+    document.getElementById('crmBigTabs').innerHTML = '';
+    document.getElementById('crmBigFoot').innerHTML = '';
+    document.getElementById('crmBigBody').innerHTML = '<div class="crm-spin" style="margin:60px;"><i class="fas fa-spinner fa-spin fa-lg"></i></div>';
+    document.getElementById('crmBigOv').classList.add('open');
+    const r = await api('pkv_enquiry_get', { enquiry_id: eid });
+    if(!r.success){ document.getElementById('crmBigBody').innerHTML = `<div class="crm-empty">${esc(r.message)}</div>`; return; }
+    const e = r.data.enquiry;
+    const name = ((e.first_name||'')+' '+(e.last_name||'')).trim()||'Enquiry #'+e.id;
+    const f = (dt,dd)=>dd?`<dt>${dt}</dt><dd>${dd}</dd>`:'';
+    bigReadonly(name, 'PKV enquiry #'+e.id+' · '+esc((e.state||'').replace(/_/g,' ')), `
+        <div class="crm-note">This enquiry lives in PhiCRM (the PKV broker tool) and is shown read-only. Manage it there.</div>
+        <dl class="crm-dl" style="margin-top:16px;">
+          ${f('Email', e.email?`<a class="crm-link" href="mailto:${esc(e.email)}">${esc(e.email)}</a>`:'<span class="crm-dim">—</span>')}
+          ${f('Phone', esc(e.phone)||'')}
+          ${f('Broker', esc(e.broker_name)||'<span class="crm-dim">Unassigned</span>')}
+          ${f('Nationality', esc(e.nationality)||'')}
+          ${f('Employment', esc(e.employment_status)||'')}
+          ${f('Current insurer', esc(e.current_insurance)||'')}
+          ${f('Source', esc(e.source)||'')}
+          ${f('Created', dateOnly(e.created_at))}
+        </dl>
+        <div class="crm-section-label">Email history ${r.data.contact?'':'<span class="crm-dim" style="font-weight:400;text-transform:none;letter-spacing:0;">(no linked contact)</span>'}</div>
+        ${r.data.contact ? renderTimeline(r.data.timeline, []) : '<div class="crm-empty" style="padding:18px;">This enquiry email is not in the contact database.</div>'}`,
+        `<a class="crm-btn" href="https://phicrm.com" target="_blank" rel="noopener"><i class="fas fa-arrow-up-right-from-square"></i> Open PhiCRM</a>`);
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// MODALS
+// ════════════════════════════════════════════════════════════════════════
+function openModal(title, bodyHtml, footHtml, lg){
+    document.getElementById('crmModalTitle').textContent = title;
+    document.getElementById('crmModalBody').innerHTML = bodyHtml;
+    document.getElementById('crmModalFoot').innerHTML = footHtml||'';
+    document.getElementById('crmModal').classList.toggle('lg', !!lg);
+    document.getElementById('crmModalOv').classList.add('open');
+}
+function crmCloseModal(){ document.getElementById('crmModalOv').classList.remove('open'); }
+
+// ── Contact form ──
+let _editContact = null;
+async function openContactForm(id){
+    _editContact = null;
+    if(id){
+        const r = await api('contact_get',{id});
+        if(!r.success){ toast(r.message,false); return; }
+        _editContact = r.data.contact;
+    }
+    const c = _editContact||{};
+    const catOpts = ['<option value=""></option>'].concat(S.vocab.categories.map(x=>`<option${c.category===x?' selected':''}>${esc(x)}</option>`)).join('');
+    const countryOpts = ['<option value=""></option>'].concat(S.vocab.countries.map(x=>`<option${c.country===x?' selected':''}>${esc(x)}</option>`)).join('');
+    const F = (fid,label,val,type='text',span)=>`<div class="crm-field${span?' span-2':''}"><label>${label}</label><input class="crm-input" id="${fid}" type="${type}" value="${esc(val||'')}"></div>`;
+    openModal(id?'Edit contact':'New contact', `
+      <div class="crm-form-grid">
+        ${F('f_first_name','First name',c.first_name)}
+        ${F('f_last_name','Last name',c.last_name)}
+        ${F('f_email','Email',c.email,'email')}
+        ${F('f_phone','Phone',c.phone)}
+        ${F('f_company','Company',c.company)}
+        ${F('f_job_title','Job title',c.job_title)}
+        <div class="crm-field"><label>Category</label><input class="crm-input" id="f_category" list="f_catlist" value="${esc(c.category||'')}"><datalist id="f_catlist">${catOpts}</datalist></div>
+        <div class="crm-field"><label>Country</label><input class="crm-input" id="f_country" list="f_countrylist" value="${esc(c.country||'')}"><datalist id="f_countrylist">${countryOpts}</datalist></div>
+        ${F('f_city','City',c.city)}
+        ${F('f_region','Region',c.region)}
+        ${F('f_address','Address',c.address,'text',true)}
+        ${F('f_postcode','Postcode',c.postcode)}
+        ${F('f_website','Website',c.website)}
+        ${F('f_source','Source',c.source,'text',true)}
+      </div>`,
+      `<button class="crm-btn" onclick="crmCloseModal()">Cancel</button><button class="crm-btn primary" onclick="saveContact()">Save contact</button>`, true);
+}
+async function saveContact(){
+    const g = fid=>document.getElementById(fid).value.trim();
+    const data = { email:g('f_email'), first_name:g('f_first_name'), last_name:g('f_last_name'), phone:g('f_phone'),
+        company:g('f_company'), job_title:g('f_job_title'), category:g('f_category'), country:g('f_country'),
+        city:g('f_city'), region:g('f_region'), address:g('f_address'), postcode:g('f_postcode'),
+        website:g('f_website'), source:g('f_source') };
+    if(_editContact) data.id = _editContact.id;
+    const r = await api('contact_save', data);
+    if(!r.success){ toast(r.message,false); return; }
+    crmCloseModal(); toast('Contact saved');
+    if(data.category && S.vocab.categories.indexOf(data.category)<0){ S.vocab.categories.push(data.category); S.vocab.categories.sort(); }
+    if(S.tab==='contacts') loadContacts();
+    if(S.drawerContactId) openContact(r.data.id);
+}
+
+async function saveDrawerContact(id){
+    const g = fid=>{ const el=document.getElementById(fid); return el?el.value.trim():''; };
+    const data = { id, email:g('de_email'), first_name:g('de_first_name'), last_name:g('de_last_name'), phone:g('de_phone'),
+        company:g('de_company'), job_title:g('de_job_title'), category:g('de_category'), country:g('de_country'),
+        city:g('de_city'), region:g('de_region'), address:g('de_address'), postcode:g('de_postcode'),
+        website:g('de_website'), source:g('de_source') };
+    const r = await api('contact_save', data);
+    if(!r.success){ toast(r.message,false); return; }
+    toast('Contact saved');
+    if(data.category && S.vocab.categories.indexOf(data.category)<0){ S.vocab.categories.push(data.category); S.vocab.categories.sort(); }
+    if(S.tab==='contacts') loadContacts();
+    openContact(id);
+}
+
+// ── Add to pipeline from a contact ──
+async function openAddToPipeline(contactId){
+    const manual = S.pipelines.filter(p=>p.type==='manual');
+    if(!manual.length){ toast('Create a pipeline first.',false); return; }
+    const opts = manual.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+    openModal('Add to pipeline', `
+      <div class="crm-field"><label>Pipeline</label><select class="crm-select" id="al_pipe" onchange="alLoadStages()">${opts}</select></div>
+      <div class="crm-field"><label>Stage</label><select class="crm-select" id="al_stage"></select></div>
+      <div class="crm-field"><label>Deal value (optional)</label><input class="crm-input" id="al_value" type="number" min="0" placeholder="e.g. 5000"></div>
+      <input type="hidden" id="al_contact" value="${contactId}">`,
+      `<button class="crm-btn" onclick="crmCloseModal()">Cancel</button><button class="crm-btn primary" onclick="saveAddToPipeline()">Add lead</button>`);
+    alLoadStages();
+}
+async function alLoadStages(){
+    const pid = document.getElementById('al_pipe').value;
+    const r = await api('pipeline_board',{pipeline:pid});
+    if(r.success){ document.getElementById('al_stage').innerHTML = r.data.stages.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join(''); }
+}
+async function saveAddToPipeline(){
+    const r = await api('lead_create', { pipeline_id:document.getElementById('al_pipe').value, contact_id:document.getElementById('al_contact').value, stage_id:document.getElementById('al_stage').value, value:document.getElementById('al_value').value });
+    if(!r.success){ toast(r.message,false); return; }
+    crmCloseModal(); toast('Added to pipeline');
+    if(S.drawerContactId) openContact(S.drawerContactId);
+    loadPipelinesCache();
+}
+
+// ── Add lead to current board (pick a contact) ──
+function openAddLead(){
+    openModal('Add lead', `
+      <div class="crm-field"><label>Find a contact</label>
+        <div class="crm-searchbox"><i class="fas fa-search"></i><input class="crm-input" id="pick_q" placeholder="Search contacts…" oninput="pickSearch()"></div>
+      </div>
+      <div id="pick_results" style="max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:3px;"></div>
+      <div class="crm-field" style="margin-top:14px;"><label>Deal value (optional)</label><input class="crm-input" id="pick_value" type="number" min="0"></div>`,
+      `<button class="crm-btn" onclick="crmCloseModal()">Cancel</button>`);
+    pickSearch();
+}
+let _pickTimer=null;
+function pickSearch(){
+    clearTimeout(_pickTimer);
+    _pickTimer = setTimeout(async ()=>{
+        const q = document.getElementById('pick_q').value.trim();
+        const r = await api('contact_pick', { q });
+        const box = document.getElementById('pick_results');
+        if(!r.success||!r.data.rows.length){ box.innerHTML='<div class="crm-empty" style="padding:18px;">No matches.</div>'; return; }
+        box.innerHTML = r.data.rows.map(c=>{
+            const name=((c.first_name||'')+' '+(c.last_name||'')).trim()||'(no name)';
+            return `<div class="crm-row-click" style="padding:9px 12px;border-bottom:1px solid var(--line-2);display:flex;gap:10px;align-items:center;" onclick="pickContact(${c.id})">
+                <div style="flex:1;"><div class="crm-strong">${esc(name)}</div><div class="crm-dim" style="font-size:12px;">${esc(c.company||'')}${c.email?' · '+esc(c.email):''}</div></div>
+                <i class="fas fa-plus crm-sbtn"></i></div>`;
+        }).join('');
+    }, 220);
+}
+async function pickContact(cid){
+    const r = await api('lead_create', { pipeline_id:S.currentPipeline, contact_id:cid, value:document.getElementById('pick_value').value });
+    if(!r.success){ toast(r.message,false); return; }
+    crmCloseModal(); toast('Lead added'); openBoard(S.currentPipeline); loadPipelinesCache();
+}
+
+// ── Pipeline form ──
+const PROJECT_TYPES = ['General','Promotions','Venues outreach','Events outreach','Broker outreach','Advertiser outreach','Restaurant outreach','Sponsorships'];
+let _pubs = null, _pfNameEdited = false;
+async function ensurePubs(){ if(_pubs) return _pubs; const r = await api('publications_list'); _pubs = r.success ? r.data.publications : []; return _pubs; }
+async function openPipelineForm(parentId){
+    const pubs = await ensurePubs();
+    const pubChecks = pubs.map(p=>`<label class="crm-chk" style="display:flex;margin:3px 0;"><input type="checkbox" class="pf_pubc" value="${esc(p)}" onchange="pfPubChange()"> ${esc(p)}</label>`).join('');
+    openModal(parentId?'New sub-project':'New project', `
+      <div class="crm-field"><label>Type</label><select class="crm-select" id="pf_type" onchange="pfTypeChange()">${PROJECT_TYPES.map(t=>`<option>${t}</option>`).join('')}</select></div>
+      <div class="crm-field" id="pf_pubwrap"><label>Publications</label>
+        <label class="crm-chk" style="margin-bottom:6px;"><input type="checkbox" id="pf_pub_all" onchange="pfPubAll()"> <strong>All TEN publications</strong> (catch-all)</label>
+        <div id="pf_pub_list" style="max-height:150px;overflow:auto;border:1px solid var(--line);border-radius:3px;padding:8px;">${pubChecks||'<span class="crm-dim">No publications found.</span>'}</div>
+        <div class="hint">Choose one, several, or tick “All TEN publications”.</div>
+      </div>
+      <div class="crm-field"><label>Project name</label><input class="crm-input" id="pf_name" oninput="_pfNameEdited=true" placeholder="auto-filled from type / publication"></div>
+      <div class="crm-field"><label>Description (optional)</label><input class="crm-input" id="pf_desc"></div>
+      <input type="hidden" id="pf_parent" value="${parentId||''}">
+      <div class="crm-note">Pick a type — for <strong>Promotions</strong> (and other per-publication work) choose one or more publications. Starts with stages Prospect → Contacted → In discussion → Proposal sent → Agreed → Declined.</div>`,
+      `<button class="crm-btn" onclick="crmCloseModal()">Cancel</button><button class="crm-btn primary" onclick="savePipeline()">Create project</button>`);
+    _pfNameEdited = false; pfTypeChange();
+}
+function openSubProjectForm(parentId){ openPipelineForm(parentId); }
+function pfTypeChange(){
+    const t = document.getElementById('pf_type').value;
+    document.getElementById('pf_pubwrap').style.display = (t==='General') ? 'none' : 'block';
+    pfAutoName();
+}
+function pfPubAll(){ const all=document.getElementById('pf_pub_all').checked; document.querySelectorAll('.pf_pubc').forEach(cb=>{ cb.checked=false; cb.disabled=all; }); pfAutoName(); }
+function pfPubChange(){ const a=document.getElementById('pf_pub_all'); if(a){ a.checked=false; } document.querySelectorAll('.pf_pubc').forEach(cb=>cb.disabled=false); pfAutoName(); }
+function getSelectedPubs(){
+    const a=document.getElementById('pf_pub_all');
+    if(a && a.checked) return {all:true, list:['All publications']};
+    return {all:false, list:[...document.querySelectorAll('.pf_pubc:checked')].map(cb=>cb.value)};
+}
+function pfAutoName(){
+    if(_pfNameEdited) return;
+    const t = document.getElementById('pf_type').value;
+    const {all,list} = getSelectedPubs();
+    let pubPart = all ? 'All publications' : (list.length===1 ? list[0] : (list.length>1 ? list.slice(0,2).join(', ')+(list.length>2?` +${list.length-2}`:'') : ''));
+    let nm = (t==='General') ? '' : t;
+    if(pubPart) nm = (t==='General' ? pubPart : (t + ' – ' + pubPart));
+    document.getElementById('pf_name').value = nm;
+}
+async function savePipeline(){
+    const type = document.getElementById('pf_type').value;
+    const sel = (type==='General') ? {all:false,list:[]} : getSelectedPubs();
+    const name = document.getElementById('pf_name').value.trim();
+    if(type==='Promotions' && !sel.all && sel.list.length===0){ toast('Choose at least one publication (or “All TEN publications”).',false); return; }
+    if(!name){ toast('Enter a project name',false); return; }
+    const publication = sel.all ? 'All publications' : sel.list.join(', ');
+    const parent = document.getElementById('pf_parent').value;
+    const r = await api('pipeline_save', { name, description:document.getElementById('pf_desc').value, parent_id:parent||'',
+        category: type==='General'?'':type, publication });
+    if(!r.success){ toast(r.message,false); return; }
+    crmCloseModal(); toast('Project created');
+    PROJ.current = 'native:'+r.data.id; PROJ.view='detail';
+    await loadPipelinesCache();
+    if(S.tab==='projects') openProject('native:'+r.data.id); else crmTab('projects');
+}
+async function confirmDeletePipeline(id){
+    const res = await Swal.fire({title:'Delete this pipeline?',text:'All its leads and history will be removed. Contacts are not deleted.',icon:'warning',showCancelButton:true,confirmButtonText:'Delete',cancelButtonText:'Cancel'});
+    if(!res.isConfirmed) return;
+    const r = await api('pipeline_delete',{id});
+    if(!r.success){ toast(r.message,false); return; }
+    S.currentPipeline = null; toast('Pipeline deleted'); await loadPipelinesCache(); loadPipelines();
+}
+
+// ── Pipeline stages editor ──
+async function openPipelineStages(pid){
+    const r = await api('pipeline_board',{pipeline:pid});
+    if(!r.success){ toast(r.message,false); return; }
+    renderStagesModal(pid, r.data.stages);
+}
+function renderStagesModal(pid, stages){
+    const rows = stages.map(s=>`<tr>
+        <td class="crm-strong">${esc(s.name)}</td>
+        <td>${s.is_won==1?'<span class="crm-badge is-won"><span class="dot"></span>Won</span>':(s.is_lost==1?'<span class="crm-badge is-lost"><span class="dot"></span>Lost</span>':'<span class="crm-dim">—</span>')}</td>
+        <td class="num"><button class="crm-btn sm" onclick="editStage(${pid},${s.id},${JSON.stringify(s.name)},${s.is_won},${s.is_lost})"><i class="fas fa-pen"></i></button>
+            <button class="crm-btn sm danger" onclick="deleteStage(${pid},${s.id})"><i class="fas fa-trash"></i></button></td>
+      </tr>`).join('');
+    openModal('Pipeline stages', `
+      <table class="crm-table" style="border:1px solid var(--line);border-radius:4px;margin-bottom:14px;"><thead><tr><th>Stage</th><th>Type</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+      <div id="stageForm"></div>
+      <button class="crm-btn" onclick="editStage(${pid},0,'',0,0)"><i class="fas fa-plus"></i> Add stage</button>`,
+      `<button class="crm-btn" onclick="crmCloseModal()">Done</button>`);
+}
+function editStage(pid, id, name, won, lost){
+    document.getElementById('stageForm').innerHTML = `
+      <div class="crm-panel" style="margin-bottom:14px;"><div class="crm-panel-body">
+        <div class="crm-field"><label>Stage name</label><input class="crm-input" id="sf_name" value="${esc(name)}"></div>
+        <div style="display:flex;gap:18px;">
+          <label class="crm-chk"><input type="checkbox" id="sf_won" ${won==1?'checked':''}> Won stage</label>
+          <label class="crm-chk"><input type="checkbox" id="sf_lost" ${lost==1?'checked':''}> Lost stage</label>
+        </div>
+        <div style="margin-top:12px;"><button class="crm-btn primary sm" onclick="saveStage(${pid},${id})">Save stage</button></div>
+      </div></div>`;
+}
+async function saveStage(pid, id){
+    const name = document.getElementById('sf_name').value.trim();
+    if(!name){ toast('Enter a name',false); return; }
+    const r = await api('stage_save', { id, pipeline_id:pid, name, is_won:document.getElementById('sf_won').checked?1:'', is_lost:document.getElementById('sf_lost').checked?1:'' });
+    if(!r.success){ toast(r.message,false); return; }
+    toast('Stage saved'); openPipelineStages(pid); if(PROJ.current==='native:'+pid) openProject(PROJ.current);
+}
+async function deleteStage(pid, id){
+    const res = await Swal.fire({title:'Delete status?',text:'Contacts in it move to the first remaining status.',icon:'warning',showCancelButton:true,confirmButtonText:'Delete'});
+    if(!res.isConfirmed) return;
+    const r = await api('stage_delete',{id});
+    if(!r.success){ toast(r.message,false); return; }
+    toast('Status deleted'); openPipelineStages(pid); if(PROJ.current==='native:'+pid) openProject(PROJ.current);
+}
+async function confirmDeleteProject(key){
+    const id = key.split(':')[1];
+    const res = await Swal.fire({title:'Delete this project?',text:'Its contact links and history are removed. The contacts themselves stay in the database.',icon:'warning',showCancelButton:true,confirmButtonText:'Delete'});
+    if(!res.isConfirmed) return;
+    const r = await api('pipeline_delete',{id});
+    if(!r.success){ toast(r.message,false); return; }
+    toast('Project deleted'); PROJ.current=null; await loadProjects();
+}
+
+// ── Activity form ──
+function openActivityForm(contactId){
+    openModal('Log activity', `
+      <div class="crm-field"><label>Type</label><select class="crm-select" id="ac_type">
+        ${['note','call','email','meeting','task'].map(t=>`<option value="${t}">${t[0].toUpperCase()+t.slice(1)}</option>`).join('')}
+      </select></div>
+      <div class="crm-field"><label>Subject</label><input class="crm-input" id="ac_subject" placeholder="e.g. Called about proposal"></div>
+      <div class="crm-field"><label>Notes</label><textarea class="crm-textarea" id="ac_body"></textarea></div>
+      <div class="crm-field"><label>Follow-up date (optional)</label><input class="crm-input" id="ac_due" type="datetime-local"></div>
+      <input type="hidden" id="ac_contact" value="${contactId}">`,
+      `<button class="crm-btn" onclick="crmCloseModal()">Cancel</button><button class="crm-btn primary" onclick="saveActivity()">Save</button>`);
+}
+async function saveActivity(){
+    const due = document.getElementById('ac_due').value;
+    const r = await api('activity_add', { contact_id:document.getElementById('ac_contact').value, type:document.getElementById('ac_type').value, subject:document.getElementById('ac_subject').value, body:document.getElementById('ac_body').value, due_at: due?due.replace('T',' ')+':00':'' });
+    if(!r.success){ toast(r.message,false); return; }
+    crmCloseModal(); toast('Activity logged');
+    if(S.drawerContactId) openContact(S.drawerContactId);
+}
+async function delActivity(id){
+    const res = await Swal.fire({title:'Delete activity?',icon:'warning',showCancelButton:true,confirmButtonText:'Delete'});
+    if(!res.isConfirmed) return;
+    const r = await api('activity_delete',{id});
+    if(r.success && S.drawerContactId){ openContact(S.drawerContactId); }
+}
+
+// ── Push to audience ──
+async function openPushAudience(contactIds, mode){
+    const r = await api('audiences_list');
+    const auds = r.success ? r.data.audiences : [];
+    const opts = ['<option value="0">— Create a new audience —</option>'].concat(auds.map(a=>`<option value="${a.id}">${esc(a.name)} (${a.members})</option>`)).join('');
+    let scopeNote = '';
+    if(mode==='leads'){
+        const pname = S.leads.pipeline_id ? (S.pipelines.find(p=>p.id==S.leads.pipeline_id)||{}).name : 'all pipelines';
+        scopeNote = `<div class="crm-note">Adds the contacts of the leads in <strong>${esc(pname||'the selected pipeline')}</strong>. Only contacts with an email and not suppressed are added.</div>`;
+    }
+    openModal('Add to email audience', `
+      ${scopeNote}
+      <div class="crm-field"><label>Audience</label><select class="crm-select" id="pa_aud" onchange="document.getElementById('pa_newwrap').style.display=this.value==='0'?'block':'none'">${opts}</select></div>
+      <div class="crm-field" id="pa_newwrap"><label>New audience name</label><input class="crm-input" id="pa_name" placeholder="e.g. Brokers – warm leads"></div>
+      <input type="hidden" id="pa_ids" value="${contactIds?contactIds.join(','):''}">
+      <input type="hidden" id="pa_mode" value="${mode||''}">`,
+      `<button class="crm-btn" onclick="crmCloseModal()">Cancel</button><button class="crm-btn primary" onclick="doPushAudience()">Add to audience</button>`);
+}
+async function doPushAudience(){
+    const aid = document.getElementById('pa_aud').value;
+    const data = { audience_id:aid, new_name:document.getElementById('pa_name')?document.getElementById('pa_name').value:'' };
+    const ids = document.getElementById('pa_ids').value;
+    const mode = document.getElementById('pa_mode').value;
+    if(ids) data.contact_ids = ids;
+    else if(mode==='leads' && S.leads.pipeline_id) data.pipeline_id = S.leads.pipeline_id;
+    else if(mode==='leads'){ toast('Choose a pipeline in the Leads filter first.',false); return; }
+    const r = await api('push_to_audience', data);
+    if(!r.success){ toast(r.message,false); return; }
+    crmCloseModal();
+    Swal.fire({icon:'success',title:'Added to audience',html:`${r.data.added} contact(s) added.<br>${r.data.selected-r.data.sendable} skipped (no email or suppressed).<br><br><a class="crm-link" href="module-email-campaigns.php">Open Email Campaigns →</a>`,confirmButtonText:'Done'});
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// SETTINGS  (choose which projects & sub-projects are shown)
+// ════════════════════════════════════════════════════════════════════════
+async function loadSettings(){
+    const el = document.getElementById('view-settings');
+    el.innerHTML = '<div class="crm-spin"><i class="fas fa-spinner fa-spin fa-lg"></i></div>';
+    const r = await api('project_prefs');
+    if(!r.success){ el.innerHTML = `<div class="crm-empty">${esc(r.message)}</div>`; return; }
+    const items = r.data.projects;
+    const srcLabel = {pkv:'Health insurance',wne:'Recruitment',email:'Email',native:'CRM project'};
+    let html = `<div class="crm-panel" style="max-width:760px;">
+        <div class="crm-panel-head"><h3>Visible projects</h3><div class="spacer"></div>
+          ${CAN_MANAGE?'<button class="crm-btn primary" onclick="openPipelineForm()"><i class="fas fa-plus"></i> New project</button>':''}</div>
+        <div class="crm-panel-body flush"><table class="crm-table"><thead><tr><th>Project</th><th>Type</th><th class="num">Shown</th></tr></thead><tbody>`;
+    items.forEach(p=>{
+        html += `<tr><td class="crm-strong">${esc(p.name)}</td><td class="crm-dim">${esc(srcLabel[p.source]||p.source)}</td>
+          <td class="num"><label class="crm-switch"><input type="checkbox" ${p.hidden?'':'checked'} ${CAN_MANAGE?'':'disabled'} onchange="setProjShown('${p.key}', this.checked)"><span></span></label></td></tr>`;
+    });
+    html += `</tbody></table></div></div>
+      <p class="crm-dim" style="max-width:760px;font-size:12.5px;margin-top:10px;">Hidden projects stay in their own tool and in the data — they're just removed from the Projects tab and Overview for you. Turn one back on any time.</p>`;
+    el.innerHTML = html;
+}
+async function setProjShown(key, shown){
+    const r = await api('project_pref_set', { key, hidden: shown?'0':'1' });
+    if(!r.success){ toast(r.message,false); return; }
+    toast(shown?'Shown':'Hidden');
+    loadPipelinesCache();
+}
+
+// ── Init ──
+function crmInit(){
+    crmTab('overview');                 // render immediately — don't wait on caches
+    bootstrap().catch(()=>{});          // fill vocab/users/pipelines for the other tabs
+    document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ crmCloseModal(); crmCloseBig(); } });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', crmInit);
+else crmInit();
 </script>
 </body>
 </html>

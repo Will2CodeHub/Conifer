@@ -46,9 +46,26 @@ if ($canSeeStats) {
         ['fa-address-book', dash_scalar($m, "SELECT COUNT(*) FROM ten_ec_contacts"),                                 'Email contacts',         ''],
         ['fa-paper-plane',  dash_scalar($m, "SELECT COUNT(*) FROM ten_ec_recipients WHERE status='sent' AND sent_at >= DATE_SUB(NOW(),INTERVAL 30 DAY)"), 'Emails sent (30d)', ''],
         ['fa-ban',          dash_scalar($m, "SELECT COUNT(*) FROM ten_ec_suppression"),                              'Suppressed emails',      ''],
+        ['fa-heart-pulse',  dash_scalar($m, "SELECT COUNT(*) FROM ten_pkv_enquiries WHERE state NOT IN('closed_success','closed_failed')"), 'PKV open (PhiCRM/GPHI)', ''],
+        ['fa-user-tie',     dash_scalar($m, "SELECT COUNT(*) FROM ten_cv_candidates"),                             'WNE candidates',         ''],
+        ['fa-diagram-project', dash_scalar($m, "SELECT COUNT(*) FROM ten_projects WHERE status='active'"),         'Active projects',        ''],
+        ['fa-user-tag',     dash_scalar($m, "SELECT COUNT(*) FROM ten_crm_leads WHERE status='open'"),             'Open CRM leads',         ''],
     ];
     // hide tiles whose data source isn't present (null)
     $tiles = array_values(array_filter($tiles, fn($t) => $t[1] !== null));
+
+    // "Needs attention" — actionable queues across the tools. [icon, label, count, url]
+    $uid = (int)($_SESSION['ten_user_id'] ?? 0);
+    $attentionAll = [
+        ['fa-pen-clip',    'Articles awaiting review', dash_scalar($a, "SELECT COUNT(*) FROM articles WHERE state='under review'"),            'module-articles.php'],
+        ['fa-star',        'New PKV enquiries',        dash_scalar($m, "SELECT COUNT(*) FROM ten_pkv_enquiries WHERE state='new'"),            'module-pkv.php'],
+        ['fa-paper-plane', 'Emails queued to send',    dash_scalar($m, "SELECT COUNT(*) FROM ten_ec_recipients WHERE status='queued'"),        'module-email-campaigns.php'],
+        ['fa-reply',       'Unread campaign replies',  dash_scalar($m, "SELECT COUNT(*) FROM ten_ec_responses WHERE type='reply'"),            'module-email-campaigns.php'],
+        ['fa-clock',       'My follow-ups due',        dash_scalar($m, "SELECT COUNT(*) FROM ten_crm_activities WHERE done=0 AND due_at IS NOT NULL AND due_at<=NOW() AND (user_id=$uid OR user_id IS NULL)"), 'module-crm.php'],
+        ['fa-user-tag',    'Open CRM leads',           dash_scalar($m, "SELECT COUNT(*) FROM ten_crm_leads WHERE status='open'"),               'module-crm.php'],
+    ];
+    // keep rows whose source exists and has something to action
+    $attention = array_values(array_filter($attentionAll, fn($x) => $x[2] !== null && $x[2] > 0));
 
     $activityStmt = $m->prepare("SELECT al.*, u.full_name FROM ten_activity_log al LEFT JOIN ten_users u ON al.user_id=u.id ORDER BY al.created_at DESC LIMIT 10");
     if ($activityStmt) { $activityStmt->execute(); $recentActivity = $activityStmt->get_result()->fetch_all(MYSQLI_ASSOC); $activityStmt->close(); }
@@ -134,6 +151,34 @@ $currentPage = 'dashboard';
             margin-top: 6px;
             font-weight: 500;
         }
+        .attention-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 14px;
+            margin-bottom: 32px;
+        }
+        .attention-card {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-left: 3px solid #1f4e79;
+            border-radius: 10px;
+            padding: 16px 18px;
+            text-decoration: none;
+            color: inherit;
+            transition: border-color .2s, box-shadow .2s;
+        }
+        .attention-card:hover { border-color: #cbd5e1; border-left-color: #1f4e79; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+        .attention-icon {
+            width: 40px; height: 40px; border-radius: 8px; background: #eef3f8; color: #1f4e79;
+            display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0;
+        }
+        .attention-main { flex: 1; min-width: 0; }
+        .attention-count { font-size: 22px; font-weight: 700; color: #111827; line-height: 1.1; }
+        .attention-label { font-size: 13px; color: #6b7280; margin-top: 2px; }
+        .attention-go { color: #cbd5e1; font-size: 13px; }
         .content-grid {
             display: grid;
             grid-template-columns: 2fr 1fr;
@@ -242,7 +287,23 @@ $currentPage = 'dashboard';
                 <?php endforeach; ?>
             </div>
             <?php endif; ?>
-            
+
+            <?php if ($canSeeStats && !empty($attention)): ?>
+            <p class="section-label">Needs attention</p>
+            <div class="attention-grid">
+                <?php foreach ($attention as $x): ?>
+                <a class="attention-card" href="<?php echo htmlspecialchars($x[3]); ?>">
+                    <div class="attention-icon"><i class="fas <?php echo $x[0]; ?>"></i></div>
+                    <div class="attention-main">
+                        <div class="attention-count"><?php echo number_format((int)$x[2]); ?></div>
+                        <div class="attention-label"><?php echo htmlspecialchars($x[1]); ?></div>
+                    </div>
+                    <i class="fas fa-chevron-right attention-go"></i>
+                </a>
+                <?php endforeach; ?>
+            </div>
+            <?php endif; ?>
+
             <div class="content-grid">
                 <div class="card">
                     <h2>

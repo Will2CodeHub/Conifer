@@ -42,12 +42,16 @@ while ($group = $groupsResult->fetch_assoc()) {
 
 $conn->close();
 ?>
+<script>/* apply collapsed state before paint to avoid a flash */(function(){try{if(localStorage.getItem('ten_sidebar_collapsed')==='1')document.documentElement.classList.add('sidebar-collapsed');}catch(e){}})();</script>
 <div class="sidebar" id="sidebar">
     <div class="sidebar-header">
         <div class="logo">
             <i class="fas fa-newspaper"></i>
             <span>TEN Management</span>
         </div>
+        <button class="sidebar-collapse-btn" onclick="toggleSidebarCollapse()" title="Collapse menu">
+            <i class="fas fa-angles-left"></i>
+        </button>
         <button class="sidebar-toggle" onclick="toggleSidebar()">
             <i class="fas fa-times"></i>
         </button>
@@ -70,8 +74,9 @@ $conn->close();
                             $isActive = ($currentPage ?? '') === $module['module_key'];
                             $moduleUrl = $module['module_url'] ?: '#';
                             ?>
-                            <a href="<?php echo htmlspecialchars($moduleUrl); ?>" 
-                               class="menu-item <?php echo $isActive ? 'active' : ''; ?>">
+                            <a href="<?php echo htmlspecialchars($moduleUrl); ?>"
+                               class="menu-item <?php echo $isActive ? 'active' : ''; ?>"
+                               title="<?php echo htmlspecialchars($module['module_name']); ?>">
                                 <i class="fa <?php echo htmlspecialchars($module['module_icon']); ?>"></i>
                                 <span><?php echo htmlspecialchars($module['module_name']); ?></span>
                             </a>
@@ -106,7 +111,7 @@ $conn->close();
 .sidebar {
     width: 280px;
     height: 100vh;
-    background: #2e2e2e;
+    background: #16202e;
     position: fixed;
     left: 0;
     top: 0;
@@ -322,6 +327,42 @@ $conn->close();
     margin-left: 280px;
     min-height: 100vh;
     background: #f8fafc;
+    transition: margin-left 0.2s ease;
+}
+
+/* Desktop collapse toggle (hidden on mobile, where the off-canvas toggle is used) */
+.sidebar-collapse-btn {
+    background: none;
+    border: none;
+    color: #94a3b8;
+    font-size: 15px;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 6px;
+    transition: color 0.2s, background 0.2s;
+}
+.sidebar-collapse-btn:hover { color: #fff; background: rgba(255,255,255,0.08); }
+
+/* ── Collapsed rail (desktop only) — clean 72px icon rail, no hover-peek ── */
+@media (min-width: 1025px) {
+    html.sidebar-collapsed .sidebar { width: 72px; }
+    html.sidebar-collapsed .main-content { margin-left: 72px; }
+    html.sidebar-collapsed .sidebar .logo span,
+    html.sidebar-collapsed .sidebar .menu-group-header span,
+    html.sidebar-collapsed .sidebar .menu-item span,
+    html.sidebar-collapsed .sidebar .menu-group-header .toggle-icon,
+    html.sidebar-collapsed .sidebar .user-details,
+    html.sidebar-collapsed .sidebar .logout-btn { display: none; }
+    html.sidebar-collapsed .sidebar-header { flex-direction: column; align-items: center; gap: 10px; padding: 18px 0; }
+    html.sidebar-collapsed .logo { gap: 0; }
+    html.sidebar-collapsed .menu-group-header { justify-content: center; padding: 12px 0; }
+    html.sidebar-collapsed .menu-item { justify-content: center; padding: 12px 0; }
+    html.sidebar-collapsed .menu-item.active { border-left: none; padding-left: 0; }
+    html.sidebar-collapsed .sidebar-footer { justify-content: center; }
+    html.sidebar-collapsed .sidebar-collapse-btn i { transform: rotate(180deg); } /* chevron points right = expand */
+}
+@media (max-width: 1024px) {
+    .sidebar-collapse-btn { display: none; }
 }
 
 @media (max-width: 1024px) {
@@ -346,6 +387,11 @@ $conn->close();
 <script>
 function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('active');
+}
+
+function toggleSidebarCollapse() {
+    const collapsed = document.documentElement.classList.toggle('sidebar-collapsed');
+    try { localStorage.setItem('ten_sidebar_collapsed', collapsed ? '1' : '0'); } catch (e) {}
 }
 
 function toggleGroup(header) {
