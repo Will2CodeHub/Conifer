@@ -138,8 +138,9 @@ try {
             if ($publish && $section) scraper_trigger_publication_cache($section['publication_key']);
             // Attach editor/live links for each newly-created article so the UI can badge + link.
             $pubKey = $section ? $section['publication_key'] : '';
+            $tenSection = $section ? $section['ten_section'] : '';
             $rows = [];
-            foreach ($results as $r) { if (!empty($r['ok'])) $rows[] = ['article_id' => $r['article_id'], 'publication_key' => $pubKey, 'status' => 'promoted']; }
+            foreach ($results as $r) { if (!empty($r['ok'])) $rows[] = ['article_id' => $r['article_id'], 'publication_key' => $pubKey, 'status' => 'promoted', 'ten_section' => $tenSection]; }
             $linked = $rows ? scraper_attach_article_links($rows) : [];
             $byArt = [];
             foreach ($linked as $l) { $byArt[(int)$l['article_id']] = $l; }
@@ -147,6 +148,7 @@ try {
                 if (!empty($r['ok']) && isset($byArt[(int)$r['article_id']])) {
                     $l = $byArt[(int)$r['article_id']];
                     $r['editor_url'] = $l['editor_url']; $r['live_url'] = $l['live_url']; $r['row_state'] = $l['row_state'];
+                    $r['is_breaking'] = $l['is_breaking'];
                 }
             }
             unset($r);

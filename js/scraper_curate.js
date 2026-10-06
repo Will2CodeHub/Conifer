@@ -250,7 +250,8 @@
         var out = [];
         if (r.row_state === "published" && r.live_url) out.push('<a class="sc-link live" href="' + esc(r.live_url) + '" target="_blank" rel="noopener">View live ↗</a>');
         if ((r.row_state === "draft" || r.row_state === "ignored") && r.editor_url) out.push('<a class="sc-link edit" href="' + esc(r.editor_url) + '" target="_blank" rel="noopener">Edit ↗</a>');
-        if (r.article_id) out.push('<a href="#" class="sc-link view scCurPv" data-aid="' + r.article_id + '">Preview</a>');
+        // Preview reads the normal articles table, so it can't show breaking items.
+        if (r.article_id && !r.is_breaking) out.push('<a href="#" class="sc-link view scCurPv" data-aid="' + r.article_id + '">Preview</a>');
         return out.join('<span style="color:var(--sc-faint);">·</span>');
     }
 
@@ -318,7 +319,8 @@
         var rows = items.map(function (it, i) {
             var links = [];
             if (it.live_url) links.push('<a class="sc-link live" href="' + esc(it.live_url) + '" target="_blank" rel="noopener">View live ↗</a>');
-            links.push('<a href="#" class="sc-link view scCurPv" data-aid="' + it.article_id + '">Preview</a>');
+            // Preview reads the normal articles table, so it can't show breaking items.
+            if (!it.is_breaking) links.push('<a href="#" class="sc-link view scCurPv" data-aid="' + it.article_id + '">Preview</a>');
             if (it.is_headline && it.front_page_url) links.push('<a class="sc-link accent" href="' + esc(it.front_page_url) + '" target="_blank" rel="noopener">Front page ↗</a>');
             return '<div class="sc-pt-row' + (it.is_headline ? ' is-headline' : '') + '">' +
                 '<span class="sc-pt-idx">' + (i + 1) + '</span>' +

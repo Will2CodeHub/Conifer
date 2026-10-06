@@ -61,7 +61,8 @@
         } else if (r.editor_url) {
             out.push('<a class="sc-link edit" href="' + esc(r.editor_url) + '" target="_blank" rel="noopener">Edit ↗</a>');
         }
-        if (r.article_id) {
+        // Preview reads the normal articles table, so it can't show breaking items.
+        if (r.article_id && !r.is_breaking) {
             out.push('<a href="#" class="sc-link view scHPrev-view" data-aid="' + r.article_id + '">Preview</a>');
         }
         return out.join('<span style="color:var(--sc-faint);"> · </span>') || '<span style="color:var(--sc-faint);">—</span>';

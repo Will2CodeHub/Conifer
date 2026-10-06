@@ -157,7 +157,8 @@ try {
                     . "<p>This link is valid for 7 days. Your login email is <strong>$safeEmail</strong>.</p>"
                     . $tutorialBlock
                     . "<p>— The Eye Newspapers</p>";
-                $sent = sendEmail($email, 'Your TEN Management account', $body);
+                require_once __DIR__ . '/../lib/transactional_mail.php';
+                $sent = ten_send_transactional_mail($email, $fullName, 'Your TEN Management account', $body);
                 $response['invite_sent'] = (bool)$sent;
             }
 
@@ -395,7 +396,8 @@ try {
                 . "<p><a href='$link' style='display:inline-block;padding:10px 18px;background:#3c4f6d;color:#fff;text-decoration:none;border-radius:6px;'>Reset your password</a></p>"
                 . "<p>Or paste this link into your browser:<br><a href='$link'>$link</a></p>"
                 . "<p>This link is valid for 24 hours. If you didn't expect this, you can ignore this email.</p>";
-            $sent = sendEmail($u['email'], 'Reset your TEN Management password', $emailBody);
+            require_once __DIR__ . '/../lib/transactional_mail.php';
+            $sent = ten_send_transactional_mail($u['email'], $u['full_name'], 'Reset your TEN Management password', $emailBody);
             logActivity('admin_send_reset', 'user', $userId, 'Admin sent password reset email');
             $response['success'] = (bool)$sent;
             $response['message'] = $sent ? ('Reset email sent to ' . $u['email']) : 'Could not send email (check mail config)';

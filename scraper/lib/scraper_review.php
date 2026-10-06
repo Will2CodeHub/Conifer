@@ -396,17 +396,50 @@ function scraper_sections_needing_precompute(): array {
 }
 
 /**
+ * The admin_ten table a section's promoted articles live in. Breaking News
+ * sections publish into articles_breaking_news (the parallel table the site's
+ * /breaking-news section renders from); every other section into articles.
+ * This mirrors the routing in scraper_promote_items.
+ */
+function scraper_section_article_table(?string $tenSection): string {
+    return strcasecmp((string)$tenSection, 'Breaking News') === 0
+        ? 'articles_breaking_news' : 'articles';
+}
+
+/** URL path segment a published article in $table sits under on the public site
+ * ('breaking-news/' for breaking items, '' for normal articles). */
+function scraper_article_url_prefix(string $table): string {
+    return $table === 'articles_breaking_news' ? 'breaking-news/' : '';
+}
+
+/**
  * Attach the promoted article's state + jump links to a set of item rows.
- * Each row must carry: article_id (nullable), publication_key, status.
- * Adds: article_id (int|null), article_state, row_state, editor_url, live_url.
+ * Each row must carry: article_id (nullable), publication_key, status, and
+ * ten_section (so Breaking News ids resolve against articles_breaking_news, not
+ * articles — otherwise a breaking publish never shows as "Published").
+ * Adds: article_id (int|null), article_state, row_state, editor_url, live_url,
+ * is_breaking (bool).
  */
 function scraper_attach_article_links(array $rows): array {
-    $ids = array_values(array_unique(array_filter(array_map(function ($r) { return (int)($r['article_id'] ?? 0); }, $rows))));
-    $states = []; $artUrl = []; $pubBase = [];
-    if ($ids) {
+    // Group article ids by the table they live in (per-row, from ten_section).
+    $idsByTable = ['articles' => [], 'articles_breaking_news' => []];
+    foreach ($rows as $r) {
+        $aid = (int)($r['article_id'] ?? 0);
+        if ($aid <= 0) continue;
+        $tbl = scraper_section_article_table($r['ten_section'] ?? '');
+        $idsByTable[$tbl][$aid] = true;
+    }
+    $states = ['articles' => [], 'articles_breaking_news' => []];
+    $artUrl = ['articles' => [], 'articles_breaking_news' => []];
+    $pubBase = [];
+    $haveIds = array_filter($idsByTable, function ($m) { return !empty($m); });
+    if ($haveIds) {
         $a = getDBConnection_TENAdmin();
-        $res = $a->query("SELECT id, state, url FROM articles WHERE id IN (" . implode(',', $ids) . ")");
-        while ($x = $res->fetch_assoc()) { $states[(int)$x['id']] = $x['state']; $artUrl[(int)$x['id']] = $x['url']; }
+        foreach ($haveIds as $tbl => $idMap) {
+            $idList = implode(',', array_map('intval', array_keys($idMap)));
+            $res = $a->query("SELECT id, state, url FROM `$tbl` WHERE id IN ($idList)");
+            while ($x = $res->fetch_assoc()) { $states[$tbl][(int)$x['id']] = $x['state']; $artUrl[$tbl][(int)$x['id']] = $x['url']; }
+        }
         $pubKeys = array_values(array_unique(array_filter(array_map(function ($r) { return $r['publication_key'] ?? ''; }, $rows))));
         if ($pubKeys) {
             $inq = implode(',', array_fill(0, count($pubKeys), '?'));
@@ -421,13 +454,19 @@ function scraper_attach_article_links(array $rows): array {
     }
     foreach ($rows as &$r) {
         $aid = (int)($r['article_id'] ?? 0);
-        $state = $aid ? ($states[$aid] ?? null) : null;
+        $tbl = scraper_section_article_table($r['ten_section'] ?? '');
+        $isBreaking = ($tbl === 'articles_breaking_news');
+        $state = $aid ? ($states[$tbl][$aid] ?? null) : null;
         $r['article_id'] = $aid ?: null;
         $r['article_state'] = $state;
-        $r['editor_url'] = $aid ? ('module-articles.php?open=' . $aid) : null;
+        $r['is_breaking'] = $isBreaking;
+        // Breaking items aren't editable/previewable through the normal article
+        // tool (it reads `articles`), so offer no editor link for them.
+        $r['editor_url'] = ($aid && !$isBreaking) ? ('module-articles.php?open=' . $aid) : null;
         $r['live_url'] = null;
-        if ($aid && $state === 'published' && !empty($artUrl[$aid]) && !empty($pubBase[$r['publication_key'] ?? ''])) {
-            $r['live_url'] = rtrim($pubBase[$r['publication_key']], '/') . '/' . ltrim($artUrl[$aid], '/');
+        if ($aid && $state === 'published' && !empty($artUrl[$tbl][$aid]) && !empty($pubBase[$r['publication_key'] ?? ''])) {
+            $r['live_url'] = rtrim($pubBase[$r['publication_key']], '/') . '/'
+                . scraper_article_url_prefix($tbl) . ltrim($artUrl[$tbl][$aid], '/');
         }
         if ($aid) {
             $r['row_state'] = $state === 'published' ? 'published' : ($state === 'deleted' ? 'ignored' : 'draft');
@@ -613,24 +652,34 @@ function scraper_curate_items(int $pubSectionId, string $mode = 'all', string $d
  * writes). Mutates $rows in place. Highest article id wins on collisions.
  */
 function scraper_fill_article_ids_by_hash(array &$rows): void {
-    $hashes = [];
+    // A breaking item's article lives in articles_breaking_news, a normal item's
+    // in articles, so match each row's hash against the right table.
+    $hashesByTable = ['articles' => [], 'articles_breaking_news' => []];
     foreach ($rows as $r) {
-        if (empty($r['article_id']) && !empty($r['source_url_hash'])) $hashes[$r['source_url_hash']] = true;
+        if (empty($r['article_id']) && !empty($r['source_url_hash'])) {
+            $tbl = scraper_section_article_table($r['ten_section'] ?? '');
+            $hashesByTable[$tbl][$r['source_url_hash']] = true;
+        }
     }
-    if (!$hashes) return;
-    $hashes = array_keys($hashes);
-    $a = getDBConnection_TENAdmin();
-    $inq = implode(',', array_fill(0, count($hashes), '?'));
-    $ps = $a->prepare("SELECT id, news_scrape_url_hash FROM articles WHERE news_scrape_url_hash IN ($inq) ORDER BY id ASC");
-    $ps->bind_param(str_repeat('s', count($hashes)), ...$hashes);
-    $ps->execute();
-    $map = [];
-    $rs = $ps->get_result();
-    while ($x = $rs->fetch_assoc()) { $map[$x['news_scrape_url_hash']] = (int)$x['id']; } // ASC so last wins = max id
-    $ps->close(); $a->close();
+    $map = ['articles' => [], 'articles_breaking_news' => []];
+    $a = null;
+    foreach ($hashesByTable as $tbl => $hset) {
+        if (!$hset) continue;
+        if (!$a) $a = getDBConnection_TENAdmin();
+        $hashes = array_keys($hset);
+        $inq = implode(',', array_fill(0, count($hashes), '?'));
+        $ps = $a->prepare("SELECT id, news_scrape_url_hash FROM `$tbl` WHERE news_scrape_url_hash IN ($inq) ORDER BY id ASC");
+        $ps->bind_param(str_repeat('s', count($hashes)), ...$hashes);
+        $ps->execute();
+        $rs = $ps->get_result();
+        while ($x = $rs->fetch_assoc()) { $map[$tbl][$x['news_scrape_url_hash']] = (int)$x['id']; } // ASC so last wins = max id
+        $ps->close();
+    }
+    if ($a) $a->close();
     foreach ($rows as &$r) {
-        if (empty($r['article_id']) && !empty($r['source_url_hash']) && isset($map[$r['source_url_hash']])) {
-            $r['article_id'] = $map[$r['source_url_hash']];
+        if (empty($r['article_id']) && !empty($r['source_url_hash'])) {
+            $tbl = scraper_section_article_table($r['ten_section'] ?? '');
+            if (isset($map[$tbl][$r['source_url_hash']])) $r['article_id'] = $map[$tbl][$r['source_url_hash']];
         }
     }
     unset($r);
@@ -646,6 +695,9 @@ function scraper_published_today(int $pubSectionId): array {
     $section = scraper_get_section($pubSectionId);
     if (!$section) return ['items' => [], 'front_page_url' => null];
     $pubKey = $section['publication_key'];
+    // Breaking News sections publish into articles_breaking_news, not articles.
+    $tbl = scraper_section_article_table($section['ten_section']);
+    $isBreaking = ($tbl === 'articles_breaking_news');
 
     // 1) Scraper DB: article ids promoted from this section today.
     $conn = getDBConnection();
@@ -668,9 +720,12 @@ function scraper_published_today(int $pubSectionId): array {
     $promotedAt = [];
     foreach ($drafts as $r) { $promotedAt[(int)$r['article_id']] = $r['promoted_at']; }
 
-    // 2) admin_ten: article details + publication front-page base URL.
+    // 2) admin_ten: article details + publication front-page base URL. frontpage_temp
+    // (the front-page headline flag) only applies to normal articles; breaking items
+    // have no headline slot, so don't select it from articles_breaking_news.
     $a = getDBConnection_TENAdmin();
-    $res = $a->query("SELECT id, title, url, state, frontpage_temp FROM articles WHERE id IN (" . implode(',', $ids) . ")");
+    $cols = $isBreaking ? "id, title, url, state" : "id, title, url, state, frontpage_temp";
+    $res = $a->query("SELECT $cols FROM `$tbl` WHERE id IN (" . implode(',', $ids) . ")");
     $arts = [];
     while ($x = $res->fetch_assoc()) { $arts[(int)$x['id']] = $x; }
     $base = null;
@@ -682,15 +737,17 @@ function scraper_published_today(int $pubSectionId): array {
 
     $frontPage = $base ? $base . '/' : null;
     $items = [];
+    $urlPrefix = scraper_article_url_prefix($tbl);
     foreach ($ids as $aid) {
         $art = $arts[$aid] ?? null;
         if (!$art || $art['state'] !== 'published') continue;   // only currently-live articles
-        $isHeadline = (int)$art['frontpage_temp'] === 1;
+        $isHeadline = !$isBreaking && (int)($art['frontpage_temp'] ?? 0) === 1;
         $items[] = [
             'article_id'     => $aid,
             'title'          => $art['title'],
-            'live_url'       => ($base && !empty($art['url'])) ? $base . '/' . ltrim($art['url'], '/') : null,
+            'live_url'       => ($base && !empty($art['url'])) ? $base . '/' . $urlPrefix . ltrim($art['url'], '/') : null,
             'is_headline'    => $isHeadline,
+            'is_breaking'    => $isBreaking,
             'front_page_url' => $isHeadline ? $frontPage : null,
             'promoted_at'    => $promotedAt[$aid] ?? null,
         ];
@@ -750,15 +807,24 @@ function scraper_history_query(array $f): array {
     $cand = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close(); $conn->close();
 
-    // One candidate row per article (keep the first — scraper title/source/section).
-    $byArt = [];
-    foreach ($cand as $c) { $aid = (int)$c['article_id']; if ($aid && !isset($byArt[$aid])) $byArt[$aid] = $c; }
-    $ids = array_keys($byArt);
-    if (!$ids) return [];
+    // One candidate row per article, keyed by "table:id" — a breaking id and a
+    // normal id can collide numerically (separate auto-increments), so the table
+    // must be part of the key. Breaking News drafts point into articles_breaking_news.
+    $byKey = [];
+    $idsByTable = ['articles' => [], 'articles_breaking_news' => []];
+    foreach ($cand as $c) {
+        $aid = (int)$c['article_id'];
+        if (!$aid) continue;
+        $tbl = scraper_section_article_table($c['ten_section']);
+        $key = $tbl . ':' . $aid;
+        if (!isset($byKey[$key])) { $byKey[$key] = $c; $idsByTable[$tbl][$aid] = true; }
+    }
+    if (!$byKey) return [];
 
-    // 2) admin_ten: filter the articles by state + publish-date range.
+    // 2) admin_ten: filter the articles by state + publish-date range (same
+    // conditions applied in each table the candidates live in).
     $a = getDBConnection_TENAdmin();
-    $conds = ["id IN (" . implode(',', $ids) . ")"];
+    $conds = [];
     // State filter (default: any state except deleted). "when it was published" uses submission_date.
     $state = trim((string)($f['state'] ?? ''));
     $allowedStates = ['published', 'draft', 'under review', 'expired', 'deleted'];
@@ -773,10 +839,15 @@ function scraper_history_query(array $f): array {
     if ($from !== '') { $conds[] = "submission_date >= '" . $a->real_escape_string($from) . " 00:00:00'"; }
     else              { $conds[] = "submission_date >= (NOW() - INTERVAL 30 DAY)"; }
     if ($to !== '')   { $conds[] = "submission_date <= '" . $a->real_escape_string($to) . " 23:59:59'"; }
-    $res = $a->query("SELECT id, title, url, canonical, publications, submission_date, state
-                      FROM articles WHERE " . implode(' AND ', $conds));
-    $arts = [];
-    while ($x = $res->fetch_assoc()) { $arts[(int)$x['id']] = $x; }
+    $arts = []; // keyed by "table:id"
+    foreach ($idsByTable as $tbl => $idMap) {
+        if (!$idMap) continue;
+        $idList = implode(',', array_map('intval', array_keys($idMap)));
+        $where = array_merge(["id IN ($idList)"], $conds);
+        $res = $a->query("SELECT id, title, url, canonical, publications, submission_date, state
+                          FROM `$tbl` WHERE " . implode(' AND ', $where));
+        while ($x = $res->fetch_assoc()) { $arts[$tbl . ':' . (int)$x['id']] = $x + ['__table' => $tbl]; }
+    }
     // Publication base URLs for building canonical links.
     $pubMap = [];
     $pr = $a->query("SELECT publication, url FROM publications WHERE pub_live=1");
@@ -784,9 +855,12 @@ function scraper_history_query(array $f): array {
     $a->close();
 
     $rows = [];
-    foreach ($arts as $aid => $art) {
-        $c = $byArt[$aid];
-        // Canonical publication: articles.canonical if valid, else the first listed publication.
+    foreach ($arts as $key => $art) {
+        $c = $byKey[$key];
+        $tbl = $art['__table'];
+        $aid = (int)$art['id'];
+        $isBreaking = ($tbl === 'articles_breaking_news');
+        // Canonical publication: article's canonical if valid, else the first listed publication.
         $canon = trim((string)($art['canonical'] ?? ''));
         if ($canon === '' || !isset($pubMap[$canon])) {
             $parts = array_filter(array_map('trim', explode(',', (string)$art['publications'])));
@@ -794,13 +868,15 @@ function scraper_history_query(array $f): array {
         }
         // A live link only makes sense for published articles.
         $canonUrl = ($art['state'] === 'published' && isset($pubMap[$canon]) && !empty($art['url']))
-            ? $pubMap[$canon] . '/' . ltrim($art['url'], '/') : null;
+            ? $pubMap[$canon] . '/' . scraper_article_url_prefix($tbl) . ltrim($art['url'], '/') : null;
         $rows[] = [
             'article_id'     => $aid,
             'title'          => ($art['title'] !== '' ? $art['title'] : $c['title']),
             'published_at'   => $art['submission_date'],
             'state'          => $art['state'],
-            'editor_url'     => 'module-articles.php?open=' . $aid,
+            // Breaking items aren't editable through the normal article tool.
+            'editor_url'     => $isBreaking ? null : ('module-articles.php?open=' . $aid),
+            'is_breaking'    => $isBreaking,
             'publication_key'=> $c['publication_key'],
             'ten_section'    => $c['ten_section'],
             'source_name'    => $c['source_name'],

@@ -44,8 +44,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <p>This link will expire in 1 hour.</p>
                 <p>If you didn't request this, please ignore this email.</p>
             ";
-            sendEmail($email, 'Password Reset - TEN Management', $emailBody);
-            
+            require_once __DIR__ . '/lib/transactional_mail.php';
+            ten_send_transactional_mail($email, $user['full_name'], 'Password Reset - TEN Management', $emailBody);
+
             $success = 'Password reset link has been sent to your email address.';
         } else {
             // Don't reveal if email exists or not for security
