@@ -62,6 +62,18 @@
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
 
+  // Plain-English name for a selected element (from its tag, else its class).
+  function elementFriendly(tag, selector) {
+    var map = { h1: "heading", h2: "heading", h3: "subheading", h4: "subheading",
+      p: "text", span: "text", a: "link", img: "image", button: "button",
+      ul: "list", ol: "list", li: "list item", nav: "navigation",
+      header: "header", footer: "footer", section: "section", div: "section" };
+    var t = String(tag || "").toLowerCase();
+    if (map[t]) { return map[t]; }
+    if (selector) { return selector.replace(/^\./, "").replace(/\bdl-/g, "").replace(/-/g, " ").trim(); }
+    return t || "element";
+  }
+
   function hostFrom(url) {
     var h = String(url || "").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
     return h;
@@ -176,6 +188,7 @@
         var idx = parseInt(d.index, 10);
         if (isNaN(idx) || !st.desktop.blocks[idx]) { return; }
         st.sel = idx; st.selEl = d.selector || "";
+        st.selElLabel = d.elLabel || ""; st.selEditKey = d.editKey || "";
         // In max-preview mode, a click jumps straight into the block's HTML editor.
         if (st.pvMax && d.blockType && TEMPLATE_BLOCKS.indexOf(d.blockType) !== -1) { enterBlockMode(d.blockType); return; }
         render();
@@ -1214,17 +1227,30 @@
 
     // Which element the style controls target.
     var target = document.createElement("div"); target.className = "dl-target";
-    target.innerHTML = "Styling: <strong>" + (selEl ? esc(selEl) : "whole block") + "</strong>";
+    target.innerHTML = "Editing: <strong>" + (selEl ? esc(elementFriendly(st.selElLabel, selEl)) : "the whole block") + "</strong>";
     if (selEl) {
       var whole = document.createElement("button"); whole.type = "button"; whole.className = "dl-chip"; whole.style.marginLeft = "8px"; whole.textContent = "whole block";
-      whole.addEventListener("click", function () { st.selEl = ""; renderRight(); });
+      whole.addEventListener("click", function () { st.selEl = ""; st.selEditKey = ""; st.selElLabel = ""; renderRight(); });
       target.appendChild(whole);
     }
     el.right.appendChild(target);
-    var pHint = document.createElement("p"); pHint.className = "dl-hint"; pHint.textContent = "Click any element in the preview to style just that element.";
+    var pHint = document.createElement("p"); pHint.className = "dl-hint";
+    pHint.textContent = selEl ? "Changes below apply to this element. Click another part of the preview to pick a different one."
+                              : "Click any element in the preview to edit and style just that part.";
     el.right.appendChild(pHint);
 
+    // If this element's text is editable, offer a reliable text field here too.
+    if (selEl && st.selEditKey) {
+      var txtSub = document.createElement("div"); txtSub.className = "dl-sub"; txtSub.textContent = "Text"; el.right.appendChild(txtSub);
+      var txt = document.createElement("input"); txt.type = "text"; txt.placeholder = "(automatic default)";
+      txt.value = (st.selEditKey in block.settings) ? block.settings[st.selEditKey] : "";
+      var ekey = st.selEditKey;
+      txt.addEventListener("input", function () { block.settings[ekey] = txt.value; applyChangeDebounced(); });
+      el.right.appendChild(field("Edit this text", txt));
+    }
+
     // Visual style controls for the selected element.
+    var styleSub = document.createElement("div"); styleSub.className = "dl-sub"; styleSub.textContent = selEl ? "Style this element" : "Style the whole block"; el.right.appendChild(styleSub);
     var styles = block.settings.styles[selEl] || (block.settings.styles[selEl] = {});
     buildStyleControls(styles);
 
