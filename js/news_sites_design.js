@@ -108,7 +108,8 @@
         '<button class="dl-b save" id="dlSave">Save draft</button>' +
         '<button class="dl-b publish" id="dlPublish">Publish</button>' +
         '<button class="dl-b history" id="dlHistory">History</button>' +
-        '<button class="dl-b max" id="dlMax" title="Maximise">⤢</button>' +
+        '<button class="dl-b" id="dlPvMax" title="Maximise the preview, then click any element to edit its HTML">⤢ Max preview</button>' +
+        '<button class="dl-b max" id="dlMax" title="Maximise window">⤢</button>' +
         '<button class="dl-b close" id="dlClose">Close</button>' +
       '</div>' +
       '<div class="dl-main">' +
@@ -163,6 +164,7 @@
     m.querySelector("#dlPublish").addEventListener("click", doPublish);
     m.querySelector("#dlHistory").addEventListener("click", showHistory);
     m.querySelector("#dlMax").addEventListener("click", function () { el.modal.classList.toggle("dl-max"); });
+    m.querySelector("#dlPvMax").addEventListener("click", togglePvMax);
     m.querySelector("#dlClose").addEventListener("click", close);
     ov.addEventListener("click", close);
 
@@ -173,7 +175,11 @@
       if (d.action === "select") {
         if (st.device !== "desktop") { setDevice("desktop"); }
         var idx = parseInt(d.index, 10);
-        if (!isNaN(idx) && st.desktop.blocks[idx]) { st.sel = idx; st.selEl = d.selector || ""; render(); }
+        if (isNaN(idx) || !st.desktop.blocks[idx]) { return; }
+        st.sel = idx; st.selEl = d.selector || "";
+        // In max-preview mode, a click jumps straight into the block's HTML editor.
+        if (st.pvMax && d.blockType && TEMPLATE_BLOCKS.indexOf(d.blockType) !== -1) { enterBlockMode(d.blockType); return; }
+        render();
       } else if (d.action === "edit") {
         var i = parseInt(d.index, 10);
         var blk = st.desktop.blocks[i];
@@ -191,7 +197,9 @@
     build();
     st = { pub: p.publication, host: hostFrom(p.url), page: "front", device: "desktop",
            desktop: { theme: {}, blocks: [] }, mobile: {}, sel: -1, selEl: "",
-           mode: "page", blockType: null, blockTemplates: {}, blockSel: null };
+           mode: "page", blockType: null, blockTemplates: {}, blockSel: null, pvMax: false };
+    el.modal.classList.remove("dl-pvmax", "dl-max");
+    var pvb = el.modal.querySelector("#dlPvMax"); if (pvb) { pvb.innerHTML = "⤢ Max preview"; pvb.classList.remove("dl-active-max"); }
     el.title.textContent = "Design — " + p.title;
     el.ov.classList.add("dl-show"); el.modal.classList.add("dl-show");
     document.body.style.overflow = "hidden"; // kill the page scrollbar behind the modal
@@ -201,6 +209,19 @@
   function close() {
     if (el.ov) { el.ov.classList.remove("dl-show"); el.modal.classList.remove("dl-show"); }
     document.body.style.overflow = "";
+  }
+
+  // Maximise the preview pane (hide side panels + go fullscreen). While on, a
+  // click on any block in the preview opens that block's HTML editor — a focused
+  // canvas for detailed desktop design work.
+  function togglePvMax() {
+    if (!st) { return; }
+    st.pvMax = !st.pvMax;
+    el.modal.classList.toggle("dl-pvmax", st.pvMax);
+    el.modal.classList.toggle("dl-max", st.pvMax);
+    var b = el.modal.querySelector("#dlPvMax");
+    if (b) { b.innerHTML = st.pvMax ? "⤡ Exit max" : "⤢ Max preview"; b.classList.toggle("dl-active-max", st.pvMax); }
+    if (st.pvMax && st.mode === "page") { toast("Max preview on — click any part of the page to edit its HTML"); }
   }
 
   function syncChips() {

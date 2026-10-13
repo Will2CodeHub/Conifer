@@ -29,6 +29,12 @@
 /* Maximised modal */
 .dl-modal.dl-max { inset: 0; border-radius: 0; }
 
+/* Max-preview: hide the side panels so the preview fills the window. A click on
+   the preview then opens the clicked block's HTML editor (set in JS). */
+.dl-modal.dl-pvmax .dl-body { grid-template-columns: 1fr; }
+.dl-modal.dl-pvmax .dl-col.left, .dl-modal.dl-pvmax .dl-col.right { display: none; }
+.dl-b.dl-active-max { background: #2563eb; color: #fff; border-color: #2563eb; }
+
 .dl-main { min-height: 0; overflow: hidden; position: relative; }
 .dl-body { display: grid; grid-template-columns: 280px 1fr 300px; min-height: 0; height: 100%; }
 #dlGjsWrap { display: none; height: 100%; }
