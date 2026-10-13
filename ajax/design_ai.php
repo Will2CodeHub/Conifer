@@ -120,7 +120,7 @@ if (!$apiKey) { dai_fail('AI is not configured (no API key).'); }
 
 $req = [
     'model'      => 'claude-sonnet-5',
-    'max_tokens' => 3000,
+    'max_tokens' => 4096,
     'system'     => $system,
     'messages'   => [['role' => 'user', 'content' => $userMsg]],
 ];
@@ -143,8 +143,24 @@ if ($response === false) { dai_fail('Could not reach the AI service: ' . $curlEr
 if ($httpCode !== 200)   { dai_fail('AI request failed (HTTP ' . $httpCode . ').'); }
 
 $data = json_decode($response, true);
-$text = $data['content'][0]['text'] ?? '';
-if ($text === '') { dai_fail('The AI returned an empty response.'); }
+if (!is_array($data)) { dai_fail('The AI returned an unreadable response.'); }
+if (isset($data['error']['message'])) { dai_fail('AI error: ' . (string)$data['error']['message']); }
+
+// Concatenate every text block (the model may emit more than one, or precede the
+// answer with a non-text block). Never assume content[0] is the text.
+$text = '';
+if (isset($data['content']) && is_array($data['content'])) {
+    foreach ($data['content'] as $block) {
+        if (is_array($block) && ($block['type'] ?? '') === 'text' && isset($block['text'])) {
+            $text .= (string)$block['text'];
+        }
+    }
+}
+$text = trim($text);
+if ($text === '') {
+    $reason = (string)($data['stop_reason'] ?? $data['type'] ?? 'no text returned');
+    dai_fail('The AI returned no usable text (' . $reason . '). Please try again or rephrase.');
+}
 $text = dai_unfence($text);
 
 // ---- validate + return ----
