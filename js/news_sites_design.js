@@ -103,6 +103,7 @@
           '<button class="dl-chip" data-dev="mobile">Mobile</button>' +
         '</div>' +
         '<div class="dl-spacer"></div>' +
+        '<button class="dl-b dl-ai" id="dlAi">✨ AI edit</button>' +
         '<button class="dl-b preview" id="dlPreviewBtn">Preview ↗</button>' +
         '<button class="dl-b save" id="dlSave">Save draft</button>' +
         '<button class="dl-b publish" id="dlPublish">Publish</button>' +
@@ -156,6 +157,7 @@
     m.querySelectorAll("#dlDevices .dl-chip").forEach(function (b) {
       b.addEventListener("click", function () { setDevice(b.dataset.dev); });
     });
+    m.querySelector("#dlAi").addEventListener("click", openAiDialog);
     m.querySelector("#dlPreviewBtn").addEventListener("click", function () { window.open(previewUrl(), "_blank"); });
     m.querySelector("#dlSave").addEventListener("click", saveDraft);
     m.querySelector("#dlPublish").addEventListener("click", doPublish);
@@ -829,6 +831,137 @@
       var nr = wys.doc.createRange(); nr.selectNodeContents(link); sel.removeAllRanges(); sel.addRange(nr);
     }
     rememberRange(); closeLinkDialog(); wysChanged();
+  }
+
+  // ---- AI edit (Claude) ----
+  function aiApi(params) {
+    var body = new URLSearchParams();
+    body.set("pub", st.pub);
+    Object.keys(params).forEach(function (k) { body.set(k, params[k]); });
+    return fetch("ajax/design_ai.php", { method: "POST", body: body })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (!j.success) { throw new Error(j.message || "AI request failed"); } return j; });
+  }
+
+  function buildAiDialog() {
+    if (el.aiDlg) { return; }
+    var ov = document.createElement("div"); ov.className = "dl-ov dl-aiov";
+    var m = document.createElement("div"); m.className = "dl-aidlg";
+    m.innerHTML =
+      '<h3>✨ AI design edit</h3>' +
+      '<div class="dl-ai-modes">' +
+        '<label><input type="radio" name="dlAiMode" value="restyle" checked> Restyle the whole design</label>' +
+        '<label><input type="radio" name="dlAiMode" value="edit_element"> Edit the selected block</label>' +
+      '</div>' +
+      '<p class="dl-ai-ctx" id="dlAiCtx"></p>' +
+      '<textarea id="dlAiText" class="dl-ai-text" placeholder="Describe the change in plain English — e.g. “make the headlines grander and the captions tighter”."></textarea>' +
+      '<p class="dl-ai-note">Works to your house system (Lora / Merriweather / Inter, zero-radius). Changes go to the draft — preview them, then Publish when you’re happy.</p>' +
+      '<div class="dl-ai-actions">' +
+        '<span class="dl-ai-busy" id="dlAiBusy">Thinking…</span>' +
+        '<button class="dl-b" id="dlAiCancel">Cancel</button>' +
+        '<button class="dl-b publish" id="dlAiApply">Apply</button>' +
+      '</div>';
+    var root = document.getElementById("dlDesignRoot");
+    root.appendChild(ov); root.appendChild(m);
+    el.aiOv = ov; el.aiDlg = m;
+    el.aiText = m.querySelector("#dlAiText");
+    el.aiCtx = m.querySelector("#dlAiCtx");
+    el.aiBusy = m.querySelector("#dlAiBusy");
+    el.aiApply = m.querySelector("#dlAiApply");
+    ov.addEventListener("click", closeAiDialog);
+    m.querySelector("#dlAiCancel").addEventListener("click", closeAiDialog);
+    el.aiApply.addEventListener("click", applyAi);
+    m.querySelectorAll('input[name="dlAiMode"]').forEach(function (r) {
+      r.addEventListener("change", updateAiCtx);
+    });
+  }
+  function selectedAiMode() {
+    var r = el.aiDlg.querySelector('input[name="dlAiMode"]:checked');
+    return r ? r.value : "restyle";
+  }
+  function selectedBlock() {
+    return (st.mode === "page" && st.sel >= 0 && st.desktop.blocks[st.sel]) ? st.desktop.blocks[st.sel] : null;
+  }
+  function updateAiCtx() {
+    var mode = selectedAiMode();
+    if (mode === "restyle") {
+      el.aiCtx.textContent = "Applies to the whole " + (PAGE_LABELS[st.page] || st.page) + " design (fonts, sizes, spacing, colours).";
+    } else {
+      var blk = selectedBlock();
+      el.aiCtx.textContent = blk ? ("Editing the “" + (REG[blk.type] ? REG[blk.type].label : blk.type) + "” block.")
+                                 : "Select a block in the list first, then choose this mode.";
+    }
+  }
+  function openAiDialog() {
+    if (st.mode !== "page") { exitBlockMode(); }
+    buildAiDialog();
+    el.aiText.value = "";
+    el.aiBusy.style.visibility = "hidden";
+    // Default to edit-block mode when a block is selected.
+    var blk = selectedBlock();
+    el.aiDlg.querySelector('input[value="edit_element"]').checked = !!blk;
+    el.aiDlg.querySelector('input[value="restyle"]').checked = !blk;
+    updateAiCtx();
+    el.aiOv.classList.add("dl-show"); el.aiDlg.classList.add("dl-show");
+    setTimeout(function () { el.aiText.focus(); }, 30);
+  }
+  function closeAiDialog() {
+    if (el.aiOv) { el.aiOv.classList.remove("dl-show"); el.aiDlg.classList.remove("dl-show"); }
+  }
+  function aiBusy(on) {
+    if (el.aiBusy) { el.aiBusy.style.visibility = on ? "visible" : "hidden"; }
+    if (el.aiApply) { el.aiApply.disabled = on; }
+  }
+  // Fetch a block's current template (saved per-pub, else the built-in default).
+  function getBlockTemplateFor(type, cb) {
+    loadBlockTemplates(function () {
+      var saved = st.blockTemplates[type];
+      if (saved != null && saved !== "") { cb(saved); return; }
+      fetch("https://" + st.host + "/design/?block=" + encodeURIComponent(type) + "&tpl_default=1")
+        .then(function (r) { return r.text(); })
+        .then(cb).catch(function () { cb(""); });
+    });
+  }
+  function applyAi() {
+    var mode = selectedAiMode();
+    var instruction = el.aiText.value.trim();
+    if (!instruction) { toast("Describe the change first"); return; }
+
+    if (mode === "restyle") {
+      aiBusy(true);
+      aiApi({ action: "restyle", instruction: instruction, current_theme: JSON.stringify(st.desktop.theme || {}) })
+        .then(function (j) {
+          if (!st.desktop.theme) { st.desktop.theme = {}; }
+          Object.keys(j.theme || {}).forEach(function (k) { st.desktop.theme[k] = j.theme[k]; });
+          if (j.custom_css) {
+            st.desktop.theme.custom_css = (st.desktop.theme.custom_css ? st.desktop.theme.custom_css + "\n" : "") + j.custom_css;
+          }
+          aiBusy(false); closeAiDialog();
+          saveDraftSilent().then(refreshPreview); renderRight();
+          toast("Design restyled — preview updated");
+        })
+        .catch(function (e) { aiBusy(false); toast(e.message); });
+      return;
+    }
+
+    // edit_element
+    var blk = selectedBlock();
+    if (!blk) { toast("Select a block in the list first"); return; }
+    var type = blk.type;
+    aiBusy(true);
+    getBlockTemplateFor(type, function (tpl) {
+      if (!tpl) { aiBusy(false); toast("Couldn't load that block's content"); return; }
+      aiApi({ action: "edit_element", block_type: type, template: tpl, instruction: instruction })
+        .then(function (j) {
+          st.blockTemplates[type] = j.template;
+          return api("save_draft", { page: "_blocks", device: "desktop", layout_json: JSON.stringify({ templates: st.blockTemplates }) });
+        })
+        .then(function () {
+          aiBusy(false); closeAiDialog(); refreshPreview();
+          toast("Block updated — preview refreshed");
+        })
+        .catch(function (e) { aiBusy(false); toast(e.message); });
+    });
   }
 
   function loadPage() {
