@@ -28,21 +28,51 @@ function dl_page_label(string $page): string {
     return $map[$page] ?? ucfirst($page);
 }
 
-/** Default theme tokens (fonts, colours, spacing). Emitted as CSS variables. */
+/**
+ * Default theme tokens — the full editorial typographic + spacing scale.
+ * Emitted as CSS variables (see theme.php) and consumed by every block's CSS.
+ * 3-font system: Lora (display/headlines), Merriweather (article body only),
+ * Inter (UI / metadata / tags / captions). Zero border-radius on containers
+ * and images (--radius). The AI "restyle" mode writes exactly these keys.
+ */
 function dl_default_theme(): array {
     return [
-        'font_display'  => '"Playfair Display", Georgia, serif',
-        'font_body'     => '"Lora", Georgia, serif',
+        // Fonts
+        'font_display'  => '"Lora", Georgia, serif',
+        'font_body'     => '"Merriweather", Georgia, serif',
         'font_ui'       => '"Inter", system-ui, sans-serif',
+        // Colours (navy-ink monochrome)
         'color_ink'     => '#14142b',
-        'color_body'    => '#333333',
+        'color_body'    => '#2a2a33',
         'color_muted'   => '#6b6b6b',
         'color_accent'  => '#1a2b4a',
         'color_bg'      => '#ffffff',
         'color_button'  => '#14142b',
+        // Headline scale (Lora)
+        'h1_size'       => 'clamp(2.4rem, 4vw, 3.4rem)',
+        'h1_weight'     => '700',
+        'h1_line'       => '1.12',
+        'h1_spacing'    => '-0.01em',
+        'h2_size'       => 'clamp(1.8rem, 2.6vw, 2.3rem)',
+        'h2_weight'     => '700',
+        'h2_line'       => '1.18',
+        'h3_size'       => '1.35rem',
+        'h3_weight'     => '700',
+        'h3_line'       => '1.25',
+        // Body (Merriweather) + reading measure
+        'body_size'     => '1.15rem',
+        'body_line'     => '1.8',
+        'body_measure'  => '44rem',
+        // UI / metadata / tags (Inter)
+        'ui_size'       => '0.8rem',
+        'ui_weight'     => '600',
+        'ui_spacing'    => '0.08em',
+        'caption_size'  => '0.85rem',
+        // Shape + spacing
+        'radius'        => '0',
         'container_max' => '1200px',
         'gutter'        => '24px',
-        'section_gap'   => '48px',
+        'section_gap'   => '64px',
         'block_gap'     => '24px',
     ];
 }
@@ -66,6 +96,8 @@ function dl_registry(): array {
         'article_hero'     => ['label' => 'Article hero image','pages' => ['article'],                         'defaults' => ['ratio' => '16x9']],
         'article_body'     => ['label' => 'Article body',      'pages' => ['article'],                         'defaults' => []],
         'article_byline'   => ['label' => 'Byline',            'pages' => ['article'],                         'defaults' => []],
+        'article_related'  => ['label' => 'Related articles (3-up)', 'pages' => ['article'],                  'defaults' => ['count' => 3, 'heading' => '']],
+        'article_quickreads' => ['label' => 'Quick reads (3-up)',  'pages' => ['article'],                       'defaults' => ['count' => 3, 'heading' => 'Quick Reads News']],
         'article_comments' => ['label' => 'Comments',          'pages' => ['article'],                         'defaults' => ['enabled' => true]],
         'triple_box'       => ['label' => 'Triple box (insurance / clinics / events)', 'pages' => ['front', 'section'], 'defaults' => []],
         'section_carousel' => ['label' => 'Section carousel',  'pages' => ['front', 'section', 'article'],     'defaults' => ['section' => '', 'count' => 10]],

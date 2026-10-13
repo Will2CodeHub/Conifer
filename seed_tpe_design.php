@@ -72,6 +72,8 @@ $pages = [
             ['type' => 'article_hero',     'settings' => ['ratio' => '16x9']],
             ['type' => 'article_body',     'settings' => []],
             ['type' => 'article_byline',   'settings' => []],
+            ['type' => 'article_related',  'settings' => ['count' => 3, 'heading' => '']],
+            ['type' => 'article_quickreads','settings' => ['count' => 3, 'heading' => 'Quick Reads News']],
             ['type' => 'article_comments', 'settings' => ['enabled' => true]],
             ['type' => 'footer',           'settings' => []],
         ]],
