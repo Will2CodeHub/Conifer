@@ -113,8 +113,15 @@
           '<div class="dl-col center" style="padding:0"><div class="dl-preview-wrap" id="dlPvWrap"><iframe class="dl-preview" id="dlPreview"></iframe></div></div>' +
           '<div class="dl-col right" id="dlRight"></div>' +
         '</div>' +
-        '<div id="dlGjsWrap"><div id="dlGjs"></div></div>' +
-      '</div>';
+        '<div id="dlGjsWrap">' +
+          '<div class="dl-wys">' +
+            '<div class="dl-wys-tb" id="dlWysTb"></div>' +
+            '<div class="dl-wys-stage">' +
+              '<iframe class="dl-wys-frame" id="dlWysFrame"></iframe>' +
+              '<textarea class="dl-wys-src" id="dlWysSrc" spellcheck="false" style="display:none"></textarea>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
     root.appendChild(ov); root.appendChild(m);
 
     el.ov = ov; el.modal = m;
@@ -228,81 +235,591 @@
     article_comments: "{{heading}}, {{button_label}}"
   };
 
-  var gjs = null;
-  var DL_GJS_BLOCKS = [
-    { id: "dl-text", label: "Text", content: '<div data-gjs-type="text">Insert text</div>' },
-    { id: "dl-heading", label: "Heading", content: '<h2 data-gjs-type="text">Heading</h2>' },
-    { id: "dl-para", label: "Paragraph", content: '<p data-gjs-type="text">Paragraph text</p>' },
-    { id: "dl-image", label: "Image", content: { type: "image" } },
-    { id: "dl-link", label: "Link", content: '<a data-gjs-type="link" href="#">Link</a>' },
-    { id: "dl-button", label: "Button", content: '<a class="dl-btn" href="#">Button</a>' },
-    { id: "dl-box", label: "Box", content: '<div style="padding:20px;border:1px solid #e5e7eb;min-height:40px"></div>' },
-    { id: "dl-row2", label: "2 columns", content: '<div style="display:flex;gap:20px"><div style="flex:1;min-height:40px">Column</div><div style="flex:1;min-height:40px">Column</div></div>' },
-    { id: "dl-row3", label: "3 columns", content: '<div style="display:flex;gap:20px"><div style="flex:1;min-height:40px">Col</div><div style="flex:1;min-height:40px">Col</div><div style="flex:1;min-height:40px">Col</div></div>' }
-  ];
+  // ====================================================================
+  //  WYSIWYG block-template editor
+  //  Edits a reusable block's HTML template as rich text: click a block,
+  //  select text, format it or turn it into a link (fixed page, section,
+  //  dynamic field, or any URL). Placeholders like {{title}} show as
+  //  protected tokens and round-trip untouched. A raw-HTML view covers
+  //  anything the toolbar does not.
+  // ====================================================================
 
-  function enterBlockMode(type) {
-    st.mode = "blocks"; st.blockType = type; el.pageSel.disabled = true;
-    el.gjsWrap.style.display = "block"; el.body.style.display = "none";
-    loadBlockTemplates(function () {
-      var saved = st.blockTemplates[type];
-      if (saved != null && saved !== "") { initGjs(type, saved); }
-      else {
-        fetch("https://" + st.host + "/design/?block=" + encodeURIComponent(type) + "&tpl_default=1")
-          .then(function (r) { return r.text(); })
-          .then(function (txt) { if (st.blockType === type) { initGjs(type, txt); } })
-          .catch(function () { initGjs(type, "<div>Empty block</div>"); });
-      }
-    });
+  // Static "fixed page" destinations, always offered in the link picker.
+  var FIXED_PAGES = [
+    ["/design/", "Home page"],
+    ["/design/about", "About us"],
+    ["/design/contact", "Contact"],
+    ["/design/impressum", "Impressum"],
+    ["/design/privacy", "Privacy policy"],
+    ["/design/terms", "Terms"],
+    ["/design/disclaimer", "Disclaimer"]
+  ];
+  // Data-driven href placeholders worth offering per block (so the section
+  // name can link to *its own* section, etc.). {{href}} suits any list item.
+  var BLOCK_HREFS = {
+    article_header: [["{{section_href}}", "This article’s section page"]],
+    front_feature:  [["{{hero.href}}", "Lead-story link"]]
+  };
+  var GENERIC_HREF = ["{{href}}", "Current item’s link (inside a list)"];
+
+  var wys = { frame: null, src: null, doc: null, win: null, root: null, type: null,
+              srcMode: false, styleTag: "", savedRange: null, sections: [],
+              chrome: false, insSel: null, srcBtn: null };
+
+  // Distinct placeholders a block template can use (for the Insert-field menu).
+  function fieldsFor(type) {
+    var out = [], s = BLOCK_PLACEHOLDERS[type] || "", re = /\{\{\{?[^{}]*?\}?\}\}/g, m;
+    while ((m = re.exec(s))) { if (out.indexOf(m[0]) === -1) { out.push(m[0]); } }
+    return out;
   }
-  function exitBlockMode() {
-    st.mode = "page"; st.blockType = null; el.pageSel.disabled = false;
-    el.gjsWrap.style.display = "none"; el.body.style.display = "";
-    render(); refreshPreview();
+
+  // Separate a stored template's HTML from any trailing <style> blocks (kept so
+  // styles authored in the previous builder are preserved on round-trip).
+  function splitStyle(tpl) {
+    var styles = [];
+    var html = String(tpl || "").replace(/<style[\s\S]*?<\/style>/gi, function (m) { styles.push(m); return ""; });
+    return { html: html.trim(), style: styles.join("\n") };
   }
+
   function loadBlockTemplates(cb) {
     api("load", { page: "_blocks", device: "desktop" }).then(function (j) {
       st.blockTemplates = (j.layout && j.layout.templates) ? j.layout.templates : {};
       if (cb) { cb(); }
     }).catch(function (e) { st.blockTemplates = {}; toast(e.message); if (cb) { cb(); } });
   }
-  function initGjs(type, html) {
-    if (!window.grapesjs) { toast("Visual editor library failed to load"); return; }
-    if (!gjs) {
-      var cfg = {
-        container: "#dlGjs",
-        height: "100%",
-        fromElement: false,
-        storageManager: false,
-        canvas: { styles: ["https://" + st.host + "/design/assets/design.css"] }
-      };
-      // Full builder UI (blocks panel, style manager, layers, RTE) when available.
-      var preset = window["grapesjs-preset-webpage"] || window.grapesjsPresetWebpage;
-      if (typeof preset === "function") {
-        cfg.plugins = [preset];
-      } else {
-        cfg.blockManager = { blocks: DL_GJS_BLOCKS };
-      }
-      gjs = grapesjs.init(cfg);
-      // Add our own basic blocks alongside whatever the preset provides.
-      try { DL_GJS_BLOCKS.forEach(function (b) { gjs.BlockManager.add(b.id, b); }); } catch (e) {}
-      gjs.on("update", saveGjsDebounced);
-    }
-    gjs.setStyle("");
-    gjs.setComponents(html || "<div>Empty block</div>");
-    window.__dlGjs = gjs;
-    try { gjs.runCommand("open-blocks"); } catch (e) {}
+
+  function loadSections() {
+    api("link_targets", {}).then(function (j) { wys.sections = j.sections || []; })
+      .catch(function () { wys.sections = []; });
   }
-  function saveGjsDebounced() {
+
+  function enterBlockMode(type) {
+    st.mode = "blocks"; st.blockType = type; wys.type = type;
+    el.pageSel.disabled = true;
+    if (el.blockSel.value !== type) { el.blockSel.value = type; }
+    el.gjsWrap.style.display = "block"; el.body.style.display = "none";
+    buildWysChrome();
+    fillInsertMenu(type);
+    loadSections();
+    loadBlockTemplates(function () {
+      var saved = st.blockTemplates[type];
+      if (saved != null && saved !== "") { loadWys(saved); }
+      else {
+        fetch("https://" + st.host + "/design/?block=" + encodeURIComponent(type) + "&tpl_default=1")
+          .then(function (r) { return r.text(); })
+          .then(function (txt) { if (st.blockType === type) { loadWys(txt); } })
+          .catch(function () { loadWys("<div>Empty block</div>"); });
+      }
+    });
+  }
+  function exitBlockMode() {
+    if (wys.srcMode) { commitSource(); }   // fold any raw-HTML edits back first
+    st.mode = "page"; st.blockType = null;
+    el.blockSel.value = "";
+    el.pageSel.disabled = false;
+    el.gjsWrap.style.display = "none"; el.body.style.display = "";
+    render(); refreshPreview();
+  }
+
+  // ---- toolbar + editing surface (built once) ----
+  function buildWysChrome() {
+    if (wys.chrome) { return; }
+    wys.chrome = true;
+    wys.frame = document.getElementById("dlWysFrame");
+    wys.src   = document.getElementById("dlWysSrc");
+    var tb = document.getElementById("dlWysTb");
+
+    function btn(html, title, fn, cls) {
+      var b = document.createElement("button");
+      b.type = "button"; b.className = "dl-tbtn" + (cls ? " " + cls : ""); b.title = title; b.innerHTML = html;
+      b.addEventListener("mousedown", function (e) { e.preventDefault(); }); // keep the editor selection
+      b.addEventListener("click", function (e) { e.preventDefault(); fn(); });
+      tb.appendChild(b); return b;
+    }
+    function cmd(name, val) {
+      return function () { if (wys.srcMode || !wys.doc) { return; } wys.doc.execCommand(name, false, val || null); wys.root.focus(); wysChanged(); };
+    }
+    function sep() { var s = document.createElement("span"); s.className = "dl-tsep"; tb.appendChild(s); }
+
+    btn("‹ Done", "Finish editing this block", function () { exitBlockMode(); }, "dl-tback");
+    var lab = document.createElement("span"); lab.className = "dl-wys-label"; lab.id = "dlWysLabel"; tb.appendChild(lab);
+    sep();
+
+    var fmt = document.createElement("select"); fmt.className = "dl-tsel"; fmt.title = "Paragraph / heading";
+    [["", "Format"], ["p", "Paragraph"], ["h1", "Heading 1"], ["h2", "Heading 2"], ["h3", "Heading 3"], ["h4", "Heading 4"], ["blockquote", "Quote"]]
+      .forEach(function (o) { var op = document.createElement("option"); op.value = o[0]; op.textContent = o[1]; fmt.appendChild(op); });
+    fmt.addEventListener("change", function () {
+      if (fmt.value) { formatBlockSel(fmt.value); }
+      fmt.value = "";
+    });
+    tb.appendChild(fmt); sep();
+
+    btn("<b>B</b>", "Bold", function () { wrapInline("strong", ["STRONG", "B"]); });
+    btn("<i>I</i>", "Italic", function () { wrapInline("em", ["EM", "I"]); });
+    btn("<u>U</u>", "Underline", function () { wrapInline("u", ["U"]); });
+    btn("<s>S</s>", "Strikethrough", function () { wrapInline("s", ["S", "STRIKE", "DEL"]); });
+    sep();
+    btn("• List", "Bulleted list", function () { listSel(false); });
+    btn("1. List", "Numbered list", function () { listSel(true); });
+    sep();
+    btn("☰←", "Align left", function () { alignSel("left"); });
+    btn("☰", "Align centre", function () { alignSel("center"); });
+    btn("→☰", "Align right", function () { alignSel("right"); });
+    sep();
+    btn("🔗 Link", "Turn the selected text into a link", openLinkDialog, "dl-tlink");
+    btn("Unlink", "Remove the link", function () { if (wys.srcMode || !wys.doc) { return; } wys.doc.execCommand("unlink"); wys.root.focus(); wysChanged(); });
+    sep();
+
+    wys.insSel = document.createElement("select"); wys.insSel.className = "dl-tsel"; wys.insSel.title = "Insert a dynamic field";
+    wys.insSel.addEventListener("change", function () { if (wys.insSel.value) { insertToken(wys.insSel.value); } wys.insSel.value = ""; });
+    tb.appendChild(wys.insSel); sep();
+
+    btn("✕ Clear", "Clear formatting", cmd("removeFormat"));
+    wys.srcBtn = btn("&lt;/&gt; HTML", "Edit the raw HTML", toggleSource, "dl-tsrc");
+  }
+
+  function fillInsertMenu(type) {
+    if (!wys.insSel) { return; }
+    wys.insSel.innerHTML = "";
+    var first = document.createElement("option"); first.value = ""; first.textContent = "Insert field…"; wys.insSel.appendChild(first);
+    fieldsFor(type).forEach(function (f) { var o = document.createElement("option"); o.value = f; o.textContent = tokInfo(f).text; wys.insSel.appendChild(o); });
+  }
+
+  // ---- tokens: {{...}} <-> protected chips ----
+  // Friendly, plain-English labels so non-technical editors never see raw
+  // template syntax ({{title}}, ↻ nav, ? show_search). The raw token is kept in
+  // data-tok and round-trips untouched; only the on-screen label changes.
+  var FIELD_LABELS = {
+    site_name: "Publication name", logo: "Logo", search_icon: "Search icon",
+    subscribe_label: "Subscribe button", name: "Name", href: "Link",
+    title: "Title", standfirst: "Standfirst", meta: "Date & read time", body: "Article text",
+    tagline: "Tagline", heading: "Heading", button_label: "Button", note: "Note",
+    placeholder: "Placeholder text", guest_label: "Guest label", section: "Section name",
+    section_href: "Section link", read_time: "Read time", snippet: "Summary", summary: "Summary",
+    image: "Image", copyright: "Copyright", blurb: "Blurb", label: "Label",
+    col1_label: "Column 1 title", col2_label: "Column 2 title", col3_label: "Column 3 title", col4_label: "Column 4 title",
+    viewall_label: "View-all label", viewall_href: "View-all link", headlines_label: "Headlines title",
+    url: "Link", cls: "Style", pager: "Pager", event: "Event",
+    clinics_title: "Clinics title", clinics_text: "Clinics text",
+    pkv_title: "PKV title", pkv_text: "PKV text", events_title: "Events title",
+    read_all_label: "Read-all link", role: "Role", photo: "Photo", email: "Email",
+    x_url: "X link", linkedin_url: "LinkedIn link",
+    // loop nouns (singular, so "repeats for each …" reads correctly)
+    nav: "menu link", sections: "section", connect: "link", services: "link", items: "item",
+    cards: "story", mid: "story", side: "story",
+    // condition senses
+    show_search: "search is on", show_subscribe: "subscribe is on",
+    hero: "there is a lead story", lead: "there is a lead story"
+  };
+  function tokHumanize(key) {
+    if (FIELD_LABELS[key]) { return FIELD_LABELS[key]; }
+    var last = String(key).split(".").pop();
+    if (FIELD_LABELS[last]) { return FIELD_LABELS[last]; }
+    last = last.replace(/_/g, " ");
+    return last.charAt(0).toUpperCase() + last.slice(1);
+  }
+  function tokInfo(raw) {
+    var inner = raw.replace(/^\{\{\{?\s*|\s*\}?\}\}$/g, ""), m;
+    if ((m = inner.match(/^#each\s+(.+)$/))) { return { cls: "loop", text: "⟳ repeats for each " + tokHumanize(m[1]) }; }
+    if ((m = inner.match(/^#if\s+(.+)$/)))   { return { cls: "cond", text: "only if " + tokHumanize(m[1]) }; }
+    if (/^\/each$/.test(inner))              { return { cls: "end",  text: "⟳ end" }; }
+    if (/^\/if$/.test(inner))                { return { cls: "end",  text: "end" }; }
+    return { cls: "field", text: tokHumanize(inner) };
+  }
+  function makeTok(raw, doc) {
+    var span = doc.createElement("span");
+    var info = tokInfo(raw);
+    span.className = "dl-tok dl-tok-" + info.cls;
+    span.setAttribute("contenteditable", "false");
+    span.setAttribute("data-tok", raw);
+    span.setAttribute("title", "Automatic content — fills in on the live site");
+    span.textContent = info.text;
+    return span;
+  }
+  // A small neutral placeholder shown in the editor in place of an <img> whose
+  // src is a {{token}} (which would otherwise render as a broken image + show
+  // the raw token in its alt text).
+  var DL_IMG_PLACEHOLDER = "data:image/svg+xml;utf8," + encodeURIComponent(
+    "<svg xmlns='http://www.w3.org/2000/svg' width='44' height='30'><rect width='44' height='30' fill='#e8edf5'/><circle cx='15' cy='11' r='3.2' fill='#b9c4d6'/><path d='M7 24l9-9 5 5 5-4 11 8z' fill='#b9c4d6'/></svg>");
+
+  // Replace templated images with a neutral placeholder for display, stashing the
+  // real src/alt so they round-trip untouched (restored in wysTemplateHtml).
+  function softenTemplateImages(root) {
+    root.querySelectorAll("img").forEach(function (img) {
+      var src = img.getAttribute("src") || "", alt = img.getAttribute("alt") || "";
+      if (!/\{\{/.test(src) && !/\{\{/.test(alt)) { return; }
+      img.setAttribute("data-dl-src", src);
+      if (/\{\{/.test(alt)) { img.setAttribute("data-dl-alt", alt); }
+      var m = src.match(/\{\{\{?\s*([\w.]+)\s*\}?\}\}/);
+      img.setAttribute("src", DL_IMG_PLACEHOLDER);
+      img.setAttribute("alt", m ? tokHumanize(m[1]) : "Image");
+      img.setAttribute("title", "Image — set automatically on the live site");
+      img.classList.add("dl-tplimg");
+    });
+  }
+
+  function tokenizeDom(root, doc) {
+    var walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, null), nodes = [], n;
+    while ((n = walker.nextNode())) { if (/\{\{[\s\S]*?\}\}/.test(n.nodeValue)) { nodes.push(n); } }
+    nodes.forEach(function (tn) {
+      var s = tn.nodeValue, re = /\{\{\{[\s\S]*?\}\}\}|\{\{[\s\S]*?\}\}/g, frag = doc.createDocumentFragment(), last = 0, m;
+      while ((m = re.exec(s))) {
+        if (m.index > last) { frag.appendChild(doc.createTextNode(s.slice(last, m.index))); }
+        frag.appendChild(makeTok(m[0], doc));
+        last = m.index + m[0].length;
+      }
+      if (last < s.length) { frag.appendChild(doc.createTextNode(s.slice(last))); }
+      tn.parentNode.replaceChild(frag, tn);
+    });
+  }
+
+  function loadWys(tpl) {
+    wys.srcMode = false;
+    if (wys.srcBtn) { wys.srcBtn.classList.remove("dl-on"); }
+    var parts = splitStyle(tpl); wys.styleTag = parts.style;
+    var labelEl = document.getElementById("dlWysLabel");
+    if (labelEl) { labelEl.textContent = (REG[wys.type] ? REG[wys.type].label : wys.type); }
+    var skeleton =
+      '<!doctype html><html><head><meta charset="utf-8">' +
+      '<link rel="stylesheet" href="https://' + st.host + '/design/assets/design.css">' +
+      '<style>' +
+        'html,body{margin:0}body{padding:18px;background:#fff;color:#111}' +
+        '.dl-edit-root{min-height:140px;outline:none}' +
+        '.dl-tok{display:inline-block;border-radius:11px;padding:1px 10px;margin:0 1px;font:500 90%/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;white-space:nowrap;vertical-align:baseline}' +
+        '.dl-tok-field{background:#e3edff;color:#1e40af;border:1px solid #bcd3ff}' +
+        '.dl-tok-loop,.dl-tok-cond{background:#f1f5f9;color:#52607a;border:1px dashed #cbd5e1;font-size:78%;text-transform:uppercase;letter-spacing:.04em;font-weight:600}' +
+        '.dl-tok-end{background:transparent;color:#aab3c2;border:1px dashed #e4e8ef;font-size:76%}' +
+        '.dl-tplimg{width:44px;height:30px;border:1px solid #cdd7e5;border-radius:4px;vertical-align:middle;object-fit:cover}' +
+        '.dl-edit-root a{color:#2563eb;text-decoration:underline}' +
+        '::selection{background:#bfdbfe}' +
+      '</style></head><body><div class="dl-edit-root" contenteditable="true"></div></body></html>';
+    wys.frame.onload = function () {
+      wys.doc = wys.frame.contentDocument; wys.win = wys.frame.contentWindow;
+      wys.root = wys.doc.querySelector(".dl-edit-root");
+      wys.root.innerHTML = parts.html || "";
+      tokenizeDom(wys.root, wys.doc);
+      softenTemplateImages(wys.root);
+      try { wys.doc.execCommand("defaultParagraphSeparator", false, "p"); } catch (e) {}
+      wys.root.addEventListener("input", wysChanged);
+      wys.root.addEventListener("keyup", rememberRange);
+      wys.root.addEventListener("mouseup", rememberRange);
+      wys.src.style.display = "none"; wys.frame.style.display = "";
+    };
+    wys.frame.srcdoc = skeleton;
+  }
+
+  function rememberRange() {
+    try { var s = wys.win.getSelection(); if (s && s.rangeCount) { wys.savedRange = s.getRangeAt(0).cloneRange(); } } catch (e) {}
+  }
+
+  // Serialise the editor back to a template string ({{...}} restored).
+  function wysTemplateHtml() {
+    if (!wys.root) { return ""; }
+    var clone = wys.root.cloneNode(true);
+    clone.querySelectorAll(".dl-tok").forEach(function (t) {
+      t.parentNode.replaceChild(wys.doc.createTextNode(t.getAttribute("data-tok") || ""), t);
+    });
+    // Restore templated images to their original {{token}} src/alt.
+    clone.querySelectorAll("img[data-dl-src]").forEach(function (img) {
+      img.setAttribute("src", img.getAttribute("data-dl-src"));
+      if (img.hasAttribute("data-dl-alt")) { img.setAttribute("alt", img.getAttribute("data-dl-alt")); }
+      img.removeAttribute("data-dl-src"); img.removeAttribute("data-dl-alt");
+      img.classList.remove("dl-tplimg"); if (!img.getAttribute("class")) { img.removeAttribute("class"); }
+      img.removeAttribute("title");
+    });
+    clone.querySelectorAll("[contenteditable]").forEach(function (e) { e.removeAttribute("contenteditable"); });
+    return clone.innerHTML.trim();
+  }
+  function wysGetTemplate() {
+    var html = wys.srcMode ? wys.src.value.trim() : wysTemplateHtml();
+    return html + (wys.styleTag ? "\n" + wys.styleTag : "");
+  }
+
+  function wysChanged() {
+    if (!st.blockType) { return; }
+    rememberRange();
     clearTimeout(applyTimer);
     applyTimer = setTimeout(function () {
-      if (!gjs || !st.blockType) { return; }
-      var html = gjs.getHtml();
-      var css = gjs.getCss();
-      st.blockTemplates[st.blockType] = html + (css ? "\n<style>" + css + "</style>" : "");
+      var tpl = wysGetTemplate();
+      st.blockTemplates[st.blockType] = tpl;
       api("save_draft", { page: "_blocks", device: "desktop", layout_json: JSON.stringify({ templates: st.blockTemplates }) })
         .catch(function (e) { toast(e.message); });
     }, 700);
+  }
+
+  function insertToken(raw) {
+    if (wys.srcMode) {
+      var ta = wys.src, p = ta.selectionStart || 0;
+      ta.value = ta.value.slice(0, p) + raw + ta.value.slice(ta.selectionEnd || p);
+      ta.focus(); ta.selectionStart = ta.selectionEnd = p + raw.length;
+      wysChanged(); return;
+    }
+    if (!wys.doc) { return; }
+    wys.root.focus();
+    var sel = wys.win.getSelection();
+    if (wys.savedRange) { sel.removeAllRanges(); sel.addRange(wys.savedRange); }
+    if (!sel.rangeCount) { wys.root.appendChild(makeTok(raw, wys.doc)); wysChanged(); return; }
+    var r = sel.getRangeAt(0); r.deleteContents();
+    var tok = makeTok(raw, wys.doc); r.insertNode(tok);
+    r.setStartAfter(tok); r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
+    rememberRange(); wysChanged();
+  }
+
+  // ---- raw HTML view ----
+  function toggleSource() {
+    if (!wys.srcMode) {
+      wys.src.value = wysTemplateHtml();
+      wys.src.style.display = ""; wys.frame.style.display = "none";
+      wys.srcMode = true; wys.srcBtn.classList.add("dl-on");
+      wys.src.focus();
+    } else {
+      commitSource();
+    }
+  }
+  function commitSource() {
+    var raw = wys.src.value;
+    wys.srcMode = false; wys.srcBtn.classList.remove("dl-on");
+    loadWys(raw + (wys.styleTag ? "\n" + wys.styleTag : ""));
+    wysChanged();
+  }
+
+  // ---- inline formatting ----
+  // execCommand refuses to format a selection made of contenteditable=false
+  // tokens, so we wrap the range ourselves (works for tokens AND plain text).
+  function closestTag(node, tags) {
+    var el = node && (node.nodeType === 1 ? node : node.parentElement);
+    while (el && el !== wys.root) {
+      if (tags.indexOf(el.tagName) !== -1) { return el; }
+      el = el.parentElement;
+    }
+    return null;
+  }
+  function restoreSelection() {
+    var sel = wys.win.getSelection();
+    if (wys.savedRange) { try { sel.removeAllRanges(); sel.addRange(wys.savedRange); } catch (e) {} }
+    return sel;
+  }
+  function wrapInline(tag, tags) {
+    if (wys.srcMode || !wys.doc) { return; }
+    wys.root.focus();
+    var sel = restoreSelection();
+    if (!sel.rangeCount || sel.isCollapsed) { toast("Select some text first"); return; }
+    var range = sel.getRangeAt(0);
+    var existing = closestTag(range.commonAncestorContainer, tags);
+    if (existing) {                         // already formatted -> toggle off
+      var inner = wys.doc.createRange(); inner.selectNodeContents(existing);
+      unwrap(existing);
+      sel.removeAllRanges(); sel.addRange(inner);
+    } else {                                // wrap the selection
+      var frag = range.extractContents();
+      var w = wys.doc.createElement(tag);
+      w.appendChild(frag);
+      range.insertNode(w);
+      var nr = wys.doc.createRange(); nr.selectNodeContents(w);
+      sel.removeAllRanges(); sel.addRange(nr);
+    }
+    rememberRange(); wysChanged();
+  }
+  function clearFormat() {
+    if (wys.srcMode || !wys.doc) { return; }
+    wys.root.focus();
+    var sel = restoreSelection();
+    if (!sel.rangeCount) { return; }
+    var tags = ["STRONG", "B", "EM", "I", "U", "S", "STRIKE", "DEL", "MARK", "A", "SMALL", "SUP", "SUB"];
+    for (var i = 0; i < 12 && sel.rangeCount; i++) {
+      var anc = closestTag(sel.getRangeAt(0).commonAncestorContainer, tags);
+      if (!anc) { break; }
+      unwrap(anc);
+    }
+    rememberRange(); wysChanged();
+  }
+
+  // ---- block-level formatting (headings, lists, align) ----
+  // These also bypass execCommand so they work across protected tokens.
+  var BLOCK_TAGS = ["P", "H1", "H2", "H3", "H4", "H5", "H6", "DIV", "BLOCKQUOTE", "LI", "PRE", "FIGCAPTION"];
+  function blockAncestor(node) {
+    var el = node && (node.nodeType === 1 ? node : node.parentElement);
+    while (el && el !== wys.root) {
+      if (BLOCK_TAGS.indexOf(el.tagName) !== -1) { return el; }
+      el = el.parentElement;
+    }
+    return null;
+  }
+  function formatBlockSel(tag) {
+    if (wys.srcMode || !wys.doc) { return; }
+    wys.root.focus();
+    var sel = restoreSelection();
+    if (!sel.rangeCount) { toast("Select the text to restyle first"); return; }
+    var range = sel.getRangeAt(0);
+    var blk = blockAncestor(range.commonAncestorContainer);
+    var el = wys.doc.createElement(tag);
+    if (blk) {
+      while (blk.firstChild) { el.appendChild(blk.firstChild); }
+      if (blk.getAttribute("style")) { el.setAttribute("style", blk.getAttribute("style")); }
+      blk.parentNode.replaceChild(el, blk);
+    } else {
+      if (range.collapsed) { toast("Select the text to restyle first"); return; }
+      el.appendChild(range.extractContents());
+      range.insertNode(el);
+    }
+    var nr = wys.doc.createRange(); nr.selectNodeContents(el);
+    sel.removeAllRanges(); sel.addRange(nr);
+    rememberRange(); wysChanged();
+  }
+  function alignSel(dir) {
+    if (wys.srcMode || !wys.doc) { return; }
+    wys.root.focus();
+    var sel = restoreSelection();
+    if (!sel.rangeCount) { return; }
+    var range = sel.getRangeAt(0);
+    var blk = blockAncestor(range.commonAncestorContainer);
+    if (!blk) {
+      if (range.collapsed) { toast("Select text in a paragraph first"); return; }
+      blk = wys.doc.createElement("div");
+      blk.appendChild(range.extractContents());
+      range.insertNode(blk);
+    }
+    blk.style.textAlign = dir;
+    var nr = wys.doc.createRange(); nr.selectNodeContents(blk);
+    sel.removeAllRanges(); sel.addRange(nr);
+    rememberRange(); wysChanged();
+  }
+  function listSel(ordered) {
+    if (wys.srcMode || !wys.doc) { return; }
+    wys.root.focus();
+    var sel = restoreSelection();
+    if (!sel.rangeCount) { return; }
+    var range = sel.getRangeAt(0);
+    var li = closestTag(range.commonAncestorContainer, ["LI"]);
+    if (li) {                               // already a list item -> back to paragraph
+      var list = li.parentNode;
+      var p = wys.doc.createElement("p");
+      while (li.firstChild) { p.appendChild(li.firstChild); }
+      list.parentNode.insertBefore(p, list.nextSibling);
+      li.parentNode.removeChild(li);
+      if (!list.querySelector("li")) { list.parentNode.removeChild(list); }
+      var pr = wys.doc.createRange(); pr.selectNodeContents(p); sel.removeAllRanges(); sel.addRange(pr);
+      rememberRange(); wysChanged(); return;
+    }
+    var listEl = wys.doc.createElement(ordered ? "ol" : "ul");
+    var item = wys.doc.createElement("li");
+    var blk = blockAncestor(range.commonAncestorContainer);
+    if (blk) {
+      while (blk.firstChild) { item.appendChild(blk.firstChild); }
+      listEl.appendChild(item);
+      blk.parentNode.replaceChild(listEl, blk);
+    } else {
+      if (range.collapsed) { toast("Select the text to list first"); return; }
+      item.appendChild(range.extractContents());
+      listEl.appendChild(item);
+      range.insertNode(listEl);
+    }
+    var nr = wys.doc.createRange(); nr.selectNodeContents(item);
+    sel.removeAllRanges(); sel.addRange(nr);
+    rememberRange(); wysChanged();
+  }
+
+  // ---- link dialog ----
+  function buildLinkDialog() {
+    if (el.linkDlg) { return; }
+    var ov = document.createElement("div"); ov.className = "dl-ov dl-linkov";
+    var m = document.createElement("div"); m.className = "dl-linkdlg";
+    m.innerHTML =
+      '<h3>Add a link</h3>' +
+      '<p class="dl-linksel" id="dlLinkSel"></p>' +
+      '<label class="dl-lk-lbl">Link to</label>' +
+      '<select id="dlLinkDest" class="dl-lk-sel"></select>' +
+      '<label class="dl-lk-lbl">URL</label>' +
+      '<input type="text" id="dlLinkUrl" class="dl-lk-url" placeholder="/design/…   https://…   or   {{section_href}}">' +
+      '<label class="dl-lk-chk"><input type="checkbox" id="dlLinkNew"> Open in a new tab</label>' +
+      '<div class="dl-lk-actions">' +
+        '<button class="dl-b" id="dlLinkCancel">Cancel</button>' +
+        '<button class="dl-b" id="dlLinkRemove">Remove link</button>' +
+        '<button class="dl-b publish" id="dlLinkApply">Apply link</button>' +
+      '</div>';
+    var root = document.getElementById("dlDesignRoot");
+    root.appendChild(ov); root.appendChild(m);
+    el.linkOv = ov; el.linkDlg = m;
+    el.linkDest = m.querySelector("#dlLinkDest");
+    el.linkUrl = m.querySelector("#dlLinkUrl");
+    el.linkNew = m.querySelector("#dlLinkNew");
+    el.linkSel = m.querySelector("#dlLinkSel");
+    el.linkDest.addEventListener("change", function () { if (el.linkDest.value) { el.linkUrl.value = el.linkDest.value; } });
+    m.querySelector("#dlLinkCancel").addEventListener("click", closeLinkDialog);
+    ov.addEventListener("click", closeLinkDialog);
+    m.querySelector("#dlLinkApply").addEventListener("click", function () { applyLink(false); });
+    m.querySelector("#dlLinkRemove").addEventListener("click", function () { applyLink(true); });
+  }
+  function fillLinkDest() {
+    var d = el.linkDest; d.innerHTML = "";
+    var first = document.createElement("option"); first.value = ""; first.textContent = "Choose a destination…"; d.appendChild(first);
+    function grp(label, pairs) {
+      if (!pairs || !pairs.length) { return; }
+      var og = document.createElement("optgroup"); og.label = label;
+      pairs.forEach(function (p) { var o = document.createElement("option"); o.value = p[0]; o.textContent = p[1]; og.appendChild(o); });
+      d.appendChild(og);
+    }
+    grp("Fixed pages", FIXED_PAGES);
+    grp("Sections", (wys.sections || []).map(function (s) { return [s.href, s.name]; }));
+    grp("Dynamic fields", (BLOCK_HREFS[wys.type] || []).concat([GENERIC_HREF]));
+  }
+  function currentAnchor() {
+    try {
+      var n = wys.savedRange ? wys.savedRange.startContainer : null;
+      n = n && (n.nodeType === 1 ? n : n.parentElement);
+      return n && n.closest ? n.closest("a") : null;
+    } catch (e) { return null; }
+  }
+  function openLinkDialog() {
+    if (wys.srcMode) { toast("Switch off the HTML view to use the link tool"); return; }
+    if (!wys.doc) { return; }
+    rememberRange();
+    var sel = wys.win.getSelection();
+    var txt = sel ? sel.toString() : "";
+    var a = currentAnchor();
+    buildLinkDialog(); fillLinkDest();
+    el.linkSel.textContent = a
+      ? ("Editing an existing link: “" + (a.textContent || "") + "”")
+      : (txt ? ("Linking: “" + txt + "”") : "Tip: select some text first, then choose a destination.");
+    el.linkUrl.value = a ? (a.getAttribute("href") || "") : "";
+    el.linkNew.checked = a ? (a.getAttribute("target") === "_blank") : false;
+    el.linkDest.value = "";
+    el.linkOv.classList.add("dl-show"); el.linkDlg.classList.add("dl-show");
+    setTimeout(function () { el.linkUrl.focus(); }, 30);
+  }
+  function closeLinkDialog() {
+    if (el.linkOv) { el.linkOv.classList.remove("dl-show"); el.linkDlg.classList.remove("dl-show"); }
+    if (wys.root) { wys.root.focus(); }
+  }
+  function unwrap(node) {
+    var p = node.parentNode; while (node.firstChild) { p.insertBefore(node.firstChild, node); } p.removeChild(node);
+  }
+  function applyLink(remove) {
+    if (!wys.doc) { return; }
+    var url = el.linkUrl.value.trim(), newTab = el.linkNew.checked;
+    wys.root.focus();
+    var sel = wys.win.getSelection();
+    if (wys.savedRange) { sel.removeAllRanges(); sel.addRange(wys.savedRange); }
+    var a = currentAnchor();
+    if (remove) {
+      if (a) { unwrap(a); }
+      closeLinkDialog(); wysChanged(); return;
+    }
+    if (!url) { toast("Enter a URL or choose a destination"); return; }
+    if (a) {                                  // edit an existing link in place
+      a.setAttribute("href", url);
+      if (newTab) { a.setAttribute("target", "_blank"); a.setAttribute("rel", "noopener"); }
+      else { a.removeAttribute("target"); a.removeAttribute("rel"); }
+    } else {
+      if (!sel.rangeCount || sel.isCollapsed) { toast("Select the text you want to link first"); return; }
+      var r = sel.getRangeAt(0), frag = r.extractContents();
+      var link = wys.doc.createElement("a");
+      link.setAttribute("href", url);                        // setAttribute keeps {{...}} literal
+      if (newTab) { link.setAttribute("target", "_blank"); link.setAttribute("rel", "noopener"); }
+      link.appendChild(frag); r.insertNode(link);
+      var nr = wys.doc.createRange(); nr.selectNodeContents(link); sel.removeAllRanges(); sel.addRange(nr);
+    }
+    rememberRange(); closeLinkDialog(); wysChanged();
   }
 
   function loadPage() {
@@ -501,6 +1018,16 @@
     var selEl = st.selEl || "";
 
     var h = document.createElement("h4"); h.textContent = reg.label + " — settings"; el.right.appendChild(h);
+
+    // Open the WYSIWYG HTML editor for this block's content (links, formatting…).
+    if (TEMPLATE_BLOCKS.indexOf(block.type) !== -1) {
+      var editBtn = document.createElement("button");
+      editBtn.type = "button"; editBtn.className = "dl-b publish";
+      editBtn.style.cssText = "width:100%;margin:0 0 12px;justify-content:center;";
+      editBtn.innerHTML = "✎ Edit HTML content &amp; links";
+      editBtn.addEventListener("click", function () { enterBlockMode(block.type); });
+      el.right.appendChild(editBtn);
+    }
 
     // Which element the style controls target.
     var target = document.createElement("div"); target.className = "dl-target";
