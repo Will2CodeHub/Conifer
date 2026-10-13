@@ -62,6 +62,17 @@
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
 
+  // PHP's json_decode turns empty {} into []; an empty array is truthy in JS, so
+  // writing object keys to it gets dropped by JSON.stringify. Coerce back to a
+  // plain object so style edits persist.
+  function toObj(v) { return (v && typeof v === "object" && !Array.isArray(v)) ? v : {}; }
+  function normBlock(b) {
+    if (!b || typeof b !== "object") { return; }
+    b.settings = toObj(b.settings);
+    b.settings.styles = toObj(b.settings.styles);
+    Object.keys(b.settings.styles).forEach(function (k) { b.settings.styles[k] = toObj(b.settings.styles[k]); });
+  }
+
   // Plain-English name for a selected element (from its tag, else its class).
   function elementFriendly(tag, selector) {
     var map = { h1: "heading", h2: "heading", h3: "subheading", h4: "subheading",
@@ -80,7 +91,13 @@
   }
   function previewUrl() {
     return "https://" + st.host + "/design/?preview=1&page=" + encodeURIComponent(st.page) +
-           "&device=" + encodeURIComponent(st.device) + "&_=" + Date.now();
+           "&device=" + encodeURIComponent(st.device) +
+           "&scroll=" + Math.round((st && st.scrollY) || 0) + "&_=" + Date.now();
+  }
+
+  // Push a live change into the preview iframe (no reload).
+  function pv(msg) {
+    try { el.preview.contentWindow.postMessage(Object.assign({ source: "ten-design-editor" }, msg), "*"); } catch (e) {}
   }
 
   function api(action, data) {
@@ -114,6 +131,7 @@
           '<button class="dl-chip dl-active" data-dev="desktop">Desktop</button>' +
           '<button class="dl-chip" data-dev="mobile">Mobile</button>' +
         '</div>' +
+        '<button class="dl-b" id="dlBlocksToggle" title="Show or hide the blocks panel (drag blocks onto the page)">☰ Blocks</button>' +
         '<div class="dl-spacer"></div>' +
         '<button class="dl-b dl-ai" id="dlAi">✨ AI edit</button>' +
         '<button class="dl-b preview" id="dlPreviewBtn">Preview ↗</button>' +
@@ -170,6 +188,10 @@
     m.querySelectorAll("#dlDevices .dl-chip").forEach(function (b) {
       b.addEventListener("click", function () { setDevice(b.dataset.dev); });
     });
+    m.querySelector("#dlBlocksToggle").addEventListener("click", function () {
+      var collapsed = el.body.classList.toggle("dl-left-collapsed");
+      this.classList.toggle("dl-active-max", !collapsed);
+    });
     m.querySelector("#dlAi").addEventListener("click", openAiDialog);
     m.querySelector("#dlPreviewBtn").addEventListener("click", function () { window.open(previewUrl(), "_blank"); });
     m.querySelector("#dlSave").addEventListener("click", saveDraft);
@@ -182,7 +204,9 @@
     // Preview → editor messages: select a block/element, or apply an inline edit.
     window.addEventListener("message", function (e) {
       var d = e.data;
-      if (!d || d.source !== "ten-design" || !st || st.mode !== "page") { return; }
+      if (!d || d.source !== "ten-design" || !st) { return; }
+      if (d.action === "scroll") { st.scrollY = d.y || 0; return; }
+      if (st.mode !== "page") { return; }
       if (d.action === "select") {
         if (st.device !== "desktop") { setDevice("desktop"); }
         var idx = parseInt(d.index, 10);
@@ -214,6 +238,7 @@
     var pvb = el.modal.querySelector("#dlPvMax"); if (pvb) { pvb.innerHTML = "⤢ Max preview"; pvb.classList.remove("dl-active-max"); }
     el.title.textContent = "Design — " + p.title;
     el.ov.classList.add("dl-show"); el.modal.classList.add("dl-show");
+    el.body.classList.add("dl-left-collapsed"); // Blocks panel collapsed by default
     document.body.style.overflow = "hidden"; // kill the page scrollbar behind the modal
     syncChips();
     loadPage();
@@ -1018,9 +1043,12 @@
     ]).then(function (res) {
       var d = res[0].layout;
       st.desktop = (d && d.blocks) ? d : { theme: {}, blocks: [] };
+      st.desktop.theme = toObj(st.desktop.theme);
+      if (!Array.isArray(st.desktop.blocks)) { st.desktop.blocks = []; }
+      st.desktop.blocks.forEach(normBlock);
       st.mobile = res[1].layout || {};
       if (!st.mobile.hidden) { st.mobile.hidden = []; }
-      if (!st.mobile.theme) { st.mobile.theme = {}; }
+      st.mobile.theme = toObj(st.mobile.theme);
       render(); refreshPreview();
     }).catch(function (e) { toast(e.message); });
   }
@@ -1165,7 +1193,15 @@
       el.right.appendChild(field(s.l, input));
     });
   }
-  function setStyle(styles, prop, val) { if (val === "" || val == null) { delete styles[prop]; } else { styles[prop] = val; } applyChangeDebounced(); }
+  var styleSaveTimer = null;
+  function setStyle(styles, prop, val) {
+    if (val === "" || val == null) { delete styles[prop]; } else { styles[prop] = val; }
+    // Instant preview on the selected element — no iframe reload, so selection
+    // and scroll position are kept.
+    pv({ action: "live_prop", blockIdx: st.sel, selector: st.selEl || "", prop: prop, value: (val == null ? "" : val) });
+    clearTimeout(styleSaveTimer);
+    styleSaveTimer = setTimeout(function () { saveDraftSilent(); }, 600);
+  }
 
   function miniBtn(txt) { var b = document.createElement("button"); b.type = "button"; b.className = "dl-mini"; b.textContent = txt; return b; }
 
@@ -1203,7 +1239,7 @@
   function renderBlockSettings(block) {
     var reg = REG[block.type] || { label: block.type, defaults: {} };
     if (!block.settings) block.settings = {};
-    if (!block.settings.styles) block.settings.styles = {};
+    block.settings.styles = toObj(block.settings.styles);
     var selEl = st.selEl || "";
 
     var h = document.createElement("h4"); h.textContent = reg.label + " — settings"; el.right.appendChild(h);
@@ -1239,6 +1275,25 @@
                               : "Click any element in the preview to edit and style just that part.";
     el.right.appendChild(pHint);
 
+    // Quick actions on the selected block (move it up/down the page, centre,
+    // duplicate, delete) — so blocks can be rearranged without the left panel.
+    var qa = document.createElement("div"); qa.className = "dl-qa";
+    var blocks = st.desktop.blocks, i = st.sel;
+    function qbtn(label, title, fn) {
+      var b = document.createElement("button"); b.type = "button"; b.className = "dl-qbtn"; b.title = title; b.innerHTML = label;
+      b.addEventListener("click", fn); qa.appendChild(b);
+    }
+    qbtn("↑ Up", "Move this block up the page", function () { if (i > 0) { var t = blocks[i - 1]; blocks[i - 1] = blocks[i]; blocks[i] = t; st.sel = i - 1; render(); applyChangeDebounced(); } });
+    qbtn("↓ Down", "Move this block down the page", function () { if (i < blocks.length - 1) { var t = blocks[i + 1]; blocks[i + 1] = blocks[i]; blocks[i] = t; st.sel = i + 1; render(); applyChangeDebounced(); } });
+    qbtn("⊡ Centre", "Centre the selected " + (selEl ? "element" : "block") + "’s contents", function () {
+      var tsel = selEl || "";
+      block.settings.styles[tsel] = toObj(block.settings.styles[tsel]);
+      setStyle(block.settings.styles[tsel], "text-align", "center"); renderRight();
+    });
+    qbtn("⧉ Duplicate", "Duplicate this block", function () { blocks.splice(i + 1, 0, clone(blocks[i])); st.sel = i + 1; render(); applyChangeDebounced(); });
+    qbtn("🗑 Delete", "Delete this block", function () { if (window.confirm("Delete this block from the page?")) { blocks.splice(i, 1); st.sel = -1; st.selEl = ""; render(); applyChangeDebounced(); } });
+    el.right.appendChild(qa);
+
     // If this element's text is editable, offer a reliable text field here too.
     if (selEl && st.selEditKey) {
       var txtSub = document.createElement("div"); txtSub.className = "dl-sub"; txtSub.textContent = "Text"; el.right.appendChild(txtSub);
@@ -1251,7 +1306,8 @@
 
     // Visual style controls for the selected element.
     var styleSub = document.createElement("div"); styleSub.className = "dl-sub"; styleSub.textContent = selEl ? "Style this element" : "Style the whole block"; el.right.appendChild(styleSub);
-    var styles = block.settings.styles[selEl] || (block.settings.styles[selEl] = {});
+    block.settings.styles[selEl] = toObj(block.settings.styles[selEl]);
+    var styles = block.settings.styles[selEl];
     buildStyleControls(styles);
 
     // Content / behaviour settings for the whole block only.

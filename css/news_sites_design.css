@@ -37,6 +37,11 @@
 
 .dl-main { min-height: 0; overflow: hidden; position: relative; }
 .dl-body { display: grid; grid-template-columns: 280px 1fr 300px; min-height: 0; height: 100%; }
+.dl-body.dl-left-collapsed { grid-template-columns: 1fr 300px; }
+.dl-body.dl-left-collapsed .dl-col.left { display: none; }
+.dl-qa { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 2px; }
+.dl-qbtn { border: 1px solid #d1d5db; background: #fff; border-radius: 6px; padding: 5px 9px; font-size: 12px; cursor: pointer; color: #334155; }
+.dl-qbtn:hover { background: #eef2ff; border-color: #c7d2fe; }
 #dlGjsWrap { display: none; height: 100%; }
 .dl-col { overflow: auto; padding: 14px; }
 .dl-col.center { overflow: hidden; padding: 0; } /* the iframe scrolls internally — no extra bar */
