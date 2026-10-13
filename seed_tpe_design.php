@@ -79,6 +79,15 @@ $pages = [
         ]],
         'mobile' => ['hidden' => [], 'theme' => ['gutter' => '16px']],
     ],
+    'author' => [
+        'desktop' => ['theme' => $theme, 'blocks' => [
+            ['type' => 'site_header',     'settings' => []],
+            ['type' => 'author_profile',  'settings' => []],
+            ['type' => 'author_articles', 'settings' => ['count' => 12, 'heading' => '']],
+            ['type' => 'footer',          'settings' => []],
+        ]],
+        'mobile' => ['hidden' => [], 'theme' => ['gutter' => '16px']],
+    ],
     'impressum'  => tpe_static_page($theme, 'impressum'),
     'contact'    => tpe_static_page($theme, 'contact'),
     'about'      => tpe_static_page($theme, 'about'),

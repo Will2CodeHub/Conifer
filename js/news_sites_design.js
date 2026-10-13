@@ -6,9 +6,9 @@
   "use strict";
 
   // Registry mirror — keep in sync with lib/design_registry.php.
-  var PAGES = ["front", "section", "article", "impressum", "contact", "about", "privacy", "terms", "disclaimer"];
+  var PAGES = ["front", "section", "article", "author", "impressum", "contact", "about", "privacy", "terms", "disclaimer"];
   var PAGE_LABELS = {
-    front: "Front page", section: "Section page", article: "Article page",
+    front: "Front page", section: "Section page", article: "Article page", author: "Author page",
     impressum: "Impressum", contact: "Contact", about: "About us",
     privacy: "Privacy policy", terms: "Terms", disclaimer: "Disclaimer"
   };
@@ -25,7 +25,11 @@
     article_hero:     { label: "Article hero image",pages: ["article"], defaults: { ratio: "16x9" } },
     article_body:     { label: "Article body",      pages: ["article"], defaults: {} },
     article_byline:   { label: "Byline",            pages: ["article"], defaults: {} },
+    article_related:  { label: "Related articles (3-up)", pages: ["article"], defaults: { count: 3, heading: "" } },
+    article_quickreads: { label: "Quick reads (3-up)", pages: ["article"], defaults: { count: 3, heading: "Quick Reads News" } },
     article_comments: { label: "Comments",          pages: ["article"], defaults: { enabled: true } },
+    author_profile:   { label: "Author profile",     pages: ["author"], defaults: {} },
+    author_articles:  { label: "Author article list",pages: ["author"], defaults: { count: 12, heading: "" } },
     triple_box:       { label: "Triple box (insurance / clinics / events)", pages: ["front", "section"], defaults: {} },
     section_carousel: { label: "Section carousel",  pages: ["front", "section", "article"], defaults: { section: "", count: 10 } },
     advert:           { label: "Advert slot",       pages: ["front", "section", "article"], defaults: { slot: "" } },
@@ -93,7 +97,7 @@
       '<div class="dl-bar">' +
         '<h3 id="dlTitle">Design</h3>' +
         '<label class="dl-pagesel-wrap">Page: <select id="dlPageSel" class="dl-pagesel"></select></label>' +
-        '<label class="dl-pagesel-wrap">Block: <select id="dlBlockSel" class="dl-pagesel"><option value="">— editing pages —</option></select></label>' +
+        '<label class="dl-pagesel-wrap" id="dlBlockWrap" style="display:none">Block: <select id="dlBlockSel" class="dl-pagesel"><option value="">— editing pages —</option></select></label>' +
         '<div class="dl-tabs" id="dlDevices">' +
           '<button class="dl-chip dl-active" data-dev="desktop">Desktop</button>' +
           '<button class="dl-chip" data-dev="mobile">Mobile</button>' +
@@ -211,6 +215,7 @@
                          "breaking_news", "triple_box", "headlines_list", "ticker", "advert",
                          "section_title", "section_lead", "section_carousel", "article_grid",
                          "article_header", "article_hero", "article_body", "article_byline",
+                         "article_related", "article_quickreads", "author_profile", "author_articles",
                          "rich_text", "article_comments"];
   var BLOCK_PLACEHOLDERS = {
     site_header: "{{site_name}}, {{logo}}, {{search_icon}}, {{subscribe_label}}, {{#if show_search}}, {{#if show_subscribe}}, {{#each nav}}{{name}} {{href}}{{/each}}",
@@ -230,9 +235,13 @@
     article_header: "{{section}}, {{title}}, {{standfirst}}, {{meta}}",
     article_hero: "{{#if image}}{{image}} {{title}}{{/if}}",
     article_body: "{{{body}}}",
-    article_byline: "{{#if byline}}{{byline}}{{/if}}",
+    article_byline: "{{#if has_author}}{{name}} {{role}} {{photo}} {{read_all_label}} {{#if linkedin_url}}{{linkedin_url}}{{/if}} {{#if email}}{{email}}{{/if}}{{/if}}",
+    article_related: "{{heading}}, {{#each cards}}{{title}} {{image}} {{section}} {{meta}}{{/each}}",
+    article_quickreads: "{{heading}}, {{#each items}}{{title}} {{section}} {{meta}}{{/each}}",
+    author_profile: "{{site_name}}, {{crumb_label}}, {{name}}, {{role}}, {{photo}}, {{#each bio_paras}}{{value}}{{/each}}, {{x_url}}, {{linkedin_url}}, {{email}}",
+    author_articles: "{{heading}}, {{#each items}}{{title}} {{image}} {{section}} {{standfirst}} {{meta}}{{/each}}",
     rich_text: "{{title}}, {{body}}",
-    article_comments: "{{heading}}, {{button_label}}"
+    article_comments: "{{heading}}, {{note}}, {{placeholder}}, {{guest_label}}, {{button_label}}"
   };
 
   // ====================================================================
@@ -1019,12 +1028,19 @@
 
     var h = document.createElement("h4"); h.textContent = reg.label + " — settings"; el.right.appendChild(h);
 
-    // Open the WYSIWYG HTML editor for this block's content (links, formatting…).
+    // Non-technical editing happens on the live preview; the raw HTML editor is
+    // an advanced, clearly-labelled escape hatch (links / custom layout).
     if (TEMPLATE_BLOCKS.indexOf(block.type) !== -1) {
+      var tip = document.createElement("p");
+      tip.className = "dl-hint";
+      tip.style.cssText = "margin:0 0 12px;color:#334155;font-size:12px;line-height:1.5;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:9px 11px;";
+      tip.innerHTML = "✏️ <strong>Edit on the page.</strong> Click any text in the preview to change it, or click any part to style it with the controls below.";
+      el.right.appendChild(tip);
+
       var editBtn = document.createElement("button");
-      editBtn.type = "button"; editBtn.className = "dl-b publish";
-      editBtn.style.cssText = "width:100%;margin:0 0 12px;justify-content:center;";
-      editBtn.innerHTML = "✎ Edit HTML content &amp; links";
+      editBtn.type = "button"; editBtn.className = "dl-adv-link";
+      editBtn.innerHTML = "⟨⟩ Advanced: edit raw HTML &amp; links";
+      editBtn.title = "For developers — shows the block's template code.";
       editBtn.addEventListener("click", function () { enterBlockMode(block.type); });
       el.right.appendChild(editBtn);
     }

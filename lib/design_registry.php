@@ -15,13 +15,14 @@ function dl_static_pages(): array {
 
 /** The pages a publication's design can cover. */
 function dl_page_types(): array {
-    return array_merge(['front', 'section', 'article'], dl_static_pages());
+    return array_merge(['front', 'section', 'article', 'author'], dl_static_pages());
 }
 
 /** Human labels for the page selector. */
 function dl_page_label(string $page): string {
     $map = [
         'front' => 'Front page', 'section' => 'Section page', 'article' => 'Article page',
+        'author' => 'Author page',
         'impressum' => 'Impressum', 'contact' => 'Contact', 'about' => 'About us',
         'privacy' => 'Privacy policy', 'terms' => 'Terms', 'disclaimer' => 'Disclaimer',
     ];
@@ -99,6 +100,8 @@ function dl_registry(): array {
         'article_related'  => ['label' => 'Related articles (3-up)', 'pages' => ['article'],                  'defaults' => ['count' => 3, 'heading' => '']],
         'article_quickreads' => ['label' => 'Quick reads (3-up)',  'pages' => ['article'],                       'defaults' => ['count' => 3, 'heading' => 'Quick Reads News']],
         'article_comments' => ['label' => 'Comments',          'pages' => ['article'],                         'defaults' => ['enabled' => true]],
+        'author_profile'   => ['label' => 'Author profile',    'pages' => ['author'],                          'defaults' => []],
+        'author_articles'  => ['label' => 'Author article list','pages' => ['author'],                         'defaults' => ['count' => 12, 'heading' => '']],
         'triple_box'       => ['label' => 'Triple box (insurance / clinics / events)', 'pages' => ['front', 'section'], 'defaults' => []],
         'section_carousel' => ['label' => 'Section carousel',  'pages' => ['front', 'section', 'article'],     'defaults' => ['section' => '', 'count' => 10]],
         'advert'           => ['label' => 'Advert slot',       'pages' => ['front', 'section', 'article'],     'defaults' => ['slot' => '']],
