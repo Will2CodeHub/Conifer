@@ -103,12 +103,13 @@ if ($action === 'restyle') {
     if ($template === '') { dai_fail('No block template supplied.'); }
     if (mb_strlen($template) > 20000) { dai_fail('Block template too large.'); }
     $system = $DESIGN_BRIEF . "\n\n" .
-        "TASK: Rewrite one block's HTML template to satisfy the editor's request, keeping the house system above.\n" .
-        "The template contains placeholders like {{title}}, {{{body}}}, and control tags {{#each items}}…{{/each}} and {{#if x}}…{{/if}}. " .
-        "You MUST preserve EVERY placeholder and control tag EXACTLY — same names, same number, same spelling. Do not add, remove, rename or reorder-away any of them. " .
-        "You may change the surrounding HTML, classes, inline styles and any STATIC visible text. Keep data-dl-edit attributes where present. " .
-        "Return ONLY the full updated HTML template — no markdown fences, no explanation.";
-    $userMsg = "Block type: " . $blockType . "\n\nCurrent template:\n" . $template .
+        "TASK: Change ONE block to satisfy the editor's request, keeping the house system above.\n" .
+        "PREFER CSS for any visual/styling change — sizing, font weight, spacing, colour, alignment, keeping text on one line or letting it wrap, borders, showing/hiding. Rewrite the HTML template only when the content or structure itself must change.\n" .
+        "Return ONLY a JSON object with these optional string fields: {\"css\": \"\", \"template\": \"\"}. Include just what you need and leave the other empty.\n" .
+        "CSS: target the block's own elements using the classes you can see in the template (e.g. .dl-wordmark, .dl-nav-list, .dl-subscribe, .dl-article-title). Your CSS is scoped to THIS block automatically, so write bare selectors — do NOT prefix them with body or a page selector. No <style> tags, no @import, no url(), no scripts. @media queries are allowed.\n" .
+        "Template: if you include one, keep EVERY placeholder and control tag ({{…}}, {{{…}}}, {{#each}}, {{#if}}, {{/each}}, {{/if}}) EXACTLY — same names and count. Keep data-dl-edit attributes. No markdown fences.\n" .
+        "Return only the JSON object.";
+    $userMsg = "Block type: " . $blockType . "\n\nCurrent template (shows the element classes and placeholders you can target):\n" . $template .
                "\n\nChange request: " . $instruction;
 } else {
     dai_fail('Unknown action');
@@ -190,12 +191,35 @@ if ($action === 'restyle') {
     exit;
 }
 
-// edit_element: enforce token preservation.
-$newTpl = $text;
-$origTokens = dai_tokens($template);
-$newTokens  = dai_tokens($newTpl);
-if ($origTokens !== $newTokens) {
-    dai_fail('The AI changed the automatic content placeholders, so the edit was blocked. Try rephrasing (e.g. "make the heading larger and uppercase").');
+// edit_element: accept {css?, template?}; apply scoped CSS and/or a token-safe template.
+$obj = json_decode($text, true);
+if (!is_array($obj) && preg_match('/\{[\s\S]*\}/', $text, $mm)) { $obj = json_decode($mm[0], true); }
+
+$css = ''; $tpl = '';
+if (is_array($obj)) {
+    $css = (isset($obj['css']) && is_string($obj['css'])) ? trim($obj['css']) : '';
+    $tpl = (isset($obj['template']) && is_string($obj['template'])) ? trim($obj['template']) : '';
+} else {
+    // Not JSON — treat the whole reply as a template (backward compatible).
+    $tpl = $text;
 }
-if (preg_match('/<script\b/i', $newTpl)) { dai_fail('The AI edit contained a script and was blocked.'); }
-echo json_encode(['success' => true, 'template' => $newTpl]);
+
+if ($css !== '') {
+    if (preg_match('/<|@import|javascript:|expression\s*\(/i', $css)) { $css = ''; }
+    else { $css = mb_substr($css, 0, 4000); }
+}
+if ($tpl !== '') {
+    if (mb_strlen($tpl) > 20000) { dai_fail('The AI edit was too large.'); }
+    if (preg_match('/<script\b/i', $tpl)) { dai_fail('The AI edit contained a script and was blocked.'); }
+    if (dai_tokens($template) !== dai_tokens($tpl)) {
+        // Placeholders were altered — drop the template, but still apply CSS if any.
+        $tpl = '';
+        if ($css === '') {
+            dai_fail('The AI changed the automatic content placeholders, so the edit was blocked. Try describing a styling change (e.g. "keep the logo on one line").');
+        }
+    }
+}
+if ($css === '' && $tpl === '') {
+    dai_fail('The AI suggested no change. Try being more specific about the look you want.');
+}
+echo json_encode(['success' => true, 'css' => $css, 'template' => $tpl]);

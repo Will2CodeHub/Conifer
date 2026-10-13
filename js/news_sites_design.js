@@ -109,7 +109,6 @@
         '<button class="dl-b publish" id="dlPublish">Publish</button>' +
         '<button class="dl-b history" id="dlHistory">History</button>' +
         '<button class="dl-b" id="dlPvMax" title="Maximise the preview, then click any element to edit its HTML">⤢ Max preview</button>' +
-        '<button class="dl-b max" id="dlMax" title="Maximise window">⤢</button>' +
         '<button class="dl-b close" id="dlClose">Close</button>' +
       '</div>' +
       '<div class="dl-main">' +
@@ -122,6 +121,7 @@
         '<div id="dlGjsWrap">' +
           '<div class="dl-wys">' +
             '<div class="dl-wys-tb" id="dlWysTb"></div>' +
+            '<div class="dl-wys-hint">Grey underlined text fills in automatically — hover it to see what it is and why it can’t be changed here. Any other text you can simply click and type over.</div>' +
             '<div class="dl-wys-stage">' +
               '<iframe class="dl-wys-frame" id="dlWysFrame"></iframe>' +
               '<textarea class="dl-wys-src" id="dlWysSrc" spellcheck="false" style="display:none"></textarea>' +
@@ -163,7 +163,6 @@
     m.querySelector("#dlSave").addEventListener("click", saveDraft);
     m.querySelector("#dlPublish").addEventListener("click", doPublish);
     m.querySelector("#dlHistory").addEventListener("click", showHistory);
-    m.querySelector("#dlMax").addEventListener("click", function () { el.modal.classList.toggle("dl-max"); });
     m.querySelector("#dlPvMax").addEventListener("click", togglePvMax);
     m.querySelector("#dlClose").addEventListener("click", close);
     ov.addEventListener("click", close);
@@ -464,8 +463,14 @@
     span.className = "dl-tok dl-tok-" + info.cls;
     span.setAttribute("contenteditable", "false");
     span.setAttribute("data-tok", raw);
-    span.setAttribute("title", "Automatic content — fills in on the live site");
     span.textContent = info.text;
+    if (info.cls === "field") {
+      span.setAttribute("title", "“" + info.text + "” is filled in automatically on the live site and changes for every page, so it can’t be typed here.");
+    } else {
+      // Loop / condition markers: kept in the DOM for a clean round-trip, but
+      // hidden from view (CSS) so there are no strange symbols on screen.
+      span.setAttribute("title", "Automatic layout — managed for you.");
+    }
     return span;
   }
   // A small neutral placeholder shown in the editor in place of an <img> whose
@@ -517,11 +522,10 @@
       '<style>' +
         'html,body{margin:0}body{padding:18px;background:#fff;color:#111}' +
         '.dl-edit-root{min-height:140px;outline:none}' +
-        '.dl-tok{display:inline-block;border-radius:11px;padding:1px 10px;margin:0 1px;font:500 90%/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;white-space:nowrap;vertical-align:baseline}' +
-        '.dl-tok-field{background:#e3edff;color:#1e40af;border:1px solid #bcd3ff}' +
-        '.dl-tok-loop,.dl-tok-cond{background:#f1f5f9;color:#52607a;border:1px dashed #cbd5e1;font-size:78%;text-transform:uppercase;letter-spacing:.04em;font-weight:600}' +
-        '.dl-tok-end{background:transparent;color:#aab3c2;border:1px dashed #e4e8ef;font-size:76%}' +
-        '.dl-tplimg{width:44px;height:30px;border:1px solid #cdd7e5;border-radius:4px;vertical-align:middle;object-fit:cover}' +
+        '.dl-tok{font:inherit;white-space:nowrap}' +
+        '.dl-tok-field{color:#6b7a90;text-decoration:underline dotted #b6c0cf;text-underline-offset:3px;cursor:help}' +
+        '.dl-tok-loop,.dl-tok-cond,.dl-tok-end{display:none}' +
+        '.dl-tplimg{width:44px;height:30px;border:1px solid #cdd7e5;border-radius:4px;vertical-align:middle;object-fit:cover;opacity:.75}' +
         '.dl-edit-root a{color:#2563eb;text-decoration:underline}' +
         '::selection{background:#bfdbfe}' +
       '</style></head><body><div class="dl-edit-root" contenteditable="true"></div></body></html>';
@@ -974,12 +978,21 @@
       if (!tpl) { aiBusy(false); toast("Couldn't load that block's content"); return; }
       aiApi({ action: "edit_element", block_type: type, template: tpl, instruction: instruction })
         .then(function (j) {
-          st.blockTemplates[type] = j.template;
-          return api("save_draft", { page: "_blocks", device: "desktop", layout_json: JSON.stringify({ templates: st.blockTemplates }) });
-        })
-        .then(function () {
-          aiBusy(false); closeAiDialog(); refreshPreview();
-          toast("Block updated — preview refreshed");
+          var tasks = [];
+          if (j.template) {
+            st.blockTemplates[type] = j.template;
+            tasks.push(api("save_draft", { page: "_blocks", device: "desktop", layout_json: JSON.stringify({ templates: st.blockTemplates }) }));
+          }
+          if (j.css) {
+            if (!blk.settings) { blk.settings = {}; }
+            blk.settings.custom_css = (blk.settings.custom_css ? blk.settings.custom_css + "\n" : "") + j.css;
+            tasks.push(saveDraftSilent());
+          }
+          if (!tasks.length) { aiBusy(false); toast("No change suggested — try rephrasing"); return; }
+          Promise.all(tasks).then(function () {
+            aiBusy(false); closeAiDialog(); refreshPreview();
+            toast("Block updated — preview refreshed");
+          });
         })
         .catch(function (e) { aiBusy(false); toast(e.message); });
     });
