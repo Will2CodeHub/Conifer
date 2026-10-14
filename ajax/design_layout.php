@@ -65,6 +65,30 @@ try {
             echo json_encode(['success' => true, 'versions' => dl_list_versions($pub)]);
             break;
 
+        case 'link_targets':
+            // Section pages for this publication (for the WYSIWYG link picker).
+            // main_menu.edition stores the same acronym as publications.publication.
+            $sections = [];
+            $conn = getDBConnection_TENAdmin();
+            if ($conn) {
+                $st = $conn->prepare("SELECT name FROM main_menu
+                    WHERE edition = ? AND section_item = '1' AND parent_item = 0
+                    ORDER BY position ASC");
+                $st->bind_param('s', $pub);
+                $st->execute();
+                $res = $st->get_result();
+                while ($row = $res->fetch_assoc()) {
+                    $name = trim((string)$row['name']);
+                    if ($name === '') { continue; }
+                    $slug = strtolower(str_replace(' ', '-', $name));
+                    $sections[] = ['name' => $name, 'href' => '/design/' . $slug];
+                }
+                $st->close();
+                $conn->close();
+            }
+            echo json_encode(['success' => true, 'sections' => $sections]);
+            break;
+
         case 'rollback':
             if (!isAdmin()) { echo json_encode(['success' => false, 'message' => 'Admin permission required']); exit; }
             $vno = (int)($_POST['version_no'] ?? 0);

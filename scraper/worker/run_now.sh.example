@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# On-demand single-section scrape wrapper for the management "Run now" button.
+# PHP (scraper_try_run_now_sync in scraper/lib/scraper_crud.php) calls this
+# synchronously as: bash run_now.sh <pub_section_id> and parses "found=.. new=..".
+# Copy to run_now.sh, fill in the real DB creds (same as run_scraper.sh), chmod 700.
+set -euo pipefail
+cd "$(dirname "$0")"
+export SCRAPER_DB_HOST=localhost SCRAPER_DB_USER=REPLACE SCRAPER_DB_PASS='REPLACE' SCRAPER_DB_NAME=TEN_Management
+export SCRAPER_ADMIN_DB_HOST=localhost SCRAPER_ADMIN_DB_USER=REPLACE SCRAPER_ADMIN_DB_PASS='REPLACE' SCRAPER_ADMIN_DB_NAME=admin_ten
+exec ./venv/bin/python run_ingest.py --pub-section-id "$1"

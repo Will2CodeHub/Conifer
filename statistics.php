@@ -460,6 +460,27 @@ $currentPage = 'statistics';
                 <div style="font-size:13px;margin-top:4px;">Choose a website from the dropdown above.</div>
             </div>
 
+            <!-- All-sites overview: shown when no publication is selected -->
+            <div id="overview" style="display:none;">
+                <h2 style="font-size:20px;font-weight:700;margin-bottom:6px;">
+                    <i class="fas fa-ranking-star"></i> All sites &mdash; unique visitors
+                </h2>
+                <div style="font-size:13px;color:#64748b;margin-bottom:18px;">
+                    Human (bot-filtered) unique visitors. Select a publication above to drill into one.
+                </div>
+                <div class="chart-card" style="margin-bottom:24px;">
+                    <h2><i class="fas fa-trophy"></i> Yesterday&rsquo;s ranking <span id="overviewDate" style="color:#64748b;font-weight:500;font-size:14px;"></span></h2>
+                    <div id="overviewTableWrap"><div style="color:#64748b;font-size:13px;padding:12px;">Loading&hellip;</div></div>
+                </div>
+                <div class="chart-card">
+                    <h2><i class="fas fa-chart-line"></i> Last 30 days &mdash; day by day</h2>
+                    <div style="font-size:12px;color:#94a3b8;margin:-6px 0 10px;">Click a site in the legend to hide/show its line.</div>
+                    <div class="chart-container" style="height:440px;">
+                        <canvas id="overviewChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
             <div id="monthlySummary" class="summary-grid" style="display: none;">
                 <!-- Will be populated by JavaScript -->
             </div>
@@ -630,6 +651,12 @@ $currentPage = 'statistics';
                         <a href="https://thegermanyeye.com/awstats/awstats.thegermanyeye.com.html" target="_blank">
                             <i class="fas fa-external-link-alt"></i> The Germany Eye
                         </a>
+                        <a href="https://theberlineye.com/awstats/awstats.theberlineye.com.html" target="_blank">
+                            <i class="fas fa-external-link-alt"></i> The Berlin Eye
+                        </a>
+                        <a href="https://thepariseye.com/awstats/awstats.thepariseye.com.html" target="_blank">
+                            <i class="fas fa-external-link-alt"></i> The Paris Eye
+                        </a>
                         <a href="https://thebarcelonaeye.com/awstats/awstats.thebarcelonaeye.com.html" target="_blank">
                             <i class="fas fa-external-link-alt"></i> The Barcelona Eye
                         </a>
@@ -645,7 +672,7 @@ $currentPage = 'statistics';
                         <a href="https://thetokyoeye.com/awstats/awstats.thetokyoeye.com.html" target="_blank">
                             <i class="fas fa-external-link-alt"></i> The Tokyo Eye
                         </a>
-                        <a href="https://buenosaireseve.com/awstats/awstats.buenosaireseve.com.html" target="_blank">
+                        <a href="https://buenosaireseye.com/awstats/awstats.buenosaireseye.com.html" target="_blank">
                             <i class="fas fa-external-link-alt"></i> Buenos Aires Eye
                         </a>
                         <a href="https://thecanaryeye.com/awstats/awstats.thecanaryeye.com.html" target="_blank">
@@ -653,6 +680,9 @@ $currentPage = 'statistics';
                         </a>
                         <a href="https://theeyenewspapers.com/awstats/awstats.theeyenewspapers.com.html" target="_blank">
                             <i class="fas fa-external-link-alt"></i> The Eye Newspapers
+                        </a>
+                        <a href="https://germanprivatehealthinsurance.com/awstats/awstats.germanprivatehealthinsurance.com.html" target="_blank">
+                            <i class="fas fa-external-link-alt"></i> GPHI
                         </a>
                     </div>
                 </div>
@@ -677,6 +707,8 @@ $currentPage = 'statistics';
         let topPagesChart = null;
         let trafficTypeChart = null;
         let sourcesChart = null;
+        let overviewChart = null;
+        let overviewLoaded = false;
         let referrersData = [];
         let refCurrentPage = 1;
         
@@ -695,7 +727,9 @@ $currentPage = 'statistics';
                 if (savedPeriod && [...perSel.options].some(o => o.value === savedPeriod)) perSel.value = savedPeriod;
             } catch (e) {}
 
-            // Deliberately do NOT auto-load; the #selectPrompt stays until a publication is picked.
+            // No per-publication auto-load, but with no site selected we show the
+            // all-sites overview (ranked table + 30-day comparison chart) on open.
+            loadTrafficStats();
 
             // Search functionality
             document.getElementById('pageSearch').addEventListener('input', function() {
@@ -734,15 +768,19 @@ $currentPage = 'statistics';
             const siteKey = document.getElementById('siteSelector').value;
             const period = document.getElementById('periodSelector').value;
 
-            // No publication chosen yet → show the prompt, load nothing.
+            // No publication chosen → show the all-sites overview instead of per-site stats.
             const prompt = document.getElementById('selectPrompt');
+            const overviewEl = document.getElementById('overview');
             if (!siteKey) {
-                if (prompt) prompt.style.display = '';
+                if (prompt) prompt.style.display = 'none';
                 document.getElementById('currentStats').style.display = 'none';
                 document.getElementById('monthlySummary').style.display = 'none';
+                if (overviewEl) overviewEl.style.display = '';
+                if (!overviewLoaded) { loadOverview(); }
                 return;
             }
             if (prompt) prompt.style.display = 'none';
+            if (overviewEl) overviewEl.style.display = 'none';
 
             // Remember this admin's current filters for next time (per device).
             try {
@@ -776,6 +814,126 @@ $currentPage = 'statistics';
                     console.error('Error:', error);
                     Swal.fire('Error', 'Failed to load statistics', 'error');
                 });
+        }
+
+        // Fixed, non-cycled colour per site (identity follows the entity, not its rank).
+        // Up to 13 distinct hues; the ranked table is the colour-free accessible view.
+        const OVERVIEW_COLORS = ['#2563eb','#dc2626','#16a34a','#d97706','#7c3aed','#0891b2','#db2777','#65a30d','#ea580c','#0d9488','#9333ea','#ca8a04','#475569'];
+
+        function loadOverview() {
+            const wrap = document.getElementById('overviewTableWrap');
+            fetch('ajax/traffic_stats.php?action=overview')
+                .then(r => r.json())
+                .then(data => {
+                    if (!data || !data.success) {
+                        if (wrap) wrap.innerHTML = '<div style="color:#dc2626;font-size:13px;padding:12px;">' + ((data && data.message) || 'Failed to load overview.') + '</div>';
+                        return;
+                    }
+                    overviewLoaded = true;
+                    const dl = document.getElementById('overviewDate');
+                    if (dl) dl.textContent = data.yesterday_label ? ('· ' + data.yesterday_label) : '';
+                    renderOverviewTable(data);
+                    renderOverviewChart(data);
+                })
+                .catch(err => {
+                    console.error('Overview error:', err);
+                    if (wrap) wrap.innerHTML = '<div style="color:#dc2626;font-size:13px;padding:12px;">Failed to load overview.</div>';
+                });
+        }
+
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        function renderOverviewTable(data) {
+            const wrap = document.getElementById('overviewTableWrap');
+            if (!wrap) return;
+            const sites = data.sites || [];
+            const max = Math.max(1, ...sites.map(s => s.yesterday || 0));
+
+            let rows = '';
+            sites.forEach(function(s, i){
+                const pct = Math.round(((s.yesterday || 0) / max) * 100);
+                const c = overviewColorFor(s.key, data);
+                rows +=
+                    '<tr style="border-bottom:1px solid #f1f5f9;">' +
+                        '<td style="padding:8px 10px;font-size:13px;color:#94a3b8;font-weight:700;width:40px;">' + (i+1) + '</td>' +
+                        '<td style="padding:8px 10px;font-size:13px;color:#1e293b;font-weight:600;white-space:nowrap;"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' + c + ';margin-right:8px;"></span>' + esc(s.name) + '</td>' +
+                        '<td style="padding:8px 10px;width:55%;">' +
+                            '<div style="display:flex;align-items:center;gap:10px;">' +
+                                '<div style="flex:1;background:#f1f5f9;border-radius:4px;height:10px;overflow:hidden;"><div style="width:' + pct + '%;height:100%;background:' + c + ';"></div></div>' +
+                                '<span style="font-size:13px;font-weight:700;color:#0f172a;min-width:60px;text-align:right;">' + (s.yesterday || 0).toLocaleString() + '</span>' +
+                            '</div>' +
+                        '</td>' +
+                    '</tr>';
+            });
+            wrap.innerHTML =
+                '<table style="width:100%;border-collapse:collapse;">' +
+                    '<thead><tr style="border-bottom:2px solid #e5e7eb;">' +
+                        '<th style="text-align:left;padding:6px 10px;font-size:11px;color:#94a3b8;text-transform:uppercase;">#</th>' +
+                        '<th style="text-align:left;padding:6px 10px;font-size:11px;color:#94a3b8;text-transform:uppercase;">Site</th>' +
+                        '<th style="text-align:left;padding:6px 10px;font-size:11px;color:#94a3b8;text-transform:uppercase;">Unique visitors</th>' +
+                    '</tr></thead><tbody>' + rows + '</tbody>' +
+                '</table>';
+        }
+
+        // Colour is assigned by the site's position in the SHARED site order (its key),
+        // so it never repaints when the ranking changes.
+        let _overviewKeyOrder = null;
+        function overviewColorFor(key, data) {
+            if (!_overviewKeyOrder) {
+                _overviewKeyOrder = (data.sites || []).map(s => s.key).slice().sort();
+            }
+            const idx = _overviewKeyOrder.indexOf(key);
+            return OVERVIEW_COLORS[(idx < 0 ? 0 : idx) % OVERVIEW_COLORS.length];
+        }
+
+        function renderOverviewChart(data) {
+            const el = document.getElementById('overviewChart');
+            if (!el) return;
+            const ctx = el.getContext('2d');
+            if (overviewChart) { overviewChart.destroy(); }
+            _overviewKeyOrder = (data.sites || []).map(s => s.key).slice().sort();
+
+            const datasets = (data.sites || []).map(function(s){
+                const c = overviewColorFor(s.key, data);
+                return {
+                    label: s.name,
+                    data: s.series || [],
+                    borderColor: c,
+                    backgroundColor: c,
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    tension: 0.25,
+                    // Start low-traffic sites hidden isn't ideal; show all, legend toggles.
+                };
+            });
+
+            overviewChart = new Chart(ctx, {
+                type: 'line',
+                data: { labels: data.days || [], datasets: datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+                        tooltip: {
+                            callbacks: {
+                                title: (items) => {
+                                    const i = items[0].dataIndex;
+                                    return (data.day_dates && data.day_dates[i]) ? data.day_dates[i] : items[0].label;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { precision: 0 } },
+                        x: { ticks: { autoSkip: true, maxTicksLimit: 15, maxRotation: 90, minRotation: 45 } }
+                    }
+                }
+            });
         }
         
         function loadMonthlySummary(siteKey) {

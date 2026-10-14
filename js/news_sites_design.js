@@ -97,7 +97,8 @@
 
   // Push a live change into the preview iframe (no reload).
   function pv(msg) {
-    try { el.preview.contentWindow.postMessage(Object.assign({ source: "ten-design-editor" }, msg), "*"); } catch (e) {}
+    var tgt = (st && st.bmOpen && el.bmPreview) ? el.bmPreview : el.preview;
+    try { tgt.contentWindow.postMessage(Object.assign({ source: "ten-design-editor" }, msg), "*"); } catch (e) {}
   }
 
   function api(action, data) {
@@ -138,7 +139,7 @@
         '<button class="dl-b save" id="dlSave">Save draft</button>' +
         '<button class="dl-b publish" id="dlPublish">Publish</button>' +
         '<button class="dl-b history" id="dlHistory">History</button>' +
-        '<button class="dl-b" id="dlPvMax" title="Maximise the preview, then click any element to edit its HTML">⤢ Max preview</button>' +
+        '<button class="dl-b" id="dlPvMax" title="Make the preview bigger — selecting and editing still work">⛶ Fullscreen</button>' +
         '<button class="dl-b close" id="dlClose">Close</button>' +
       '</div>' +
       '<div class="dl-main">' +
@@ -166,7 +167,7 @@
     el.pageSel = m.querySelector("#dlPageSel");
     el.blocks = m.querySelector("#dlBlocks");
     el.palette = m.querySelector("#dlPalette");
-    el.right = m.querySelector("#dlRight");
+    el.right = m.querySelector("#dlRight"); el._rightMainPanel = el.right;
     el.preview = m.querySelector("#dlPreview");
     el.pvWrap = m.querySelector("#dlPvWrap");
     el.title = m.querySelector("#dlTitle");
@@ -201,6 +202,31 @@
     m.querySelector("#dlClose").addEventListener("click", close);
     ov.addEventListener("click", close);
 
+    // ---- per-block edit modal (⚙): the block in its own window + revert tools ----
+    var bmOv = document.createElement("div"); bmOv.className = "dl-ov dl-bmov"; bmOv.id = "dlBmOv";
+    var bm = document.createElement("div"); bm.className = "dl-bmodal"; bm.id = "dlBmodal";
+    bm.innerHTML =
+      '<div class="dl-bm-bar">' +
+        '<h3 id="dlBmTitle">Edit block</h3>' +
+        '<div class="dl-spacer"></div>' +
+        '<button class="dl-b" id="dlBmDefault" title="Reset this block to the original design">↺ Reset to default</button>' +
+        '<button class="dl-b" id="dlBmUndo" title="Undo every change you made to this block since opening this window">↶ Undo my changes</button>' +
+        '<button class="dl-b publish" id="dlBmDone">Done</button>' +
+      '</div>' +
+      '<div class="dl-bm-body">' +
+        '<div class="dl-bm-settings" id="dlBmSettings"></div>' +
+        '<div class="dl-bm-pv"><iframe id="dlBmPreview"></iframe></div>' +
+      '</div>';
+    root.appendChild(bmOv); root.appendChild(bm);
+    el.bmOv = bmOv; el.bmodal = bm;
+    el.bmSettings = bm.querySelector("#dlBmSettings");
+    el.bmPreview = bm.querySelector("#dlBmPreview");
+    el.bmTitle = bm.querySelector("#dlBmTitle");
+    el.bmPreview.addEventListener("load", function () { if (st && st.bmOpen) { pv({ action: "isolate", index: st.sel }); } });
+    bm.querySelector("#dlBmDone").addEventListener("click", closeBlockModal);
+    bm.querySelector("#dlBmUndo").addEventListener("click", blockModalUndo);
+    bm.querySelector("#dlBmDefault").addEventListener("click", blockModalDefault);
+
     // Preview → editor messages: select a block/element, or apply an inline edit.
     window.addEventListener("message", function (e) {
       var d = e.data;
@@ -213,15 +239,16 @@
         if (isNaN(idx) || !st.desktop.blocks[idx]) { return; }
         st.sel = idx; st.selEl = d.selector || "";
         st.selElLabel = d.elLabel || ""; st.selEditKey = d.editKey || "";
-        // In max-preview mode, a click jumps straight into the block's HTML editor.
-        if (st.pvMax && d.blockType && TEMPLATE_BLOCKS.indexOf(d.blockType) !== -1) { enterBlockMode(d.blockType); return; }
+        // Unified model: a click ALWAYS just selects the element and opens its
+        // inspector on the right — it never jumps into a separate editing mode.
+        st.selAnchorHref = (typeof d.anchorHref === "string") ? d.anchorHref : null;
+        st.selAnchorSel = d.anchorSelector || "";
         render();
       } else if (d.action === "edit") {
         var i = parseInt(d.index, 10);
         var blk = st.desktop.blocks[i];
         if (blk && d.key) {
-          if (!blk.settings) { blk.settings = {}; }
-          blk.settings[d.key] = d.value;
+          workSettings(blk)[d.key] = d.value;
           applyChangeDebounced();
           if (st.sel === i) { renderRight(); }
         }
@@ -233,14 +260,19 @@
     build();
     st = { pub: p.publication, host: hostFrom(p.url), page: "front", device: "desktop",
            desktop: { theme: {}, blocks: [] }, mobile: {}, sel: -1, selEl: "",
-           mode: "page", blockType: null, blockTemplates: {}, blockSel: null, pvMax: false };
+           selAnchorHref: null, selAnchorSel: "",
+           mode: "page", blockType: null, blockTemplates: {}, globalBlocks: {}, blockSel: null, pvMax: false };
     el.modal.classList.remove("dl-pvmax", "dl-max");
-    var pvb = el.modal.querySelector("#dlPvMax"); if (pvb) { pvb.innerHTML = "⤢ Max preview"; pvb.classList.remove("dl-active-max"); }
+    if (el.bmodal) { el.bmodal.classList.remove("dl-show"); el.bmOv.classList.remove("dl-show"); }
+    if (el._rightMainPanel) { el.right = el._rightMainPanel; }  // undo any left-over modal swap
+    var pvb = el.modal.querySelector("#dlPvMax"); if (pvb) { pvb.innerHTML = "⛶ Fullscreen"; pvb.classList.remove("dl-active-max"); }
     el.title.textContent = "Design — " + p.title;
     el.ov.classList.add("dl-show"); el.modal.classList.add("dl-show");
     el.body.classList.add("dl-left-collapsed"); // Blocks panel collapsed by default
     document.body.style.overflow = "hidden"; // kill the page scrollbar behind the modal
     syncChips();
+    loadSections(); // populate the Link dropdown's Sections group (page mode too)
+    loadBlockTemplates(); // load global block templates + settings (shared across pages)
     loadPage();
   }
   function close() {
@@ -248,17 +280,16 @@
     document.body.style.overflow = "";
   }
 
-  // Maximise the preview pane (hide side panels + go fullscreen). While on, a
-  // click on any block in the preview opens that block's HTML editor — a focused
-  // canvas for detailed desktop design work.
+  // Fullscreen: make the preview bigger by hiding the left blocks rail. The
+  // right-hand inspector stays, so selecting and editing still work — this is a
+  // pure VIEW toggle and never changes the editing mode.
   function togglePvMax() {
     if (!st) { return; }
     st.pvMax = !st.pvMax;
     el.modal.classList.toggle("dl-pvmax", st.pvMax);
     el.modal.classList.toggle("dl-max", st.pvMax);
     var b = el.modal.querySelector("#dlPvMax");
-    if (b) { b.innerHTML = st.pvMax ? "⤡ Exit max" : "⤢ Max preview"; b.classList.toggle("dl-active-max", st.pvMax); }
-    if (st.pvMax && st.mode === "page") { toast("Max preview on — click any part of the page to edit its HTML"); }
+    if (b) { b.innerHTML = st.pvMax ? "⛶ Exit fullscreen" : "⛶ Fullscreen"; b.classList.toggle("dl-active-max", st.pvMax); }
   }
 
   function syncChips() {
@@ -326,8 +357,13 @@
   // Data-driven href placeholders worth offering per block (so the section
   // name can link to *its own* section, etc.). {{href}} suits any list item.
   var BLOCK_HREFS = {
-    article_header: [["{{section_href}}", "This article’s section page"]],
-    front_feature:  [["{{hero.href}}", "Lead-story link"]]
+    article_header:     [["{{section_href}}", "This article’s section page"]],
+    front_feature:      [["{{hero.href}}", "Lead-story link"], ["{{section_href}}", "This headline’s section page"]],
+    headlines_list:     [["{{section_href}}", "This headline’s section page"]],
+    section_carousel:   [["{{section_href}}", "This item’s section page"]],
+    article_related:    [["{{section_href}}", "This item’s section page"]],
+    article_quickreads: [["{{section_href}}", "This item’s section page"]],
+    author_articles:    [["{{section_href}}", "This article’s section page"]]
   };
   var GENERIC_HREF = ["{{href}}", "Current item’s link (inside a list)"];
 
@@ -353,8 +389,31 @@
   function loadBlockTemplates(cb) {
     api("load", { page: "_blocks", device: "desktop" }).then(function (j) {
       st.blockTemplates = (j.layout && j.layout.templates) ? j.layout.templates : {};
+      st.globalBlocks = (j.layout && j.layout.settings) ? j.layout.settings : {};
       if (cb) { cb(); }
-    }).catch(function (e) { st.blockTemplates = {}; toast(e.message); if (cb) { cb(); } });
+    }).catch(function (e) { st.blockTemplates = {}; st.globalBlocks = {}; toast(e.message); if (cb) { cb(); } });
+  }
+
+  // The settings object the editor should read/write for a block. By default a
+  // block edits its publication-wide GLOBAL settings (shared across every page);
+  // when the block is flagged "only for this page" it edits its own instance
+  // settings. The global entry is seeded from the instance the first time it is
+  // touched, so existing per-page designs are preserved as the global baseline.
+  function workSettings(block) {
+    if (block.page_specific) { block.settings = toObj(block.settings); block.settings.styles = toObj(block.settings.styles); return block.settings; }
+    if (!st.globalBlocks) { st.globalBlocks = {}; }
+    if (!st.globalBlocks[block.type]) { st.globalBlocks[block.type] = clone(toObj(block.settings)); }
+    st.globalBlocks[block.type] = toObj(st.globalBlocks[block.type]);
+    st.globalBlocks[block.type].styles = toObj(st.globalBlocks[block.type].styles);
+    return st.globalBlocks[block.type];
+  }
+
+  // Persist the publication-wide block templates + global settings to the
+  // shared '_blocks' store (so edits apply across pages).
+  function saveGlobalsSilent() {
+    return api("save_draft", { page: "_blocks", device: "desktop",
+      layout_json: JSON.stringify({ templates: st.blockTemplates || {}, settings: st.globalBlocks || {} }) })
+      .catch(function (e) { toast(e.message); });
   }
 
   function loadSections() {
@@ -616,8 +675,7 @@
     applyTimer = setTimeout(function () {
       var tpl = wysGetTemplate();
       st.blockTemplates[st.blockType] = tpl;
-      api("save_draft", { page: "_blocks", device: "desktop", layout_json: JSON.stringify({ templates: st.blockTemplates }) })
-        .catch(function (e) { toast(e.message); });
+      saveGlobalsSilent(); // persist templates + global settings together (don't drop settings)
     }, 700);
   }
 
@@ -1019,12 +1077,12 @@
           var tasks = [];
           if (j.template) {
             st.blockTemplates[type] = j.template;
-            tasks.push(api("save_draft", { page: "_blocks", device: "desktop", layout_json: JSON.stringify({ templates: st.blockTemplates }) }));
+            tasks.push(saveGlobalsSilent()); // saves templates + settings together
           }
           if (j.css) {
-            if (!blk.settings) { blk.settings = {}; }
-            blk.settings.custom_css = (blk.settings.custom_css ? blk.settings.custom_css + "\n" : "") + j.css;
-            tasks.push(saveDraftSilent());
+            var AS = workSettings(blk);
+            AS.custom_css = (AS.custom_css ? AS.custom_css + "\n" : "") + j.css;
+            tasks.push(saveDraftSilent()); tasks.push(saveGlobalsSilent());
           }
           if (!tasks.length) { aiBusy(false); toast("No change suggested — try rephrasing"); return; }
           Promise.all(tasks).then(function () {
@@ -1053,7 +1111,60 @@
     }).catch(function (e) { toast(e.message); });
   }
 
-  function refreshPreview() { el.preview.src = previewUrl(); }
+  function refreshPreview() {
+    if (st && st.bmOpen && el.bmPreview) { el.bmPreview.src = previewUrl(); }
+    else { el.preview.src = previewUrl(); }
+  }
+
+  // ---- per-block edit modal ----
+  function openBlockModal(i) {
+    var block = st.desktop.blocks[i];
+    if (!block) { return; }
+    st.sel = i; st.selEl = ""; st.selEditKey = ""; st.selElLabel = ""; st.selAnchorSel = ""; st.selAnchorHref = null;
+    st.bmType = block.type;
+    // Snapshot everything this block's look depends on, for "Undo my changes".
+    st.bmSnap = {
+      settings: clone(block.settings || {}),
+      page_specific: !!block.page_specific,
+      global: clone((st.globalBlocks && st.globalBlocks[block.type]) || {})
+    };
+    st.bmOpen = true;
+    el.bmTitle.textContent = (REG[block.type] || { label: block.type }).label + " — edit";
+    el._rightSaved = el.right; el.right = el.bmSettings;   // render settings into the modal
+    renderRight();
+    el.bmOv.classList.add("dl-show"); el.bmodal.classList.add("dl-show");
+    el.bmPreview.src = previewUrl();                        // onload isolates to this block
+  }
+  function closeBlockModal() {
+    if (!st || !st.bmOpen) { return; }
+    st.bmOpen = false;
+    if (el._rightSaved) { el.right = el._rightSaved; }
+    el.bmOv.classList.remove("dl-show"); el.bmodal.classList.remove("dl-show");
+    renderRight();            // restore the main right panel
+    refreshPreview();         // reload the main preview with the saved result
+  }
+  function blockModalUndo() {
+    if (!st || !st.bmOpen || !st.bmSnap) { return; }
+    var block = st.desktop.blocks[st.sel];
+    if (block) {
+      block.settings = clone(st.bmSnap.settings);
+      block.page_specific = st.bmSnap.page_specific;
+      if (!st.globalBlocks) { st.globalBlocks = {}; }
+      st.globalBlocks[st.bmType] = clone(st.bmSnap.global);
+    }
+    renderRight(); applyChangeDebounced(); refreshPreview();
+    toast("Reverted your changes to this block");
+  }
+  function blockModalDefault() {
+    if (!st || !st.bmOpen) { return; }
+    if (!window.confirm("Reset this block to the original default design? This clears your styling, links and options for it.")) { return; }
+    var block = st.desktop.blocks[st.sel];
+    var def = clone((REG[block.type] || {}).defaults || {});
+    if (block.page_specific) { block.settings = def; }
+    else { if (!st.globalBlocks) { st.globalBlocks = {}; } st.globalBlocks[block.type] = def; }
+    renderRight(); applyChangeDebounced(); refreshPreview();
+    toast("Reset to default");
+  }
 
   // ---- rendering ----
   function render() { renderBlocks(); renderPalette(); renderRight(); }
@@ -1075,7 +1186,7 @@
                        '<button class="dl-mini" data-a="del" title="Remove">✕</button>';
         li.querySelector('[data-a="up"]').addEventListener("click", function (e) { e.stopPropagation(); if (i > 0) { var t = blocks[i - 1]; blocks[i - 1] = blocks[i]; blocks[i] = t; st.sel = i - 1; render(); applyChangeDebounced(); } });
         li.querySelector('[data-a="down"]').addEventListener("click", function (e) { e.stopPropagation(); if (i < blocks.length - 1) { var t = blocks[i + 1]; blocks[i + 1] = blocks[i]; blocks[i] = t; st.sel = i + 1; render(); applyChangeDebounced(); } });
-        li.querySelector('[data-a="cfg"]').addEventListener("click", function (e) { e.stopPropagation(); st.sel = i; st.selEl = ""; render(); });
+        li.querySelector('[data-a="cfg"]').addEventListener("click", function (e) { e.stopPropagation(); openBlockModal(i); });
         li.querySelector('[data-a="del"]').addEventListener("click", function (e) { e.stopPropagation(); blocks.splice(i, 1); if (st.sel === i) st.sel = -1; render(); applyChangeDebounced(); });
         li.addEventListener("click", function () { st.sel = i; st.selEl = ""; render(); });
         li.addEventListener("dragstart", function (e) { e.dataTransfer.setData("text/plain", i); });
@@ -1163,14 +1274,98 @@
     { p: "border-style", l: "Border style", t: "select", o: [["",""],["solid","Solid"],["dashed","Dashed"],["dotted","Dotted"],["none","None"]] },
     { p: "border-color", l: "Border colour", t: "color" },
     { p: "border-radius", l: "Corner radius", t: "text", ph: "e.g. 8px" },
-    { sub: "Box" },
-    { p: "padding", l: "Padding", t: "text", ph: "e.g. 16px 24px" },
-    { p: "margin", l: "Margin", t: "text", ph: "e.g. 0 0 24px" }
+    { sub: "Size & spacing" },
+    { note: "Width is how wide this item is across the page. Leave it blank to keep the normal width. Choose “pixels” for an exact size, or “percent” for a share of the space (100% = full width, 50% = half)." },
+    { p: "width", l: "Width", t: "lenunit" },
+    { note: "Column widths only apply to a block laid out in side-by-side columns (like the front page). Type one number per column to say how they share the space: “1 1” = two equal columns, “2 1” = the first twice as wide as the second, “1 1 1” = three equal columns." },
+    { p: "grid-template-columns", l: "Column widths", t: "shares", ph: "e.g. 2 1" },
+    { note: "Padding is the space INSIDE the box, between its edge and the content. Margin is the space OUTSIDE the box, between it and the items next to it. Both are in pixels — fill in any of the four sides." },
+    { p: "padding", l: "Padding (px)", t: "box4" },
+    { p: "margin", l: "Margin (px)", t: "box4" }
   ];
+
+  // One side of a 4-box padding/margin control. Values are plain numbers,
+  // written as px to the CSS longhand (e.g. "padding-top").
+  function box4Side(styles, base, side) {
+    var wrap = document.createElement("div"); wrap.className = "dl-b4-cell";
+    var lab = document.createElement("span"); lab.className = "dl-b4-lab"; lab.textContent = side.charAt(0).toUpperCase() + side.slice(1);
+    var inp = document.createElement("input"); inp.type = "number"; inp.min = "0"; inp.placeholder = "0";
+    var prop = base + "-" + side;
+    var cur = styles[prop] || "";
+    inp.value = cur ? String(cur).replace(/px$/i, "") : "";
+    inp.addEventListener("input", function () {
+      var v = inp.value.trim();
+      setStyle(styles, prop, v === "" ? "" : (v + "px"));
+    });
+    wrap.appendChild(lab); wrap.appendChild(inp);
+    return wrap;
+  }
+
+  // A labelled drag slider with a live value readout. onInput(value) fires as the
+  // user drags so the preview can update immediately. Returns the range input.
+  function sliderRow(labelText, min, max, step, val, fmt, onInput) {
+    var wrap = document.createElement("div"); wrap.className = "dl-field";
+    var l = document.createElement("label"); l.textContent = labelText; wrap.appendChild(l);
+    var row = document.createElement("div"); row.className = "dl-slider-row";
+    var r = document.createElement("input"); r.type = "range"; r.min = min; r.max = max; r.step = step; r.value = val;
+    var out = document.createElement("span"); out.className = "dl-slider-out"; out.textContent = fmt(val);
+    r.addEventListener("input", function () { out.textContent = fmt(parseFloat(r.value)); onInput(parseFloat(r.value)); });
+    row.appendChild(r); row.appendChild(out); wrap.appendChild(row);
+    el.right.appendChild(wrap);
+    return r;
+  }
 
   function buildStyleControls(styles) {
     STYLE_SPECS.forEach(function (s) {
       if (s.sub) { var d = document.createElement("div"); d.className = "dl-sub"; d.textContent = s.sub; el.right.appendChild(d); return; }
+      if (s.note) { var n = document.createElement("p"); n.className = "dl-hint"; n.textContent = s.note; el.right.appendChild(n); return; }
+      if (s.t === "box4") {
+        var lbl = document.createElement("div"); lbl.className = "dl-b4-title"; lbl.textContent = s.l; el.right.appendChild(lbl);
+        var row = document.createElement("div"); row.className = "dl-box4";
+        ["top", "right", "bottom", "left"].forEach(function (side) { row.appendChild(box4Side(styles, s.p, side)); });
+        el.right.appendChild(row);
+        return;
+      }
+      if (s.t === "lenunit") {
+        // Width: a number + a plain "pixels / percent" dropdown.
+        var curW = String(styles[s.p] || "");
+        var wUnit = /%/.test(curW) ? "%" : "px";
+        var wNum = curW.replace(/[^0-9.]/g, "");
+        var lr = document.createElement("div"); lr.className = "dl-color-row";
+        var ni = document.createElement("input"); ni.type = "number"; ni.min = "0"; ni.placeholder = "normal";
+        ni.value = wNum; ni.style.cssText = "flex:1 1 auto;min-width:0;width:auto;";
+        var us = document.createElement("select");
+        [["px", "pixels"], ["%", "percent"]].forEach(function (o) { var op = document.createElement("option"); op.value = o[0]; op.textContent = o[1]; us.appendChild(op); });
+        us.value = wUnit; us.style.cssText = "flex:0 0 7.5em;width:auto;";
+        var applyW = function () { var n = ni.value.trim(); setStyle(styles, s.p, n === "" ? "" : (n + us.value)); };
+        ni.addEventListener("input", applyW); us.addEventListener("change", applyW);
+        lr.appendChild(ni); lr.appendChild(us);
+        el.right.appendChild(field(s.l, lr));
+        return;
+      }
+      if (s.t === "shares") {
+        // Column widths: plain "share" numbers (e.g. "2 1"), stored as CSS fr
+        // units. Plus a drag slider for the common two-column split.
+        var curC = String(styles[s.p] || "");
+        var disp = curC ? curC.split(/\s+/).map(function (t) { return t.replace(/fr$/i, ""); }).join(" ") : "";
+        var si = document.createElement("input"); si.type = "text"; si.placeholder = s.ph || "e.g. 2 1"; si.value = disp;
+        si.addEventListener("input", function () {
+          var raw = si.value.trim();
+          if (raw === "") { setStyle(styles, s.p, ""); return; }
+          var parts = raw.split(/\s+/).filter(function (x) { return /^[0-9.]+$/.test(x); });
+          if (!parts.length) { return; }
+          setStyle(styles, s.p, parts.map(function (x) { return x + "fr"; }).join(" "));
+        });
+        el.right.appendChild(field(s.l, si));
+
+        var toks = disp ? disp.split(/\s+/) : [];
+        var leftPct = 50;
+        if (toks.length === 2) { var a = parseFloat(toks[0]) || 1, b = parseFloat(toks[1]) || 1; leftPct = Math.max(20, Math.min(80, Math.round(a / (a + b) * 100))); }
+        sliderRow("Two columns: drag to set the first column’s share", 20, 80, 1, leftPct,
+          function (v) { return v + " : " + (100 - v); },
+          function (v) { var val = v + "fr " + (100 - v) + "fr"; setStyle(styles, s.p, val); si.value = v + " " + (100 - v); });
+        return;
+      }
       var input;
       if (s.t === "select") {
         input = document.createElement("select");
@@ -1206,11 +1401,11 @@
   function miniBtn(txt) { var b = document.createElement("button"); b.type = "button"; b.className = "dl-mini"; b.textContent = txt; return b; }
 
   // Add / remove / reorder the sections shown by a front_sections block.
-  function renderSectionList(block) {
-    var arr = block.settings.sections;
+  function renderSectionList(S) {
+    var arr = S.sections;
     if (!Array.isArray(arr)) {
       arr = (typeof arr === "string" && arr) ? arr.split(",").map(function (s) { return s.trim(); }).filter(Boolean) : [];
-      block.settings.sections = arr;
+      S.sections = arr;
     }
     var sub = document.createElement("div"); sub.className = "dl-sub"; sub.textContent = "Sections shown (in order)"; el.right.appendChild(sub);
     if (!arr.length) { var n = document.createElement("p"); n.className = "dl-hint"; n.textContent = "Empty = all sections from the menu, in order."; el.right.appendChild(n); }
@@ -1238,11 +1433,32 @@
 
   function renderBlockSettings(block) {
     var reg = REG[block.type] || { label: block.type, defaults: {} };
-    if (!block.settings) block.settings = {};
-    block.settings.styles = toObj(block.settings.styles);
+    var S = workSettings(block);        // GLOBAL settings by default, or this page's own copy
+    S.styles = toObj(S.styles);
     var selEl = st.selEl || "";
 
     var h = document.createElement("h4"); h.textContent = reg.label + " — settings"; el.right.appendChild(h);
+
+    // Scope: do edits to this block apply to every page, or only this one?
+    var scopeWrap = document.createElement("label"); scopeWrap.className = "dl-inline"; scopeWrap.style.cssText = "margin:2px 0 6px;";
+    var scope = document.createElement("input"); scope.type = "checkbox"; scope.checked = !!block.page_specific;
+    scope.addEventListener("change", function () {
+      if (scope.checked) {
+        block.settings = clone(workSettings(block)); // seed this page's own copy from the shared design
+        block.page_specific = true;
+      } else {
+        block.page_specific = false; block.settings = {}; // go back to the shared design
+      }
+      render(); applyChangeDebounced();
+    });
+    scopeWrap.appendChild(scope);
+    scopeWrap.appendChild(document.createTextNode(" This block’s design is only for this page"));
+    el.right.appendChild(scopeWrap);
+    var scopeHint = document.createElement("p"); scopeHint.className = "dl-hint";
+    scopeHint.textContent = block.page_specific
+      ? "Changes here affect only this page’s copy of the block."
+      : "Changes here update this block on every page that uses it. Tick the box to make this page different.";
+    el.right.appendChild(scopeHint);
 
     // Non-technical editing happens on the live preview; the raw HTML editor is
     // an advanced, clearly-labelled escape hatch (links / custom layout).
@@ -1255,8 +1471,8 @@
 
       var editBtn = document.createElement("button");
       editBtn.type = "button"; editBtn.className = "dl-adv-link";
-      editBtn.innerHTML = "⟨⟩ Advanced: edit raw HTML &amp; links";
-      editBtn.title = "For developers — shows the block's template code.";
+      editBtn.innerHTML = "⟨⟩ Advanced: edit block template (developers)";
+      editBtn.title = "Developer escape hatch — edit the block's raw HTML template with tokens. Not needed for everyday text, links or styling.";
       editBtn.addEventListener("click", function () { enterBlockMode(block.type); });
       el.right.appendChild(editBtn);
     }
@@ -1266,7 +1482,7 @@
     target.innerHTML = "Editing: <strong>" + (selEl ? esc(elementFriendly(st.selElLabel, selEl)) : "the whole block") + "</strong>";
     if (selEl) {
       var whole = document.createElement("button"); whole.type = "button"; whole.className = "dl-chip"; whole.style.marginLeft = "8px"; whole.textContent = "whole block";
-      whole.addEventListener("click", function () { st.selEl = ""; st.selEditKey = ""; st.selElLabel = ""; renderRight(); });
+      whole.addEventListener("click", function () { st.selEl = ""; st.selEditKey = ""; st.selElLabel = ""; st.selAnchorSel = ""; st.selAnchorHref = null; renderRight(); });
       target.appendChild(whole);
     }
     el.right.appendChild(target);
@@ -1287,8 +1503,8 @@
     qbtn("↓ Down", "Move this block down the page", function () { if (i < blocks.length - 1) { var t = blocks[i + 1]; blocks[i + 1] = blocks[i]; blocks[i] = t; st.sel = i + 1; render(); applyChangeDebounced(); } });
     qbtn("⊡ Centre", "Centre the selected " + (selEl ? "element" : "block") + "’s contents", function () {
       var tsel = selEl || "";
-      block.settings.styles[tsel] = toObj(block.settings.styles[tsel]);
-      setStyle(block.settings.styles[tsel], "text-align", "center"); renderRight();
+      S.styles[tsel] = toObj(S.styles[tsel]);
+      setStyle(S.styles[tsel], "text-align", "center"); renderRight();
     });
     qbtn("⧉ Duplicate", "Duplicate this block", function () { blocks.splice(i + 1, 0, clone(blocks[i])); st.sel = i + 1; render(); applyChangeDebounced(); });
     qbtn("🗑 Delete", "Delete this block", function () { if (window.confirm("Delete this block from the page?")) { blocks.splice(i, 1); st.sel = -1; st.selEl = ""; render(); applyChangeDebounced(); } });
@@ -1296,63 +1512,138 @@
 
     // If this element's text is editable, offer a reliable text field here too.
     if (selEl && st.selEditKey) {
-      var txtSub = document.createElement("div"); txtSub.className = "dl-sub"; txtSub.textContent = "Text"; el.right.appendChild(txtSub);
+      var txtSub = document.createElement("div"); txtSub.className = "dl-sub"; txtSub.textContent = "Content"; el.right.appendChild(txtSub);
       var txt = document.createElement("input"); txt.type = "text"; txt.placeholder = "(automatic default)";
-      txt.value = (st.selEditKey in block.settings) ? block.settings[st.selEditKey] : "";
+      txt.value = (st.selEditKey in S) ? S[st.selEditKey] : "";
       var ekey = st.selEditKey;
-      txt.addEventListener("input", function () { block.settings[ekey] = txt.value; applyChangeDebounced(); });
+      txt.addEventListener("input", function () { S[ekey] = txt.value; applyChangeDebounced(); });
       el.right.appendChild(field("Edit this text", txt));
+    }
+
+    // Link for the selected element (shown when an element is selected that is,
+    // or contains, a link).
+    if (selEl && st.selAnchorSel) {
+      var linkSub = document.createElement("div"); linkSub.className = "dl-sub"; linkSub.textContent = "Link"; el.right.appendChild(linkSub);
+      S.links = toObj(S.links);
+      var asel = st.selAnchorSel;
+      var curHref = (asel in S.links) ? S.links[asel] : (st.selAnchorHref || "");
+
+      var dest = document.createElement("select");
+      var first = document.createElement("option"); first.value = ""; first.textContent = "Choose a destination…"; dest.appendChild(first);
+      (function () {
+        function grp(label, pairs) {
+          if (!pairs || !pairs.length) { return; }
+          var og = document.createElement("optgroup"); og.label = label;
+          pairs.forEach(function (p) { var o = document.createElement("option"); o.value = p[0]; o.textContent = p[1]; og.appendChild(o); });
+          dest.appendChild(og);
+        }
+        grp("Fixed pages", FIXED_PAGES);
+        grp("Sections", (wys.sections || []).map(function (s) { return [s.href, s.name]; }));
+        grp("Dynamic fields", (BLOCK_HREFS[block.type] || []).concat([GENERIC_HREF]));
+      })();
+      el.right.appendChild(field("Link to", dest));
+
+      var urlInp = document.createElement("input"); urlInp.type = "text";
+      urlInp.placeholder = "/design/…   https://…   or   {{section_href}}";
+      urlInp.value = curHref;
+      el.right.appendChild(field("URL", urlInp));
+
+      function setLink(href) {
+        S.links[asel] = href;
+        st.selAnchorHref = href;
+        pv({ action: "live_href", blockIdx: st.sel, selector: asel, href: href });
+        applyChangeDebounced();
+      }
+      dest.addEventListener("change", function () { if (dest.value) { urlInp.value = dest.value; setLink(dest.value); } });
+      urlInp.addEventListener("input", function () { setLink(urlInp.value.trim()); });
+
+      var rmLink = document.createElement("button"); rmLink.type = "button"; rmLink.className = "dl-mini"; rmLink.style.marginTop = "6px"; rmLink.textContent = "Remove link";
+      rmLink.addEventListener("click", function () { urlInp.value = ""; setLink(""); });
+      el.right.appendChild(rmLink);
+
+      var lkHint = document.createElement("p"); lkHint.className = "dl-hint";
+      lkHint.textContent = "This link follows each item — e.g. “this item’s section” links every row to its own section.";
+      el.right.appendChild(lkHint);
     }
 
     // Visual style controls for the selected element.
     var styleSub = document.createElement("div"); styleSub.className = "dl-sub"; styleSub.textContent = selEl ? "Style this element" : "Style the whole block"; el.right.appendChild(styleSub);
-    block.settings.styles[selEl] = toObj(block.settings.styles[selEl]);
-    var styles = block.settings.styles[selEl];
+    S.styles[selEl] = toObj(S.styles[selEl]);
+    var styles = S.styles[selEl];
     buildStyleControls(styles);
+
+    // Page width (whole-site content container). Lives in the page theme, but is
+    // surfaced here so it can be adjusted while working on a block. Assumed px.
+    if (!st.desktop.theme) { st.desktop.theme = {}; }
+    var pwSub = document.createElement("div"); pwSub.className = "dl-sub"; pwSub.textContent = "Page width (whole site)"; el.right.appendChild(pwSub);
+    var pwNote = document.createElement("p"); pwNote.className = "dl-hint";
+    pwNote.textContent = "How wide the whole page content is. Drag the slider and watch the preview get narrower or wider. This affects every page on the site.";
+    el.right.appendChild(pwNote);
+    var pwVal = parseInt(String(st.desktop.theme.container_max || "").replace(/px$/i, ""), 10) || 1200;
+    sliderRow("Page width", 700, 1920, 10, pwVal, function (v) { return v + " px"; }, function (v) {
+      pv({ action: "live_css", key: "pagewidth", css: ".dl-container{max-width:" + v + "px !important}" });
+      st.desktop.theme.container_max = v + "px";
+      applyChangeDebounced();
+    });
+
+    // Reset just the width-related settings (this element's width + column
+    // widths, and the whole-site page width) back to their defaults.
+    var rstW = document.createElement("button"); rstW.type = "button"; rstW.className = "dl-mini"; rstW.style.marginTop = "8px";
+    rstW.textContent = "↺ Reset widths to default";
+    rstW.title = "Clears Width, Column widths and Page width back to the design's defaults.";
+    rstW.addEventListener("click", function () {
+      delete styles["width"]; delete styles["grid-template-columns"];
+      delete st.desktop.theme.container_max;
+      pv({ action: "live_prop", blockIdx: st.sel, selector: st.selEl || "", prop: "width", value: "" });
+      pv({ action: "live_prop", blockIdx: st.sel, selector: st.selEl || "", prop: "grid-template-columns", value: "" });
+      pv({ action: "live_css", key: "pagewidth", css: "" });
+      applyChangeDebounced(); renderRight();
+    });
+    el.right.appendChild(rstW);
 
     // Content / behaviour settings for the whole block only.
     if (!selEl) {
       var cfgSub = document.createElement("div"); cfgSub.className = "dl-sub"; cfgSub.textContent = "Content & options"; el.right.appendChild(cfgSub);
       var eqWrap = document.createElement("label"); eqWrap.className = "dl-inline";
-      var eq = document.createElement("input"); eq.type = "checkbox"; eq.checked = !!block.settings.equal_height;
-      eq.addEventListener("change", function () { block.settings.equal_height = eq.checked; applyChangeDebounced(); });
+      var eq = document.createElement("input"); eq.type = "checkbox"; eq.checked = !!S.equal_height;
+      eq.addEventListener("change", function () { S.equal_height = eq.checked; applyChangeDebounced(); });
       eqWrap.appendChild(eq); eqWrap.appendChild(document.createTextNode(" Match tallest element in the same row"));
       el.right.appendChild(eqWrap);
 
       var defs = reg.defaults || {};
       Object.keys(defs).forEach(function (k) {
         if (block.type === "front_sections" && k === "sections") { return; } // custom UI below
-        var val = (k in block.settings) ? block.settings[k] : defs[k];
+        var val = (k in S) ? S[k] : defs[k];
         var input;
         if (typeof defs[k] === "boolean") {
           input = document.createElement("input"); input.type = "checkbox"; input.checked = !!val;
-          input.addEventListener("change", function () { block.settings[k] = input.checked; applyChangeDebounced(); });
+          input.addEventListener("change", function () { S[k] = input.checked; applyChangeDebounced(); });
         } else if (typeof defs[k] === "number") {
           input = document.createElement("input"); input.type = "number"; input.value = val;
-          input.addEventListener("input", function () { block.settings[k] = parseInt(input.value, 10) || 0; applyChangeDebounced(); });
+          input.addEventListener("input", function () { S[k] = parseInt(input.value, 10) || 0; applyChangeDebounced(); });
         } else {
           input = document.createElement("input"); input.type = "text"; input.value = val;
-          input.addEventListener("input", function () { block.settings[k] = input.value; applyChangeDebounced(); });
+          input.addEventListener("input", function () { S[k] = input.value; applyChangeDebounced(); });
         }
         el.right.appendChild(field(k.replace(/_/g, " "), input));
       });
 
-      if (block.type === "front_sections") { renderSectionList(block); }
+      if (block.type === "front_sections") { renderSectionList(S); }
 
       // Custom HTML appended to the block.
       var htmlSub = document.createElement("div"); htmlSub.className = "dl-sub"; htmlSub.textContent = "Custom HTML (appended)"; el.right.appendChild(htmlSub);
       var hta = document.createElement("textarea"); hta.className = "dl-css"; hta.rows = 5;
       hta.placeholder = "<div class=\"promo\">Custom HTML…</div>";
-      hta.value = block.settings.custom_html || "";
-      hta.addEventListener("input", function () { block.settings.custom_html = hta.value; applyChangeDebounced(); });
+      hta.value = S.custom_html || "";
+      hta.addEventListener("input", function () { S.custom_html = hta.value; applyChangeDebounced(); });
       el.right.appendChild(field("", hta));
 
       // Advanced freeform CSS.
       var cssSub = document.createElement("div"); cssSub.className = "dl-sub"; cssSub.textContent = "Advanced CSS (this block)"; el.right.appendChild(cssSub);
       var ta = document.createElement("textarea"); ta.className = "dl-css"; ta.rows = 5;
       ta.placeholder = ".dl-headlines-list li { padding: 6px 0; }";
-      ta.value = block.settings.custom_css || "";
-      ta.addEventListener("input", function () { block.settings.custom_css = ta.value; applyChangeDebounced(); });
+      ta.value = S.custom_css || "";
+      ta.addEventListener("input", function () { S.custom_css = ta.value; applyChangeDebounced(); });
       el.right.appendChild(field("", ta));
     }
   }
@@ -1431,7 +1722,10 @@
   // preview always reflects the current settings (e.g. hiding search/subscribe).
   function applyChangeDebounced() {
     clearTimeout(applyTimer);
-    applyTimer = setTimeout(function () { saveDraftSilent().then(refreshPreview); }, 500);
+    applyTimer = setTimeout(function () {
+      // Persist the page layout AND the shared global block settings, then refresh.
+      Promise.all([saveDraftSilent(), saveGlobalsSilent()]).then(refreshPreview);
+    }, 500);
   }
 
   function doPublish() {

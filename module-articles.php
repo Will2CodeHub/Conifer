@@ -13,6 +13,12 @@ $apiKey = '35893630-f396d86d2cc73061b0e733d53';
 // (enforced in ajax/get_articles.php) and no Sponsored Articles tab.
 $isJournalist = (($_SESSION['ten_position'] ?? '') === 'Journalist');
 
+// Edit history (view + restore past versions) is an oversight tool limited to
+// senior roles — kept in sync with the gate in ajax/article_revisions.php.
+$canViewHistory = isAdmin() || in_array(($_SESSION['ten_position'] ?? ''), [
+    'Admin', 'Super Admin', 'Super User', 'Administrator', 'Manager', 'Editor-in-Chief',
+], true);
+
 $currentPage = 'articles';
 $pageTitle = 'Article Management';
 
@@ -29,6 +35,10 @@ $pageTitle = 'Article Management';
     <link rel="stylesheet" href="css/backend-style.css">
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+    // Whether the current user may see/use the article edit-history feature (senior roles).
+    window.TEN_canViewHistory = <?php echo $canViewHistory ? 'true' : 'false'; ?>;
+    </script>
     <script>
     /* Author finder: the author <select> lists only ACTIVE authors by default; this adds
        a "Find another author…" option that searches ALL authors (incl. inactive) so an
@@ -3065,6 +3075,11 @@ document.addEventListener('change', function (e) {
                     ? '<button type="button" onclick="openEdit(' + row.id + ')" style="border:none;background:#3b82f6;color:#fff;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;gap:4px;font-weight:500;" title="Edit article"><i class="fas fa-pencil-alt"></i> Edit</button>'
                     : '';
 
+                // History button (senior roles only): opens the edit-history modal.
+                const historyBtn = window.TEN_canViewHistory
+                    ? '<button type="button" onclick="openHistory(' + row.id + ')" style="border:none;background:#8b5cf6;color:#fff;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;gap:4px;font-weight:500;" title="View edit history"><i class="fas fa-clock-rotate-left"></i> History</button>'
+                    : '';
+
                 // Smart view button: preview for unpublished, live for published
                 let viewBtn = '';
                 if (row.state === 'published' && row.live_url) {
@@ -3118,7 +3133,7 @@ document.addEventListener('change', function (e) {
                     '<td style="padding:12px 10px;vertical-align:middle;width:110px;">' + statusBadge + '</td>' +
                     '<td style="padding:12px 10px;vertical-align:middle;width:160px;font-size:12px;color:#64748b;white-space:nowrap;">' + dateStr + scheduledBadge + '</td>' +
                     '<td style="padding:12px 10px;vertical-align:middle;text-align:center;width:120px;">' +
-                        '<div style="display:flex;gap:6px;justify-content:center;flex-wrap:nowrap;">' + editBtn + viewBtn + '</div>' +
+                        '<div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">' + editBtn + viewBtn + historyBtn + '</div>' +
                     '</td>';
 
                 tbody.appendChild(tr);
@@ -4363,6 +4378,7 @@ document.addEventListener('change', function (e) {
         } catch (e) { /* no-op */ }
     })();
     </script>
+    <script src="js/article_history.js?v=<?php echo @filemtime(__DIR__ . '/js/article_history.js'); ?>"></script>
     <script src="js/ten_crop_resolution.js?v=<?php echo @filemtime(__DIR__ . '/js/ten_crop_resolution.js'); ?>"></script>
     <script src="js/scraper_image_suggest.js?v=<?php echo @filemtime(__DIR__ . '/js/scraper_image_suggest.js'); ?>"></script>
     <script src="js/image_search.js?v=<?php echo @filemtime(__DIR__ . '/js/image_search.js'); ?>"></script>

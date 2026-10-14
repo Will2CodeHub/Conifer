@@ -115,6 +115,12 @@ function ten_regenerate_publication_caches($publicationsCsv) {
     }
 }
 
+// Edit-history helpers (ten_build_snapshot / ten_write_revision). Required AFTER
+// the local write-helper defs above so the lib's function_exists-guarded copies
+// of those helpers are skipped here (no redeclare); the standalone restore
+// endpoint, which includes only the lib, gets them from there.
+require_once __DIR__ . '/../lib/article_revisions.php';
+
 // Check login
 if (!isLoggedIn()) {
     echo json_encode(['status' => 'error', 'message' => 'Not authenticated']);
@@ -326,6 +332,22 @@ try {
     } catch (Throwable $e) { $createdBy = ''; }
     if ($createdBy === '') { $createdBy = $_SESSION['ten_full_name'] ?? ($_SESSION['ten_username'] ?? ''); }
 
+    // Edit-history: build the snapshot of editable fields once (shared by the
+    // INSERT and UPDATE branches) and record who is making THIS edit (the logged-in
+    // user, not the article's author). Logged after a successful write below.
+    $snapFields = [
+        'title' => $title, 'article_text' => $articleText, 'alias' => $alias, 'tags' => $tags,
+        'section' => $section, 'section_subcat' => $sectionSubcat, 'journalist_id' => $author,
+        'publications' => $publications, 'canonical' => $canonical, 'meta_title' => $metaTitle,
+        'meta_description' => $metaDescription, 'meta_keywords' => $metaKeywords,
+        'evergreen' => $evergreen, 'featured' => $featured, 'sponsored' => $sponsored,
+        'frontpage_temp' => $headline, 'note' => $note, 'created_by' => $createdBy,
+        'publish_now' => $publishNow, 'publish_from' => $publishFrom, 'publish_to' => $publishTo,
+        'state' => $state,
+    ];
+    $editorId   = (int) ($_SESSION['ten_user_id'] ?? 0);
+    $editorName = $_SESSION['ten_full_name'] ?? ($_SESSION['ten_username'] ?? '');
+
     // Update or insert
     if ($articleId > 0) {
         // UPDATE
@@ -416,6 +438,10 @@ try {
                 ten_write_pub_flags($conn, $articleId, array_keys($pubFlags), $pubFlags);
             }
 
+            // Edit-history: log a full snapshot of this save (best-effort).
+            ten_write_revision($conn, $articleId, $editorId, $editorName, $state, 'save',
+                ten_build_snapshot($snapFields, $pubFlags));
+
             $conn->close();
 
             echo json_encode([
@@ -474,6 +500,10 @@ try {
             if ($hasPubFlags) {
                 ten_write_pub_flags($conn, $newId, array_keys($pubFlags), $pubFlags);
             }
+
+            // Edit-history: log the initial snapshot of the new article (best-effort).
+            ten_write_revision($conn, $newId, $editorId, $editorName, $state, 'save',
+                ten_build_snapshot($snapFields, $pubFlags));
 
             $conn->close();
 

@@ -49,7 +49,11 @@ switch ($action) {
     case 'monthly_summary':
         getMonthlySummary();
         break;
-    
+
+    case 'overview':
+        getAllSitesOverview();
+        break;
+
     default:
         echo ts_json(['success' => false, 'message' => 'Invalid action']);
 }
@@ -221,6 +225,78 @@ function getDailySeries($siteKey, $days = 31) {
         ];
     }
     return $series;
+}
+
+/**
+ * All-sites overview (shown on the stats page when no publication is selected):
+ * every site's HUMAN-unique visitors for YESTERDAY (ranked, most first) plus a
+ * day-by-day human-unique series over the trailing 30 days (yesterday-29 ..
+ * yesterday) for a comparison chart. One grouped query feeds both. GPHI is
+ * included. Missing days read as 0 (the nightly collector only fills forward).
+ */
+function getAllSitesOverview() {
+    $conn = getDBConnection();
+    $sites = ten_stats_sites();
+
+    // Window: 30 days ending yesterday.
+    $endTs   = strtotime('yesterday');
+    $startTs = strtotime('-29 days', $endTs);
+    $startDate = date('Y-m-d', $startTs);
+    $endDate   = date('Y-m-d', $endTs);
+
+    // Ordered list of day keys/labels for the x-axis.
+    $days = [];
+    for ($i = 0; $i < 30; $i++) {
+        $ts = strtotime("+$i days", $startTs);
+        $days[] = ['date' => date('Y-m-d', $ts), 'label' => date('j M', $ts)];
+    }
+
+    // date => site_key => human_unique, for the whole window in one query.
+    $byDate = [];
+    $stmt = $conn->prepare("
+        SELECT site_key, stat_date, SUM(human_unique) AS hu
+        FROM ten_traffic_stats
+        WHERE stat_date BETWEEN ? AND ?
+        GROUP BY site_key, stat_date
+    ");
+    if ($stmt) {
+        $stmt->bind_param('ss', $startDate, $endDate);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        while ($res && ($row = $res->fetch_assoc())) {
+            $byDate[$row['stat_date']][$row['site_key']] = (int) $row['hu'];
+        }
+        $stmt->close();
+    }
+    $conn->close();
+
+    // Build a per-site series over the fixed day list + yesterday's figure.
+    $out = [];
+    foreach ($sites as $key => $info) {
+        $series = [];
+        foreach ($days as $d) {
+            $series[] = $byDate[$d['date']][$key] ?? 0;
+        }
+        $out[] = [
+            'key'       => $key,
+            'name'      => $info['name'],
+            'yesterday' => $byDate[$endDate][$key] ?? 0,
+            'series'    => $series,
+        ];
+    }
+
+    // Rank by yesterday's human-unique, most first.
+    usort($out, function ($a, $b) { return $b['yesterday'] - $a['yesterday']; });
+
+    echo ts_json([
+        'success'       => true,
+        'metric'        => 'human_unique',
+        'yesterday'     => $endDate,
+        'yesterday_label' => date('D jS M, Y', $endTs),
+        'days'          => array_column($days, 'label'),
+        'day_dates'     => array_column($days, 'date'),
+        'sites'         => $out,
+    ]);
 }
 
 /**
