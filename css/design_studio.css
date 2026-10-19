@@ -273,6 +273,8 @@ body {
 .ds-he-btn:hover { background: #fff; border-color: var(--ds-line-2); }
 .ds-he-btn.ds-on { background: var(--ds-accent-wash); border-color: #cdddff; color: var(--ds-accent-ink); }
 .ds-he-link { color: var(--ds-accent-ink); }
+.ds-he-del { color: #b91c1c; }
+.ds-he-del:hover { background: #fef2f2; border-color: #fecaca; }
 .ds-he-sel {
   font: inherit; font-size: 13px; color: var(--ds-ink-2); border: 1px solid var(--ds-line-2);
   border-radius: 6px; padding: 5px 6px; background: #fff; cursor: pointer; max-width: 160px;

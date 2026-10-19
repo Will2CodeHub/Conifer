@@ -8,6 +8,7 @@
   var DS = window.DS = window.DS || {};
   var bs = null;   // { type, name, store, html, undo, lastHtml }
   var saveTimer = null;
+  var msgBound = false;
 
   DS.renderBlockEditor = function (params) {
     var type = params && params.type;
@@ -56,6 +57,23 @@
 
     DS.HtmlEditor.mount(document.getElementById("dsBeEditor"), { host: DS.ds.host, type: type });
     DS.HtmlEditor.onChange(onEditorChange);
+    // Cross-pane highlight: selecting in the editor outlines the same element in
+    // the live Preview pane.
+    DS.HtmlEditor.onSelect(function (selector) {
+      var f = document.getElementById("dsBePv");
+      if (f && f.contentWindow) {
+        try { f.contentWindow.postMessage({ source: "ten-design-editor", action: "select_el", blockIdx: 0, selector: selector }, "*"); } catch (e) {}
+      }
+    });
+    // Clicking an element in the Preview selects it in the editor.
+    if (!msgBound) {
+      msgBound = true;
+      window.addEventListener("message", function (e) {
+        var d = e.data;
+        if (!d || d.source !== "ten-design" || !bs) { return; }
+        if (d.action === "select" && d.selector) { DS.HtmlEditor.selectBySelector(d.selector); }
+      });
+    }
 
     loadTemplate(type);
   };

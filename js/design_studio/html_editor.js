@@ -321,6 +321,10 @@
       case "br": insertNodeAtCaret(w.doc.createElement("br")); return;
       case "a": el = w.doc.createElement("a"); el.setAttribute("href", "#"); el.textContent = "New link"; break;
       case "button": el = w.doc.createElement("button"); el.textContent = "Button"; break;
+      case "subscribe":
+        el = w.doc.createElement("a"); el.className = "dl-subscribe"; el.setAttribute("href", "/subscribe");
+        el.textContent = "{{subscribe_label}}";
+        insertNodeAtCaret(el); tokenizeDom(el, w.doc); selectElement(el); return;
       case "img": el = w.doc.createElement("img"); el.setAttribute("src", IMG_PH); el.setAttribute("alt", "Image"); el.style.maxWidth = "100%"; el.style.height = "auto"; break;
       case "hr": el = w.doc.createElement("hr"); break;
       case "div": el = w.doc.createElement("div"); el.textContent = "New box"; break;
@@ -701,7 +705,7 @@
       w.srcBtn.innerHTML = src ? "&#9998; Visual" : "&lt;/&gt; HTML";
     });
     sep();
-    selAct("Add a new element", [["", "+ Insert"], ["p", "Text paragraph"], ["h2", "Heading"], ["br", "Line break"], ["a", "Link"], ["button", "Button"], ["img", "Image"], ["hr", "Divider line"], ["div", "Box / container"]], insertElement);
+    selAct("Add a new element", [["", "+ Insert"], ["p", "Text paragraph"], ["h2", "Heading"], ["br", "Line break"], ["a", "Link"], ["button", "Button"], ["subscribe", "Subscribe button"], ["img", "Image"], ["hr", "Divider line"], ["div", "Box / container"]], insertElement);
     sep();
     c.format = selRef("Paragraph / heading", [["", "Format"], ["p", "Paragraph"], ["h1", "Heading 1"], ["h2", "Heading 2"], ["h3", "Heading 3"], ["h4", "Heading 4"], ["blockquote", "Quote"]], function (v) { if (v) { formatBlockSel(v); } });
     sep();
@@ -750,7 +754,8 @@
     btn("&minus; Column", "Remove the last column", removeColumn);
     c.cols = mk("span", "ds-he-cols"); c.cols.style.display = "none"; tb.appendChild(c.cols);
     sep();
-    btn("&#10005; Clear", "Clear formatting", clearFormat);
+    btn("&#128465; Delete element", "Delete the selected element", deleteSelected, "ds-he-del");
+    btn("&#10005; Clear formatting", "Remove bold / italic / colour from the selected text", clearFormat);
 
     function applyWidth() {
       var u = c.widthUnit.value, v = c.width.value;
@@ -815,13 +820,43 @@
   function applyElTo(el, prop, val) { if (!el) { return; } try { el.style[prop] = val; } catch (e) {} changed(); }
   function applyEl(prop, val) { applyElTo(w.selEl, prop, val); }
 
-  function selectElement(el) {
+  function selectElement(el, silent) {
     if (w.selEl) { try { w.selEl.classList.remove("ds-he-sel"); } catch (e) {} }
     w.selEl = (el && el !== w.root && el.nodeType === 1) ? el : null;
     if (w.selEl) { try { w.selEl.classList.add("ds-he-sel"); } catch (e) {} }
     w.gridEl = findGrid(w.selEl);
     syncToolbar();
     if (w.gridEl) { mountGridHandles(w.gridEl); renderColumnSliders(w.gridEl); } else { clearGridHandles(); renderColumnSliders(null); }
+    if (!silent && w.onSelect) { try { w.onSelect(w.selEl ? elSelector(w.selEl) : ""); } catch (e) {} }
+  }
+  // A selector for an element, relative to the block, matching the one the
+  // preview bridge posts (first dl-* class, else container+tag, else tag).
+  function elSelector(el) {
+    var tag = (el.tagName || "").toLowerCase(), node = el;
+    while (node && node !== w.root) {
+      if (node.classList) {
+        var dl = [].slice.call(node.classList).find(function (c) {
+          return c.indexOf("dl-") === 0 && c.indexOf("dl-block") !== 0 && c !== "dl-tok" && c.indexOf("dl-tok-") !== 0 && c !== "ds-he-sel";
+        });
+        if (dl) { return node === el ? ("." + dl) : ("." + dl + (tag ? " " + tag : "")); }
+      }
+      node = node.parentElement;
+    }
+    return tag;
+  }
+  // Select an element by a selector coming from the preview (clicking there).
+  function selectBySelector(selector) {
+    if (!w.root || !selector) { return; }
+    try { var el = w.root.querySelector(selector); if (el) { el.scrollIntoView({ block: "center" }); selectElement(el, true); } } catch (e) {}
+  }
+  // Delete the selected element.
+  function deleteSelected() {
+    if (w.srcMode) { return; }
+    if (!w.selEl) { DS.toast("Click an element to delete it first"); return; }
+    var el = w.selEl, parent = el.parentNode;
+    selectElement(null);
+    if (parent) { parent.removeChild(el); }
+    clearGridHandles(); changed();
   }
 
   // Apply a style to the current text selection (if any) or the selected element.
@@ -1056,6 +1091,8 @@
     toggleSource: toggleSource,
     isSourceMode: function () { return !!w.srcMode; },
     onChange: function (fn) { w.onChange = fn; },
+    onSelect: function (fn) { w.onSelect = fn; },
+    selectBySelector: selectBySelector,
     focusElement: function (selector) {
       if (!w.root || !selector) { return; }
       try {
