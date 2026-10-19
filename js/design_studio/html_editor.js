@@ -625,7 +625,24 @@
         var tk = e.target && e.target.closest ? e.target.closest(".dl-tok") : null;
         if (tk) { selectNode(tk); }
       });
-      renderInspector();
+      // Reliable new lines: Enter inserts a paragraph, Shift+Enter a line break,
+      // even when the caret sits next to protected placeholders.
+      w.root.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          var sel = w.win.getSelection();
+          if (!sel.rangeCount) { return; }
+          var node;
+          if (e.shiftKey) { node = w.doc.createElement("br"); }
+          else { node = w.doc.createElement("p"); node.appendChild(w.doc.createElement("br")); }
+          var r = sel.getRangeAt(0); r.deleteContents(); r.insertNode(node);
+          var nr = w.doc.createRange();
+          if (node.tagName === "P") { nr.setStart(node, 0); } else { nr.setStartAfter(node); }
+          nr.collapse(true); sel.removeAllRanges(); sel.addRange(nr);
+          rememberRange(); changed();
+        }
+      });
+      syncToolbar();
       // Native drag of content reflows the editor into a mess; allow only the
       // column resize handles to be dragged.
       w.root.addEventListener("dragstart", function (e) {
@@ -636,8 +653,9 @@
     w.frame.srcdoc = skeleton;
   }
 
-  // ---- toolbar ---------------------------------------------------------
+  // ---- toolbar (single style area; reflects the selected element) -------
   function buildToolbar(tb) {
+    var c = w.ctl = {};
     function btn(html, title, fn, cls) {
       var b = document.createElement("button");
       b.type = "button"; b.className = "ds-he-btn" + (cls ? " " + cls : ""); b.title = title; b.innerHTML = html;
@@ -645,40 +663,62 @@
       b.addEventListener("click", function (e) { e.preventDefault(); fn(); });
       tb.appendChild(b); return b;
     }
-    function sep() { var s = document.createElement("span"); s.className = "ds-he-sep"; tb.appendChild(s); }
-    function sel(title, opts, onChange) {
+    function sep() { tb.appendChild(mk("span", "ds-he-sep")); }
+    // action menu: runs onChange then resets to the first option
+    function selAct(title, opts, onChange) {
       var s = document.createElement("select"); s.className = "ds-he-sel"; s.title = title;
       opts.forEach(function (o) { var op = document.createElement("option"); op.value = o[0]; op.textContent = o[1]; s.appendChild(op); });
       s.addEventListener("mousedown", function () { rememberRange(); });
       s.addEventListener("change", function () { if (s.value !== "") { onChange(s.value); } s.value = ""; });
       tb.appendChild(s); return s;
     }
+    // value menu: keeps its value (reflects the element)
+    function selRef(title, opts, onChange) {
+      var s = document.createElement("select"); s.className = "ds-he-sel"; s.title = title;
+      opts.forEach(function (o) { var op = document.createElement("option"); op.value = o[0]; op.textContent = o[1]; s.appendChild(op); });
+      s.addEventListener("mousedown", function () { rememberRange(); });
+      s.addEventListener("change", function () { onChange(s.value); });
+      tb.appendChild(s); return s;
+    }
+    function numBox(title, ph, onInput, width) {
+      var i = document.createElement("input"); i.type = "number"; i.className = "ds-he-num"; i.title = title; i.placeholder = ph || ""; if (width) { i.style.width = width; }
+      i.addEventListener("mousedown", function () { rememberRange(); });
+      i.addEventListener("input", function () { onInput(i.value); });
+      tb.appendChild(i); return i;
+    }
+    function colBox(title, glyph, onInput) {
+      var wrap = mk("label", "ds-he-colour"); wrap.title = title; wrap.innerHTML = "<span>" + glyph + "</span>";
+      var i = document.createElement("input"); i.type = "color";
+      i.addEventListener("mousedown", function () { rememberRange(); });
+      i.addEventListener("input", function () { onInput(i.value); });
+      wrap.appendChild(i); tb.appendChild(wrap); return i;
+    }
+    function lab(t) { tb.appendChild(mk("span", "ds-he-lab", t)); }
+
     w.srcBtn = btn("&lt;/&gt; HTML", "Switch between visual editing and the HTML code", function () {
       var src = toggleSource();
       w.srcBtn.classList.toggle("ds-on", src);
       w.srcBtn.innerHTML = src ? "&#9998; Visual" : "&lt;/&gt; HTML";
     });
     sep();
-    sel("Add a new element", [["", "+ Insert"], ["p", "Text paragraph"], ["h2", "Heading"], ["br", "Line break"], ["a", "Link"], ["button", "Button"], ["img", "Image"], ["hr", "Divider line"], ["div", "Box / container"]], insertElement);
+    selAct("Add a new element", [["", "+ Insert"], ["p", "Text paragraph"], ["h2", "Heading"], ["br", "Line break"], ["a", "Link"], ["button", "Button"], ["img", "Image"], ["hr", "Divider line"], ["div", "Box / container"]], insertElement);
     sep();
-    sel("Paragraph / heading", [["", "Format"], ["p", "Paragraph"], ["h1", "Heading 1"], ["h2", "Heading 2"], ["h3", "Heading 3"], ["h4", "Heading 4"], ["blockquote", "Quote"]], formatBlockSel);
+    c.format = selRef("Paragraph / heading", [["", "Format"], ["p", "Paragraph"], ["h1", "Heading 1"], ["h2", "Heading 2"], ["h3", "Heading 3"], ["h4", "Heading 4"], ["blockquote", "Quote"]], function (v) { if (v) { formatBlockSel(v); } });
     sep();
     btn("<b>B</b>", "Bold", function () { wrapInline("strong", ["STRONG", "B"]); });
     btn("<i>I</i>", "Italic", function () { wrapInline("em", ["EM", "I"]); });
     btn("<u>U</u>", "Underline", function () { wrapInline("u", ["U"]); });
     btn("<s>S</s>", "Strikethrough", function () { wrapInline("s", ["S", "STRIKE", "DEL"]); });
-    sep();
     btn("x<sup>2</sup>", "Superscript", function () { wrapInline("sup", ["SUP"]); });
     btn("x<sub>2</sub>", "Subscript", function () { wrapInline("sub", ["SUB"]); });
     sep();
-    sel("Font", FONTS, function (v) { wrapInlineStyle("fontFamily", v); });
-    sel("Text size", SIZES, function (v) { wrapInlineStyle("fontSize", v); });
-    sel("Font weight", WEIGHTS, function (v) { wrapInlineStyle("fontWeight", v); });
-    sel("Line height", LINEHEIGHTS, function (v) { blockStyle("lineHeight", v); });
-    // colour pickers
-    var cText = colourControl("Text colour", "A", function (v) { wrapInlineStyle("color", v); });
-    var cBg = colourControl("Highlight colour", "▣", function (v) { wrapInlineStyle("backgroundColor", v); });
-    tb.appendChild(cText); tb.appendChild(cBg); sep();
+    selAct("Font", FONTS, function (v) { styleTextOrEl("fontFamily", v); });
+    lab("Size"); c.size = numBox("Text size (px)", "–", function (v) { styleTextOrEl("fontSize", v === "" ? "" : (v + "px")); }, "3.2em");
+    c.weight = selRef("Font weight", WEIGHTS, function (v) { styleTextOrEl("fontWeight", v); });
+    lab("Line"); c.lineh = numBox("Line height", "–", function (v) { styleEl("lineHeight", v === "" ? "" : v); }, "3em");
+    c.textcolor = colBox("Text colour", "A", function (v) { styleTextOrEl("color", v); });
+    c.bgcolor = colBox("Highlight colour", "&#9635;", function (v) { styleTextOrEl("backgroundColor", v); });
+    sep();
     btn("&bull; List", "Bulleted list", function () { listSel(false); });
     btn("1. List", "Numbered list", function () { listSel(true); });
     btn("&#9776;&larr;", "Align left", function () { alignSel("left"); });
@@ -690,20 +730,33 @@
     btn("Unlink", "Remove the link", function () { if (!w.doc || w.srcMode) { return; } var a = currentAnchor(); if (a) { unwrap(a); changed(); } });
     btn("&#8213; Rule", "Insert a horizontal line", insertHR);
     sep();
-    w.insSel = sel("Insert a placeholder (auto-filled on the live site)", [["", "Placeholder…"]], insertToken);
+    w.insSel = selAct("Insert a placeholder (auto-filled on the live site)", [["", "Placeholder…"]], insertToken);
     sep();
-    btn("&#9707; Columns", "Add a column", addColumn);
+    lab("Margin"); c.margin = numBox("Margin — all sides (px)", "0", function (v) { styleElBox("margin", v === "" ? "" : (v + "px")); }, "3em");
+    lab("Pad"); c.padding = numBox("Padding — all sides (px)", "0", function (v) { styleElBox("padding", v === "" ? "" : (v + "px")); }, "3em");
+    lab("Width"); c.width = numBox("Width", "auto", function (v) { applyWidth(); }, "3.4em");
+    c.widthUnit = (function () {
+      var s = document.createElement("select"); s.className = "ds-he-unit";
+      ["px", "%", "rem", "em", "auto"].forEach(function (u) { var o = document.createElement("option"); o.value = u; o.textContent = u; s.appendChild(o); });
+      s.addEventListener("change", applyWidth); tb.appendChild(s); return s;
+    })();
+    sep();
+    lab("Border"); c.bstyle = selRef("Border style", [["", "border"], ["none", "None"], ["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["double", "Double"]], function (v) {
+      styleEl("borderStyle", v); if (w.selEl && v && v !== "none" && !w.selEl.style.borderWidth) { w.selEl.style.borderWidth = "1px"; changed(); }
+    });
+    c.bcolor = colBox("Border colour", "&#9638;", function (v) { styleEl("borderColor", v); });
+    sep();
+    btn("&#9707; Add column", "Add a column", addColumn);
     btn("&minus; Column", "Remove the last column", removeColumn);
+    c.cols = mk("span", "ds-he-cols"); c.cols.style.display = "none"; tb.appendChild(c.cols);
     sep();
     btn("&#10005; Clear", "Clear formatting", clearFormat);
-  }
-  function colourControl(title, glyph, onPick) {
-    var wrap = document.createElement("label"); wrap.className = "ds-he-colour"; wrap.title = title;
-    wrap.innerHTML = '<span>' + glyph + '</span>';
-    var inp = document.createElement("input"); inp.type = "color";
-    inp.addEventListener("mousedown", function () { rememberRange(); });
-    inp.addEventListener("input", function () { onPick(inp.value); });
-    wrap.appendChild(inp); return wrap;
+
+    function applyWidth() {
+      var u = c.widthUnit.value, v = c.width.value;
+      if (u === "auto") { styleEl("width", "auto"); return; }
+      styleEl("width", v === "" ? "" : (v + u));
+    }
   }
   function fillInsertMenu(type) {
     if (!w.insSel) { return; }
@@ -766,8 +819,75 @@
     if (w.selEl) { try { w.selEl.classList.remove("ds-he-sel"); } catch (e) {} }
     w.selEl = (el && el !== w.root && el.nodeType === 1) ? el : null;
     if (w.selEl) { try { w.selEl.classList.add("ds-he-sel"); } catch (e) {} }
-    renderInspector();
+    w.gridEl = findGrid(w.selEl);
+    syncToolbar();
+    if (w.gridEl) { mountGridHandles(w.gridEl); renderColumnSliders(w.gridEl); } else { clearGridHandles(); renderColumnSliders(null); }
   }
+
+  // Apply a style to the current text selection (if any) or the selected element.
+  function styleTextOrEl(prop, val) {
+    var sel = w.win && w.win.getSelection();
+    if (sel && sel.rangeCount && !sel.isCollapsed && w.root.contains(sel.anchorNode)) { wrapInlineStyle(prop, val); }
+    else if (w.selEl) { w.selEl.style[prop] = val; changed(); }
+    else { DS.toast("Select some text, or click an element first"); }
+  }
+  function styleEl(prop, val) { if (w.selEl) { w.selEl.style[prop] = val; changed(); } else { DS.toast("Click an element first"); } }
+  function styleElBox(prefix, val) {
+    if (!w.selEl) { DS.toast("Click an element first"); return; }
+    ["Top", "Right", "Bottom", "Left"].forEach(function (s) { w.selEl.style[prefix + s] = val; });
+    changed();
+  }
+
+  // Reflect the selected element's current (rendered) values into the toolbar.
+  function syncToolbar() {
+    var c = w.ctl; if (!c) { return; }
+    var el = w.selEl;
+    if (c.label) { c.label.textContent = el ? friendlyEl(el) : "nothing selected"; }
+    if (!el || !w.win) {
+      [c.size, c.weight, c.lineh, c.margin, c.padding, c.width, c.format, c.bstyle].forEach(function (x) { if (x) { x.value = ""; } });
+      return;
+    }
+    var cs = w.win.getComputedStyle(el);
+    if (c.size) { c.size.value = Math.round(parseFloat(cs.fontSize)) || ""; }
+    if (c.weight) { var wt = String(cs.fontWeight); c.weight.value = (["100", "200", "300", "400", "500", "600", "700", "800", "900"].indexOf(wt) >= 0 ? wt : ""); }
+    if (c.lineh) { var lh = cs.lineHeight; c.lineh.value = (lh === "normal" ? "" : (Math.round(parseFloat(lh) * 10) / 10) || ""); }
+    if (c.textcolor) { c.textcolor.value = rgbToHex(cs.color); }
+    if (c.bgcolor) { c.bgcolor.value = rgbToHex(cs.backgroundColor); }
+    if (c.margin) { c.margin.value = pxNum(el.style.marginTop || cs.marginTop); }
+    if (c.padding) { c.padding.value = pxNum(el.style.paddingTop || cs.paddingTop); }
+    if (c.width) { var wd = el.style.width || ""; c.width.value = wd ? numOf(wd) : ""; if (c.widthUnit && wd) { c.widthUnit.value = unitOf(wd) || "px"; } }
+    if (c.bstyle) { c.bstyle.value = (cs.borderStyle && cs.borderStyle !== "none" ? cs.borderStyle.split(" ")[0] : ""); }
+    if (c.bcolor) { c.bcolor.value = rgbToHex(cs.borderTopColor || cs.borderColor); }
+    if (c.format) { var tag = el.tagName.toLowerCase(); c.format.value = (["p", "h1", "h2", "h3", "h4", "blockquote"].indexOf(tag) >= 0 ? tag : ""); }
+  }
+  function pxNum(v) { var n = parseFloat(v); return (!n || isNaN(n)) ? "" : Math.round(n); }
+
+  // Column width sliders (shown in the toolbar when a grid is selected).
+  function renderColumnSliders(grid) {
+    var host = w.ctl && w.ctl.cols; if (!host) { return; }
+    host.innerHTML = "";
+    if (!grid) { host.style.display = "none"; return; }
+    var cs = w.win.getComputedStyle(grid);
+    var widths = cs.gridTemplateColumns.split(/\s+/).map(parseFloat).filter(function (x) { return !isNaN(x); });
+    if (widths.length < 2) { host.style.display = "none"; return; }
+    host.style.display = "inline-flex";
+    var total = widths.reduce(function (a, b) { return a + b; }, 0) || 1;
+    host.appendChild(mk("span", "ds-he-colslab", "Columns:"));
+    widths.forEach(function (px, i) {
+      var wrap = mk("span", "ds-he-colsld");
+      var sl = document.createElement("input");
+      sl.type = "range"; sl.min = "1"; sl.max = "12"; sl.title = "Column " + (i + 1) + " width";
+      sl.value = Math.max(1, Math.round(px / total * 12));
+      sl.addEventListener("input", function () {
+        var all = Array.prototype.map.call(host.querySelectorAll("input[type=range]"), function (s) { return (+s.value) + "fr"; });
+        applyElTo(grid, "gridTemplateColumns", all.join(" "));
+        mountGridHandles(grid);
+      });
+      wrap.appendChild(document.createTextNode((i + 1) + "")); wrap.appendChild(sl);
+      host.appendChild(wrap);
+    });
+  }
+  function mk(tag, cls, txt) { var n = document.createElement(tag); if (cls) { n.className = cls; } if (txt != null) { n.textContent = txt; } return n; }
 
   // ---- control builders ----
   function group(title, inner) { return '<details class="ds-insp-group" open><summary>' + esc(title) + '</summary><div class="ds-insp-body">' + inner + '</div></details>'; }
@@ -915,22 +1035,17 @@
       w.onChange = null; w.srcMode = false; w.savedRange = null;
       container.innerHTML =
         '<div class="ds-he">' +
-          '<div class="ds-he-main">' +
-            '<div class="ds-he-tb" id="dsHeTb"></div>' +
-            '<div class="ds-he-hint">Click any element to style it in the panel on the right (margins, padding, size, border, background, columns…). Grey dotted text fills in automatically on the live site — you can style it but not retype it.</div>' +
-            '<div class="ds-he-stage">' +
-              '<iframe class="ds-he-frame" id="dsHeFrame" title="Block editor"></iframe>' +
-              '<textarea class="ds-he-src" id="dsHeSrc" spellcheck="false" style="display:none"></textarea>' +
-            '</div>' +
+          '<div class="ds-he-tb" id="dsHeTb"></div>' +
+          '<div class="ds-he-hint">Click an element to select it — the toolbar then shows and changes its styles (size, colour, margins, padding, width, columns…). Grey dotted text fills in automatically; style it but don’t retype it. Use <b>+ Insert</b> to add new text, headings or lines.</div>' +
+          '<div class="ds-he-stage">' +
+            '<iframe class="ds-he-frame" id="dsHeFrame" title="Block editor"></iframe>' +
+            '<textarea class="ds-he-src" id="dsHeSrc" spellcheck="false" style="display:none"></textarea>' +
           '</div>' +
-          '<aside class="ds-he-inspector" id="dsHeInsp"></aside>' +
         '</div>';
       w.container = container.querySelector(".ds-he");
-      w.inspector = container.querySelector("#dsHeInsp");
       w.frame = container.querySelector("#dsHeFrame");
       w.src = container.querySelector("#dsHeSrc");
       w.src.addEventListener("input", changed);
-      renderInspector();
       buildToolbar(container.querySelector("#dsHeTb"));
       fillInsertMenu(w.type);
       // live section list for the link picker

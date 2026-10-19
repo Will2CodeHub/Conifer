@@ -151,6 +151,26 @@ try {
             echo json_encode(['success' => true]);
             break;
 
+        case 'block_default':
+            // Server-side proxy for a block's built-in default template (the browser's
+            // cross-origin fetch to the site is unreliable; this is same-origin + reliable).
+            $type = preg_replace('/[^a-z0-9_]/i', '', (string)($_GET['type'] ?? $_POST['type'] ?? ''));
+            $conn = getDBConnection_TENAdmin(); $url = '';
+            if ($conn) {
+                $s = $conn->prepare("SELECT url FROM publications WHERE publication=? LIMIT 1");
+                $s->bind_param('s', $pub); $s->execute();
+                $url = (string)($s->get_result()->fetch_assoc()['url'] ?? ''); $s->close(); $conn->close();
+            }
+            $host = preg_replace('#^https?://#', '', $url); $host = preg_replace('#/.*$#', '', $host);
+            $tpl = '';
+            if ($host !== '' && $type !== '') {
+                $ctx = stream_context_create(['http' => ['timeout' => 6], 'https' => ['timeout' => 6]]);
+                $tpl = @file_get_contents('https://' . $host . '/design/?block=' . urlencode($type) . '&tpl_default=1', false, $ctx);
+            }
+            header('Content-Type: text/plain; charset=utf-8');
+            echo ($tpl !== false ? $tpl : '');
+            exit;
+
         case 'get_version_item':
             // One block's template, or one page's layout, from a published version
             // (for the per-editor "revert to a saved version" history).

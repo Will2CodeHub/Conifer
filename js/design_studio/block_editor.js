@@ -70,14 +70,16 @@
       var layout = j.layout || {};
       bs.store = { templates: toObj(layout.templates), settings: toObj(layout.settings), names: toObj(layout.names) };
       var saved = bs.store.templates[type];
-      if (saved != null && saved !== "") { startEditor(saved); }
-      else {
-        fetch("https://" + DS.ds.host + "/design/?block=" + encodeURIComponent(type) + "&tpl_default=1")
-          .then(function (r) { return r.text(); })
-          .then(function (txt) { if (bs.type === type) { startEditor(txt || "<div>Empty block</div>"); } })
-          .catch(function () { startEditor("<div>Empty block</div>"); });
-      }
-    }).catch(function (e) { DS.toast(e.message); startEditor("<div>Empty block</div>"); });
+      if (saved != null && saved !== "") { startEditor(saved); return; }
+      // No stored template: load the built-in default via the same-origin proxy,
+      // with a timeout fallback so the editor never stays blank.
+      var done = false, fallback = '<div class="dl-block-custom"><p>Start typing here…</p></div>';
+      var timer = setTimeout(function () { if (!done && bs.type === type) { done = true; startEditor(fallback); } }, 5000);
+      fetch("ajax/design_layout.php?action=block_default&pub=" + encodeURIComponent(DS.ds.pub) + "&type=" + encodeURIComponent(type))
+        .then(function (r) { return r.text(); })
+        .then(function (txt) { if (!done && bs.type === type) { done = true; clearTimeout(timer); startEditor(txt && txt.trim() ? txt : fallback); } })
+        .catch(function () { if (!done && bs.type === type) { done = true; clearTimeout(timer); startEditor(fallback); } });
+    }).catch(function (e) { DS.toast(e.message); startEditor('<div class="dl-block-custom"><p>Start typing here…</p></div>'); });
   }
 
   function startEditor(html) {

@@ -257,8 +257,7 @@ body {
 .ds-be-editor { flex: 1 1 auto; min-height: 0; overflow: hidden; }
 
 /* HTML editor */
-.ds-he { display: flex; flex-direction: row; height: 100%; background: var(--ds-surface); }
-.ds-he-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.ds-he { display: flex; flex-direction: column; height: 100%; background: var(--ds-surface); }
 .ds-he-tb {
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
   padding: 8px 10px; border-bottom: 1px solid var(--ds-line); background: var(--ds-canvas);
@@ -285,6 +284,13 @@ body {
 .ds-he-colour span { font-size: 13px; font-weight: 700; color: var(--ds-ink); }
 .ds-he-colour input[type="color"] { width: 20px; height: 20px; border: 0; padding: 0; background: none; cursor: pointer; }
 .ds-he-sep { width: 1px; height: 22px; background: var(--ds-line); margin: 0 4px; }
+.ds-he-num { font: inherit; font-size: 12px; padding: 4px 5px; border: 1px solid var(--ds-line-2); border-radius: 6px; text-align: center; }
+.ds-he-unit { font: inherit; font-size: 12px; padding: 4px 3px; border: 1px solid var(--ds-line-2); border-radius: 6px; background: #fff; }
+.ds-he-lab { font-size: 11px; font-weight: 600; color: var(--ds-muted); margin: 0 1px 0 3px; }
+.ds-he-cols { display: none; align-items: center; gap: 6px; }
+.ds-he-colslab { font-size: 11px; font-weight: 700; color: var(--ds-muted); }
+.ds-he-colsld { display: inline-flex; align-items: center; gap: 2px; font-size: 10px; color: var(--ds-muted); }
+.ds-he-colsld input[type="range"] { width: 66px; accent-color: var(--ds-accent); }
 .ds-he-hint { padding: 7px 12px; font-size: 12px; color: var(--ds-muted); background: #fcfcfd; border-bottom: 1px solid var(--ds-line); }
 .ds-he-stage { flex: 1 1 auto; min-height: 0; position: relative; }
 .ds-he-frame { width: 100%; height: 100%; border: 0; background: #fff; }
