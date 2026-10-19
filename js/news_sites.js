@@ -88,7 +88,8 @@
             if (designBtn) {
                 designBtn.addEventListener("click", function () {
                     if (this.disabled) { return; }
-                    if (typeof openDesignModal === "function") { openDesignModal(p); }
+                    // New Design Studio — full-page editor in its own tab.
+                    window.open("design-studio.php?pub=" + encodeURIComponent(p.publication || ""), "_blank");
                 });
             }
             box.appendChild(card);

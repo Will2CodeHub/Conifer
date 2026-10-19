@@ -110,11 +110,10 @@ $canEdit = isAdmin();
             <div id="nsOverlay" class="ns-overlay" style="display:none;"></div>
             <div id="nsModal" class="ns-modal" style="display:none;"><div id="nsModalBody"></div></div>
 
-            <!-- Design editor mounts here (large modal built by news_sites_design.js) -->
-            <div id="dlDesignRoot"></div>
+            <!-- The design editor is now the full-page Design Studio (design-studio.php),
+                 opened in a new tab from each publication's Design button. -->
         </div>
     </div>
     <script src="js/news_sites.js?v=<?php echo @filemtime(__DIR__ . '/js/news_sites.js'); ?>"></script>
-    <script src="js/news_sites_design.js?v=<?php echo @filemtime(__DIR__ . '/js/news_sites_design.js'); ?>"></script>
 </body>
 </html>
