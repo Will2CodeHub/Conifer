@@ -20,7 +20,6 @@
         '<button class="ds-back" id="dsBeBack"><i class="fas fa-arrow-left"></i> Design home</button>' +
         '<h1>' + DS.esc(name) + '</h1>' +
         '<div class="ds-grow"></div>' +
-        '<button class="ds-btn ds-btn-ghost" id="dsBeHtml"><i class="fas fa-code"></i> HTML</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeUndo"><i class="fas fa-rotate-left"></i> Undo</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeHistory"><i class="fas fa-clock-rotate-left"></i> History</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBePreview"><i class="fas fa-up-right-from-square"></i> Preview</button>' +
@@ -35,10 +34,6 @@
     root.querySelector("#dsBePreview").addEventListener("click", function () { window.open(DS.previewUrl({ block: type }), "_blank"); });
     root.querySelector("#dsBeUndo").addEventListener("click", function () {
       if (bs.undo && bs.undo.canUndo()) { bs.undo.undo(); DS.toast("Reverted"); } else { DS.toast("Nothing to undo"); }
-    });
-    root.querySelector("#dsBeHtml").addEventListener("click", function () {
-      var src = DS.HtmlEditor.toggleSource();
-      this.innerHTML = src ? '<i class="fas fa-eye"></i> Visual' : '<i class="fas fa-code"></i> HTML';
     });
     root.querySelector("#dsBeSave").addEventListener("click", function () {
       saveNow().then(function () { DS.toast("Saved"); previewReload(); }).catch(function (e) { DS.toast(e.message); });

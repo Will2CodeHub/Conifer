@@ -544,7 +544,8 @@
   // ---- load ------------------------------------------------------------
   function setHtml(tpl) {
     w.srcMode = false;
-    if (w.srcBtn) { w.srcBtn.classList.remove("ds-on"); }
+    if (w.container) { w.container.classList.remove("ds-he-src-mode"); }
+    if (w.srcBtn) { w.srcBtn.classList.remove("ds-on"); w.srcBtn.innerHTML = "&lt;/&gt; HTML"; }
     var parts = splitStyle(tpl); w.styleTag = parts.style;
     var skeleton =
       '<!doctype html><html><head><meta charset="utf-8">' +
@@ -644,6 +645,12 @@
     btn("&minus; Column", "Remove the last column", removeColumn);
     sep();
     btn("&#10005; Clear", "Clear formatting", clearFormat);
+    sep();
+    w.srcBtn = btn("&lt;/&gt; HTML", "Switch between visual editing and the HTML code", function () {
+      var src = toggleSource();
+      w.srcBtn.classList.toggle("ds-on", src);
+      w.srcBtn.innerHTML = src ? "&#9998; Visual" : "&lt;/&gt; HTML";
+    }, "ds-he-src");
   }
   function colourControl(title, glyph, onPick) {
     var wrap = document.createElement("label"); wrap.className = "ds-he-colour"; wrap.title = title;
