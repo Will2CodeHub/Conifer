@@ -151,6 +151,22 @@ try {
             echo json_encode(['success' => true]);
             break;
 
+        case 'get_version_item':
+            // One block's template, or one page's layout, from a published version
+            // (for the per-editor "revert to a saved version" history).
+            $vno  = (int)($_POST['version_no'] ?? $_GET['version_no'] ?? 0);
+            $kind = (string)($_POST['kind'] ?? $_GET['kind'] ?? '');
+            $id   = (string)($_POST['id'] ?? $_GET['id'] ?? '');
+            $bundle = dl_get_version($pub, $vno) ?: [];
+            if ($kind === 'block') {
+                echo json_encode(['success' => true, 'template' => (string)($bundle['_blocks']['desktop']['templates'][$id] ?? '')]);
+            } elseif ($kind === 'page') {
+                echo json_encode(['success' => true, 'layout' => $bundle[$id]['desktop'] ?? null]);
+            } else {
+                echo json_encode(['success' => false, 'message' => 'Unknown kind']);
+            }
+            break;
+
         case 'list_assign':
             echo json_encode(['success' => true, 'assign' => dl_load_assign($pub)]);
             break;

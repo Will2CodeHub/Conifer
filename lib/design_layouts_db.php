@@ -139,6 +139,19 @@ function dl_list_versions(string $pub): array {
     return $out;
 }
 
+/** A specific version's snapshot bundle, or null. */
+function dl_get_version(string $pub, int $version_no): ?array {
+    $conn = getDBConnection_TENAdmin();
+    if (!$conn) { return null; }
+    $st = $conn->prepare("SELECT snapshot_json FROM ten_design_versions WHERE publication=? AND version_no=? LIMIT 1");
+    $st->bind_param('si', $pub, $version_no);
+    $st->execute();
+    $row = $st->get_result()->fetch_assoc();
+    $st->close();
+    $conn->close();
+    return $row ? json_decode($row['snapshot_json'], true) : null;
+}
+
 /** The currently live snapshot bundle, or null. */
 function dl_live_snapshot(string $pub): ?array {
     $conn = getDBConnection_TENAdmin();

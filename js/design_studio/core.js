@@ -41,6 +41,46 @@
     return "https://" + ds.host + "/design/?" + q.join("&");
   };
 
+  // Generic overlay dialog (the dialog sits inside the overlay so it is never
+  // hidden behind it).
+  DS.dialog = function (opts) {
+    var ov = document.createElement("div"); ov.className = "ds-dlg-ov";
+    var d = document.createElement("div"); d.className = "ds-dlg";
+    d.innerHTML = '<h3>' + DS.esc(opts.title) + '</h3><div class="ds-dlg-body">' + (opts.body || "") + '</div>' +
+      '<div class="ds-dlg-actions"><button class="ds-btn ds-btn-ghost" data-x>Close</button></div>';
+    ov.appendChild(d); document.body.appendChild(ov);
+    function close() { ov.remove(); }
+    ov.addEventListener("click", function (e) { if (e.target === ov) { close(); } });
+    d.querySelector("[data-x]").addEventListener("click", close);
+    return { el: d, close: close };
+  };
+
+  // Per-editor history: revert one block/page to a published version's content.
+  DS.openItemHistory = function (kind, id, onRestore) {
+    DS.api("list_versions", {}).then(function (r) {
+      var versions = r.versions || [];
+      var rows = versions.length ? versions.map(function (v) {
+        return '<div class="ds-hist-row"><div><span class="ds-hist-v">v' + DS.esc(v.version_no) +
+          (v.label ? ' · ' + DS.esc(v.label) : '') + '</span>' +
+          (parseInt(v.is_live, 10) ? '<span class="ds-live-pill">Live</span>' : '') +
+          '<span class="ds-tile-meta">' + DS.esc(v.created_at) + ' · ' + DS.esc(v.created_by || '') + '</span></div>' +
+          '<button class="ds-btn ds-btn-ghost ds-sm" data-v="' + DS.esc(v.version_no) + '">Restore this</button></div>';
+      }).join("") : '<p class="ds-dlg-say">No saved versions yet. Use Publish on the Design home to save one.</p>';
+      var dlg = DS.dialog({ title: "Revert to a saved version",
+        body: '<p class="ds-dlg-say">Restore this ' + (kind === "block" ? "block" : "page") +
+          '’s content from a published version. Nothing else is changed, and it stays a draft until you Publish.</p>' +
+          '<div class="ds-hist">' + rows + '</div>' });
+      dlg.el.querySelectorAll("[data-v]").forEach(function (b) {
+        b.addEventListener("click", function () {
+          b.disabled = true;
+          DS.api("get_version_item", { version_no: b.dataset.v, kind: kind, id: id })
+            .then(function (res) { onRestore(res); dlg.close(); DS.toast("Reverted to v" + b.dataset.v); })
+            .catch(function (e) { b.disabled = false; DS.toast(e.message); });
+        });
+      });
+    }).catch(function (e) { DS.toast(e.message); });
+  };
+
   var SCREENS = { home: "dsHome", page: "dsPage", block: "dsBlock" };
   function show(screen) {
     Object.keys(SCREENS).forEach(function (k) {

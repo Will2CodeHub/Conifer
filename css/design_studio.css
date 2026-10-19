@@ -259,9 +259,14 @@ body {
 /* HTML editor */
 .ds-he { display: flex; flex-direction: column; height: 100%; background: var(--ds-surface); }
 .ds-he-tb {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  display: flex; flex-wrap: nowrap; align-items: center; gap: 4px;
   padding: 8px 10px; border-bottom: 1px solid var(--ds-line); background: var(--ds-canvas);
+  overflow-x: auto; overflow-y: hidden;
 }
+.ds-he-tb > * { flex: 0 0 auto; }
+/* In raw-HTML mode the formatting controls don't apply — hide them; the
+   HTML/Visual toggle lives in the editor's top bar. */
+.ds-he-src-mode .ds-he-tb, .ds-he-src-mode .ds-he-hint { display: none; }
 .ds-he-btn {
   border: 1px solid transparent; background: none; cursor: pointer; font: inherit; font-size: 13px;
   color: var(--ds-ink-2); padding: 5px 9px; border-radius: 6px; min-width: 30px;

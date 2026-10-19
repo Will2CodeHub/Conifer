@@ -71,11 +71,13 @@
       '<h1>' + DS.esc(name) + '</h1>' +
       '<div class="ds-grow"></div>' +
       '<button class="ds-btn ds-btn-ghost" id="dsPeUndo"><i class="fas fa-rotate-left"></i> Undo</button>' +
+      '<button class="ds-btn ds-btn-ghost" id="dsPeHistory"><i class="fas fa-clock-rotate-left"></i> History</button>' +
       '<div class="ds-seg" aria-label="Preview device">' +
         '<button data-dev="desktop" class="' + (ds.device === "desktop" ? "on" : "") + '">Desktop</button>' +
         '<button data-dev="mobile" class="' + (ds.device === "mobile" ? "on" : "") + '">Mobile</button>' +
       '</div>' +
       '<button class="ds-btn ds-btn-ghost" id="dsPePreview"><i class="fas fa-up-right-from-square"></i> Preview</button>' +
+      '<button class="ds-btn ds-btn-primary" id="dsPeSave"><i class="fas fa-floppy-disk"></i> Save</button>' +
     '</header>';
   }
 
@@ -86,6 +88,17 @@
     });
     root.querySelector("#dsPePreview").addEventListener("click", function () {
       window.open(DS.previewUrl({ page: st.slug, device: DS.ds.device }), "_blank");
+    });
+    root.querySelector("#dsPeSave").addEventListener("click", function () {
+      DS.api("save_draft", { page: st.slug, device: "desktop", layout_json: JSON.stringify(st.layout) })
+        .then(function () { DS.toast("Saved"); refreshPreview(); }).catch(function (e) { DS.toast(e.message); });
+    });
+    root.querySelector("#dsPeHistory").addEventListener("click", function () {
+      DS.openItemHistory("page", st.slug, function (res) {
+        if (res.layout && res.layout.blocks) {
+          st.undo.push(); st.layout = res.layout; renderRail(); scheduleSave(0, true);
+        } else { DS.toast("That version has nothing for this page"); }
+      });
     });
     root.querySelectorAll(".ds-seg button").forEach(function (b) {
       b.addEventListener("click", function () {

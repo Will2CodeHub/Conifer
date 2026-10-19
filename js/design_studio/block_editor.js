@@ -20,8 +20,11 @@
         '<button class="ds-back" id="dsBeBack"><i class="fas fa-arrow-left"></i> Design home</button>' +
         '<h1>' + DS.esc(name) + '</h1>' +
         '<div class="ds-grow"></div>' +
+        '<button class="ds-btn ds-btn-ghost" id="dsBeHtml"><i class="fas fa-code"></i> HTML</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeUndo"><i class="fas fa-rotate-left"></i> Undo</button>' +
-        '<button class="ds-btn ds-btn-ghost" id="dsBePreview"><i class="fas fa-up-right-from-square"></i> Open preview</button>' +
+        '<button class="ds-btn ds-btn-ghost" id="dsBeHistory"><i class="fas fa-clock-rotate-left"></i> History</button>' +
+        '<button class="ds-btn ds-btn-ghost" id="dsBePreview"><i class="fas fa-up-right-from-square"></i> Preview</button>' +
+        '<button class="ds-btn ds-btn-primary" id="dsBeSave"><i class="fas fa-floppy-disk"></i> Save</button>' +
       '</header>' +
       '<div class="ds-be">' +
         '<div class="ds-be-preview"><div class="ds-be-label">Preview</div><iframe id="dsBePv" title="Live preview"></iframe></div>' +
@@ -32,6 +35,20 @@
     root.querySelector("#dsBePreview").addEventListener("click", function () { window.open(DS.previewUrl({ block: type }), "_blank"); });
     root.querySelector("#dsBeUndo").addEventListener("click", function () {
       if (bs.undo && bs.undo.canUndo()) { bs.undo.undo(); DS.toast("Reverted"); } else { DS.toast("Nothing to undo"); }
+    });
+    root.querySelector("#dsBeHtml").addEventListener("click", function () {
+      var src = DS.HtmlEditor.toggleSource();
+      this.innerHTML = src ? '<i class="fas fa-eye"></i> Visual' : '<i class="fas fa-code"></i> HTML';
+    });
+    root.querySelector("#dsBeSave").addEventListener("click", function () {
+      saveNow().then(function () { DS.toast("Saved"); previewReload(); }).catch(function (e) { DS.toast(e.message); });
+    });
+    root.querySelector("#dsBeHistory").addEventListener("click", function () {
+      DS.openItemHistory("block", type, function (res) {
+        var tpl = res.template || "";
+        bs.undo.push(); bs.html = tpl; bs.lastHtml = tpl; bs.store.templates[bs.type] = tpl;
+        DS.HtmlEditor.setHtml(tpl); saveNow().then(previewReload);
+      });
     });
 
     bs.undo = DsUndo(function () { return bs.html; }, function (h) {
@@ -82,6 +99,16 @@
   function previewReload() {
     var f = document.getElementById("dsBePv");
     if (f) { f.src = DS.previewUrl({ block: bs.type }); }
+  }
+
+  // Explicit, immediate save (the Save button). Autosave also runs on change.
+  function saveNow() {
+    var cur = "";
+    try { cur = (DS.HtmlEditor.getHtml && DS.HtmlEditor.getHtml()) || ""; } catch (e) {}
+    if (!cur) { cur = bs.html || ""; }
+    if (cur) { bs.store.templates[bs.type] = cur; }
+    return DS.api("save_draft", { page: "_blocks", device: "desktop",
+      layout_json: JSON.stringify({ templates: bs.store.templates, settings: bs.store.settings, names: bs.store.names }) });
   }
 
   // Debounced: persist the _blocks store THEN reload the preview so it shows the

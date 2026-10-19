@@ -83,6 +83,8 @@
     ["Verdana, sans-serif", "Verdana"], ['"Courier New", monospace', "Courier"]];
   var SIZES = [["", "Size"], ["12px", "12"], ["14px", "14"], ["16px", "16"], ["18px", "18"], ["20px", "20"],
     ["24px", "24"], ["28px", "28"], ["32px", "32"], ["40px", "40"], ["48px", "48"], ["64px", "64"]];
+  var WEIGHTS = [["", "Weight"], ["300", "Light"], ["400", "Normal"], ["500", "Medium"], ["600", "Semibold"], ["700", "Bold"], ["800", "Extra bold"]];
+  var LINEHEIGHTS = [["", "Line height"], ["1", "1.0"], ["1.2", "1.2"], ["1.4", "1.4"], ["1.6", "1.6"], ["1.8", "1.8"], ["2", "2.0"]];
 
   // ---- tokens ----------------------------------------------------------
   function fieldsFor(type) {
@@ -281,6 +283,33 @@
     var nr = w.doc.createRange(); nr.selectNodeContents(blk); sel.removeAllRanges(); sel.addRange(nr);
     rememberRange(); changed();
   }
+  // Apply a style to the nearest block (e.g. line-height).
+  function blockStyle(prop, val) {
+    if (w.srcMode || !w.doc) { return; }
+    w.root.focus();
+    var sel = restoreSelection();
+    if (!sel.rangeCount) { return; }
+    var range = sel.getRangeAt(0);
+    var blk = blockAncestor(range.commonAncestorContainer);
+    if (!blk) {
+      if (range.collapsed) { DS.toast("Select text in a paragraph first"); return; }
+      blk = w.doc.createElement("div"); blk.appendChild(range.extractContents()); range.insertNode(blk);
+    }
+    blk.style[prop] = val;
+    var nr = w.doc.createRange(); nr.selectNodeContents(blk); sel.removeAllRanges(); sel.addRange(nr);
+    rememberRange(); changed();
+  }
+  function insertHR() {
+    if (w.srcMode || !w.doc) { return; }
+    w.root.focus();
+    var sel = restoreSelection();
+    var hr = w.doc.createElement("hr");
+    if (sel.rangeCount) {
+      var r = sel.getRangeAt(0); r.collapse(false); r.insertNode(hr);
+      r.setStartAfter(hr); r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
+    } else { w.root.appendChild(hr); }
+    rememberRange(); changed();
+  }
   function listSel(ordered) {
     if (w.srcMode || !w.doc) { return; }
     w.root.focus();
@@ -477,12 +506,15 @@
     if (!w.srcMode) {
       w.src.value = templateHtml();
       w.src.style.display = ""; w.frame.style.display = "none"; w.srcMode = true;
-      w.srcBtn.classList.add("ds-on"); w.src.focus();
+      if (w.container) { w.container.classList.add("ds-he-src-mode"); }
+      w.src.focus();
     } else {
       var raw = w.src.value;
-      w.srcMode = false; w.srcBtn.classList.remove("ds-on");
+      w.srcMode = false;
+      if (w.container) { w.container.classList.remove("ds-he-src-mode"); }
       setHtml(raw + (w.styleTag ? "\n" + w.styleTag : "")); changed();
     }
+    return w.srcMode;
   }
 
   // ---- serialise -------------------------------------------------------
@@ -584,8 +616,13 @@
     btn("<u>U</u>", "Underline", function () { wrapInline("u", ["U"]); });
     btn("<s>S</s>", "Strikethrough", function () { wrapInline("s", ["S", "STRIKE", "DEL"]); });
     sep();
+    btn("x<sup>2</sup>", "Superscript", function () { wrapInline("sup", ["SUP"]); });
+    btn("x<sub>2</sub>", "Subscript", function () { wrapInline("sub", ["SUB"]); });
+    sep();
     sel("Font", FONTS, function (v) { wrapInlineStyle("fontFamily", v); });
     sel("Text size", SIZES, function (v) { wrapInlineStyle("fontSize", v); });
+    sel("Font weight", WEIGHTS, function (v) { wrapInlineStyle("fontWeight", v); });
+    sel("Line height", LINEHEIGHTS, function (v) { blockStyle("lineHeight", v); });
     // colour pickers
     var cText = colourControl("Text colour", "A", function (v) { wrapInlineStyle("color", v); });
     var cBg = colourControl("Highlight colour", "▣", function (v) { wrapInlineStyle("backgroundColor", v); });
@@ -595,9 +632,11 @@
     btn("&#9776;&larr;", "Align left", function () { alignSel("left"); });
     btn("&#9776;", "Align centre", function () { alignSel("center"); });
     btn("&rarr;&#9776;", "Align right", function () { alignSel("right"); });
+    btn("&#9776;&#9776;", "Justify", function () { alignSel("justify"); });
     sep();
     btn("&#128279; Link", "Turn the selected text into a link", openLinkDialog, "ds-he-link");
     btn("Unlink", "Remove the link", function () { if (!w.doc || w.srcMode) { return; } var a = currentAnchor(); if (a) { unwrap(a); changed(); } });
+    btn("&#8213; Rule", "Insert a horizontal line", insertHR);
     sep();
     w.insSel = sel("Insert a placeholder (auto-filled on the live site)", [["", "Placeholder…"]], insertToken);
     sep();
@@ -605,7 +644,6 @@
     btn("&minus; Column", "Remove the last column", removeColumn);
     sep();
     btn("&#10005; Clear", "Clear formatting", clearFormat);
-    w.srcBtn = btn("&lt;/&gt; HTML", "Edit the raw HTML", toggleSource, "ds-he-src");
   }
   function colourControl(title, glyph, onPick) {
     var wrap = document.createElement("label"); wrap.className = "ds-he-colour"; wrap.title = title;
@@ -643,6 +681,7 @@
             '<textarea class="ds-he-src" id="dsHeSrc" spellcheck="false" style="display:none"></textarea>' +
           '</div>' +
         '</div>';
+      w.container = container.querySelector(".ds-he");
       w.frame = container.querySelector("#dsHeFrame");
       w.src = container.querySelector("#dsHeSrc");
       w.src.addEventListener("input", changed);
@@ -653,6 +692,8 @@
     },
     setHtml: setHtml,
     getHtml: getTemplate,
+    toggleSource: toggleSource,
+    isSourceMode: function () { return !!w.srcMode; },
     onChange: function (fn) { w.onChange = fn; },
     focusElement: function (selector) {
       if (!w.root || !selector) { return; }
