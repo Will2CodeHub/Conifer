@@ -273,8 +273,10 @@
   function refreshPreview() {
     var f = document.getElementById("dsPvFrame");
     if (!f) { return; }
+    var wrap = f.parentNode;
+    if (wrap) { wrap.classList.toggle("ds-mobile", DS.ds.device === "mobile"); } // narrow phone frame
     if (st.kind === "template") {
-      f.src = "https://" + DS.ds.host + "/design/?preview=1&template=" + encodeURIComponent(st.tplId) + "&_=" + Date.now();
+      f.src = "https://" + DS.ds.host + "/design/?preview=1&template=" + encodeURIComponent(st.tplId) + "&device=" + DS.ds.device + "&_=" + Date.now();
       return;
     }
     f.src = DS.previewUrl({ page: st.slug, device: DS.ds.device }) + "&scroll=" + Math.round(st.scrollY || 0);

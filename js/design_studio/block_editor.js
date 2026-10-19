@@ -21,6 +21,10 @@
         '<button class="ds-back" id="dsBeBack"><i class="fas fa-arrow-left"></i> Design home</button>' +
         '<h1>' + DS.esc(name) + '</h1>' +
         '<div class="ds-grow"></div>' +
+        '<div class="ds-seg" aria-label="Preview device">' +
+          '<button data-dev="desktop" class="' + (DS.ds.device === "desktop" ? "on" : "") + '">Desktop</button>' +
+          '<button data-dev="mobile" class="' + (DS.ds.device === "mobile" ? "on" : "") + '">Mobile</button>' +
+        '</div>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeContent"><i class="fas fa-sliders"></i> Content</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeUndo"><i class="fas fa-rotate-left"></i> Undo</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeHistory"><i class="fas fa-clock-rotate-left"></i> History</button>' +
@@ -42,6 +46,13 @@
     });
     root.querySelector("#dsBeSave").addEventListener("click", function () {
       saveNow().then(function () { DS.toast("Saved"); previewReload(); }).catch(function (e) { DS.toast(e.message); });
+    });
+    root.querySelectorAll(".ds-seg button").forEach(function (b) {
+      b.addEventListener("click", function () {
+        DS.ds.device = b.dataset.dev;
+        root.querySelectorAll(".ds-seg button").forEach(function (x) { x.classList.toggle("on", x === b); });
+        previewReload();
+      });
     });
     root.querySelector("#dsBeContent").addEventListener("click", function () { openContentDialog(type); });
     root.querySelector("#dsBeHistory").addEventListener("click", function () {
@@ -118,7 +129,10 @@
 
   function previewReload() {
     var f = document.getElementById("dsBePv");
-    if (f) { f.src = DS.previewUrl({ block: bs.type }); }
+    if (!f) { return; }
+    var wrap = f.parentNode;
+    if (wrap) { wrap.classList.toggle("ds-mobile", DS.ds.device === "mobile"); }
+    f.src = DS.previewUrl({ block: bs.type });
   }
 
   function humanizeKey(k) { return k.replace(/_/g, " ").replace(/^\w/, function (c) { return c.toUpperCase(); }); }
