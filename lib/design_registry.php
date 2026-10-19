@@ -164,13 +164,22 @@ function dl_validate_layout(array $layout, string $page): array {
         return ['ok' => false, 'errors' => ['missing blocks array'], 'layout' => ['theme' => dl_default_theme(), 'blocks' => []]];
     }
     $clean = [];
+    $reg = dl_registry();
+    $isBuiltinPage = in_array($page, dl_page_types(), true);
     foreach ($layout['blocks'] as $b) {
-        if (!isset($b['type']) || !dl_block_allowed($b['type'], $page)) {
-            $errors[] = 'dropped invalid block: ' . ($b['type'] ?? '?');
+        $type = $b['type'] ?? '';
+        // Named/custom blocks (blk_*) may be placed on any page. Built-in blocks
+        // are checked against their allowed pages on built-in pages; on custom
+        // pages any registered block type is allowed.
+        $isNamed = is_string($type) && strpos($type, 'blk_') === 0;
+        $ok = $isNamed
+            || ($isBuiltinPage ? dl_block_allowed($type, $page) : isset($reg[$type]));
+        if ($type === '' || !$ok) {
+            $errors[] = 'dropped invalid block: ' . ($type !== '' ? $type : '?');
             continue;
         }
         $clean[] = [
-            'type'     => $b['type'],
+            'type'     => $type,
             'settings' => (isset($b['settings']) && is_array($b['settings'])) ? $b['settings'] : [],
         ];
     }
