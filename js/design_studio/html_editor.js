@@ -95,9 +95,26 @@
     var html = String(tpl || "").replace(/<style[\s\S]*?<\/style>/gi, function (m) { styles.push(m); return ""; });
     return { html: html.trim(), style: styles.join("\n") };
   }
+  // Per-block overrides so ambiguous field names read clearly in context
+  // (e.g. {{name}} inside the top menu means the menu item's label).
+  var BLOCK_FIELD_LABELS = {
+    site_header: { name: "Menu label", href: "Menu link" },
+    footer: { name: "Footer link label", url: "Footer link" },
+    front_sections: { name: "Section name", href: "Section link" },
+    breaking_news: { title: "Headline", href: "Headline link" },
+    headlines_list: { title: "Headline", href: "Headline link" },
+    ticker: { title: "Ticker item", href: "Ticker link" },
+    front_feature: { title: "Story headline", summary: "Story summary" },
+    section_carousel: { title: "Story headline" },
+    article_related: { title: "Story headline" },
+    article_quickreads: { title: "Story headline" },
+    author_articles: { title: "Article headline" }
+  };
   function tokHumanize(key) {
+    if (w.type && BLOCK_FIELD_LABELS[w.type] && BLOCK_FIELD_LABELS[w.type][key]) { return BLOCK_FIELD_LABELS[w.type][key]; }
     if (FIELD_LABELS[key]) { return FIELD_LABELS[key]; }
     var last = String(key).split(".").pop();
+    if (w.type && BLOCK_FIELD_LABELS[w.type] && BLOCK_FIELD_LABELS[w.type][last]) { return BLOCK_FIELD_LABELS[w.type][last]; }
     if (FIELD_LABELS[last]) { return FIELD_LABELS[last]; }
     last = last.replace(/_/g, " ");
     return last.charAt(0).toUpperCase() + last.slice(1);
@@ -392,13 +409,13 @@
         (a ? '<button class="ds-btn ds-btn-danger" data-a="remove">Remove link</button>' : '') +
         '<button class="ds-btn ds-btn-primary" data-a="apply">Apply link</button>' +
       '</div>';
-    document.body.appendChild(ov); document.body.appendChild(d);
+    ov.appendChild(d); document.body.appendChild(ov);   // dialog INSIDE the overlay so it sits in front
     var urlI = d.querySelector("#lkUrl"), destI = d.querySelector("#lkDest"), newI = d.querySelector("#lkNew");
     urlI.value = a ? (a.getAttribute("href") || "") : "";
     newI.checked = a ? (a.getAttribute("target") === "_blank") : false;
     destI.addEventListener("change", function () { if (destI.value) { urlI.value = destI.value; } });
-    function close() { ov.remove(); d.remove(); if (w.root) { w.root.focus(); } }
-    ov.addEventListener("click", close);
+    function close() { ov.remove(); if (w.root) { w.root.focus(); } }
+    ov.addEventListener("click", function (e) { if (e.target === ov) { close(); } });
     d.querySelector('[data-a="cancel"]').addEventListener("click", close);
     if (a) { d.querySelector('[data-a="remove"]').addEventListener("click", function () { applyLink(true, "", false); close(); }); }
     d.querySelector('[data-a="apply"]').addEventListener("click", function () {

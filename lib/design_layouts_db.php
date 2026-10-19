@@ -34,8 +34,8 @@ function dl_load_draft(string $pub, string $page, string $device = 'desktop'): ?
  * transaction (it will not be closed); omit it to use a self-managed connection.
  */
 function dl_save_draft(string $pub, string $page, string $device, array $layout, ?string $user, ?mysqli $conn = null): void {
-    if ($page === '_blocks' || $page === '_pages' || $page === '_templates') {
-        $store = $layout; // meta rows (block registry / page registry / templates), stored as-is
+    if ($page === '_blocks' || $page === '_pages' || $page === '_templates' || $page === '_assign') {
+        $store = $layout; // meta rows (block registry / page registry / templates / assignments), stored as-is
     } elseif ($device === 'desktop') {
         $v = dl_validate_layout($layout, $page);
         $store = $v['layout'];
@@ -272,6 +272,41 @@ function dl_create_named_block(string $pub, string $name, string $user): string 
     $meta['names'][$type]     = ['name' => $name, 'created_by' => $user];
     dl_save_draft($pub, '_blocks', 'desktop', $meta, $user);
     return $type;
+}
+
+/** Delete a user-created template. Built-in tpl_default cannot be deleted.
+ *  Also clears any page→template assignments that pointed at it. */
+function dl_delete_template(string $pub, string $id, string $user): void {
+    if ($id === 'tpl_default') { throw new RuntimeException('The default template cannot be deleted'); }
+    $meta = dl_load_templates($pub);
+    $found = false;
+    $kept = [];
+    foreach ($meta['templates'] as $t) {
+        if (($t['id'] ?? '') === $id) { $found = true; continue; }
+        $kept[] = $t;
+    }
+    if (!$found) { throw new RuntimeException('Template not found'); }
+    dl_save_draft($pub, '_templates', 'desktop', ['templates' => $kept], $user);
+    // Drop assignments that referenced the deleted template.
+    $assign = dl_load_assign($pub);
+    $changed = false;
+    foreach ($assign as $slug => $tpl) { if ($tpl === $id) { unset($assign[$slug]); $changed = true; } }
+    if ($changed) { dl_save_draft($pub, '_assign', 'desktop', ['assign' => $assign], $user); }
+}
+
+/** Page → template assignments as [slug => template_id]. '' means "no frame". */
+function dl_load_assign(string $pub): array {
+    $raw = dl_load_draft($pub, '_assign', 'desktop');
+    return (is_array($raw) && isset($raw['assign']) && is_array($raw['assign'])) ? $raw['assign'] : [];
+}
+
+/** Assign ($tplId) or unassign ('') a template to a page slug. */
+function dl_set_assign(string $pub, string $slug, string $tplId, string $user): void {
+    $slug = trim($slug);
+    if ($slug === '') { throw new RuntimeException('Page required'); }
+    $assign = dl_load_assign($pub);
+    $assign[$slug] = $tplId;   // '' = explicitly no frame (overrides a custom page default)
+    dl_save_draft($pub, '_assign', 'desktop', ['assign' => $assign], $user);
 }
 
 /**

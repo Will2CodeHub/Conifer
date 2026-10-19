@@ -237,6 +237,16 @@ body {
   border: 1px solid var(--ds-line); border-radius: 9px; background: var(--ds-canvas); font-weight: 600; color: var(--ds-ink); }
 .ds-frame-row i { color: var(--ds-muted); }
 
+/* sliders, assign select, add-frame */
+.ds-slider-row { margin-bottom: 15px; }
+.ds-slider-row label { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; font-weight: 600; color: var(--ds-ink-2); margin-bottom: 6px; }
+.ds-slider-out { color: var(--ds-accent-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+.ds-slider-row input[type="range"] { width: 100%; accent-color: var(--ds-accent); }
+.ds-pe-assign { width: 100%; padding: 8px 10px; border: 1px solid var(--ds-line-2); border-radius: 8px; font: inherit; color: var(--ds-ink); background: #fff; }
+.ds-pe-assign:focus { outline: none; border-color: var(--ds-accent); box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+.ds-addframe { display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; color: var(--ds-accent-ink); cursor: pointer; font: inherit; font-size: 13px; padding: 4px 6px; border-radius: 6px; }
+.ds-addframe:hover { background: var(--ds-accent-wash); }
+
 /* ---- block editor ----------------------------------------------------- */
 .ds-be { display: flex; flex-direction: column; height: calc(100vh - 61px); }
 .ds-be-preview { flex: 0 0 38%; min-height: 160px; border-bottom: 1px solid var(--ds-line); background: #fff; }

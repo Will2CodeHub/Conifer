@@ -151,6 +151,24 @@ try {
             echo json_encode(['success' => true]);
             break;
 
+        case 'list_assign':
+            echo json_encode(['success' => true, 'assign' => dl_load_assign($pub)]);
+            break;
+
+        case 'assign_template':
+            if (!isAdmin()) { echo json_encode(['success' => false, 'message' => 'Admin permission required']); exit; }
+            dl_set_assign($pub, (string)($_POST['slug'] ?? ''), (string)($_POST['template'] ?? ''), $user);
+            logActivity('design_assign_template', 'publication', 0, "assign $pub " . (string)($_POST['slug'] ?? '') . "=" . (string)($_POST['template'] ?? ''));
+            echo json_encode(['success' => true]);
+            break;
+
+        case 'delete_template':
+            if (!isAdmin()) { echo json_encode(['success' => false, 'message' => 'Admin permission required']); exit; }
+            dl_delete_template($pub, (string)($_POST['id'] ?? ''), $user);
+            logActivity('design_delete_template', 'publication', 0, "delete tpl $pub/" . (string)($_POST['id'] ?? ''));
+            echo json_encode(['success' => true]);
+            break;
+
         case 'save_pages':
         case 'save_templates':
             if (!isAdmin()) { echo json_encode(['success' => false, 'message' => 'Admin permission required']); exit; }

@@ -34,7 +34,7 @@
     st = { slug: slug, kind: kind, name: name, layout: { theme: {}, blocks: [] },
            undo: null, scrollY: 0 };
     st.undo = DsUndo(function () { return st.layout; },
-      function (l) { st.layout = l; renderRail(); refreshPreview(); scheduleSave(0); });
+      function (l) { st.layout = l; renderRail(); scheduleSave(0, true); });  // save THEN refresh, so the revert actually shows
 
     if (kind === "template") { return renderTemplateEditor(params); }
 
@@ -47,11 +47,13 @@
           '<div class="ds-pe-sec"><h3>Blocks on this page</h3><ul class="ds-blocklist" id="dsBlockList"></ul>' +
             '<p class="ds-rail-hint">Drag to reorder. The top menu and footer are the page frame — edit their contents from Blocks on the home screen.</p>' +
           '</div>' +
+          '<div class="ds-pe-sec" id="dsPeTplSec"></div>' +
         '</aside>' +
         '<main class="ds-pe-preview"><iframe id="dsPvFrame" title="Live preview"></iframe></main>' +
       '</div>';
     wireTopbar(root, name);
     renderPalette();
+    loadTemplateAssign(slug);
 
     DS.api("load", { page: slug, device: "desktop" }).then(function (j) {
       var layout = j.layout;
@@ -65,7 +67,7 @@
   function topbar(name) {
     var ds = DS.ds;
     return '<header class="ds-topbar">' +
-      '<button class="ds-back" id="dsPeBack"><i class="fas fa-arrow-left"></i> Back</button>' +
+      '<button class="ds-back" id="dsPeBack"><i class="fas fa-arrow-left"></i> Design home</button>' +
       '<h1>' + DS.esc(name) + '</h1>' +
       '<div class="ds-grow"></div>' +
       '<button class="ds-btn ds-btn-ghost" id="dsPeUndo"><i class="fas fa-rotate-left"></i> Undo</button>' +
@@ -78,7 +80,7 @@
   }
 
   function wireTopbar(root, name) {
-    root.querySelector("#dsPeBack").addEventListener("click", function () { if (st && st.undo) { st.undo.clear(); } history.back(); });
+    root.querySelector("#dsPeBack").addEventListener("click", function () { if (st && st.undo) { st.undo.clear(); } DS.dsGo("home"); });
     root.querySelector("#dsPeUndo").addEventListener("click", function () {
       if (st.undo.canUndo()) { st.undo.undo(); DS.toast("Reverted"); } else { DS.toast("Nothing to undo"); }
     });
@@ -217,55 +219,135 @@
     f.src = url;
   }
 
-  // =============================================================== template editor
+  // --------------------------------------------------------------- assign a template to this page
+  function loadTemplateAssign(slug) {
+    var sec = document.getElementById("dsPeTplSec");
+    if (!sec) { return; }
+    Promise.all([DS.api("list_templates", {}), DS.api("list_assign", {}), DS.api("list_pages", {})]).then(function (r) {
+      var tpls = r[0].templates || [], assign = r[1].assign || {};
+      var custom = {}; (r[2].pages || []).forEach(function (p) { custom[p.slug] = p.template; });
+      var cur = (slug in assign) ? assign[slug] : (custom[slug] || "");
+      var opts = '<option value="">No template (page keeps its own header &amp; footer)</option>' +
+        tpls.map(function (t) { return '<option value="' + DS.esc(t.id) + '"' + (cur === t.id ? ' selected' : '') + '>' + DS.esc(t.name) + '</option>'; }).join("");
+      sec.innerHTML = '<h3>Page template</h3><select class="ds-pe-assign" id="dsTplAssign">' + opts + '</select>' +
+        '<p class="ds-rail-hint">Apply a template to use its shared header, footer and page width. While a template is applied, this page’s own top menu and footer are hidden.</p>';
+      sec.querySelector("#dsTplAssign").addEventListener("change", function () {
+        DS.api("assign_template", { slug: slug, template: this.value })
+          .then(function () { DS.toast("Template updated"); refreshPreview(); })
+          .catch(function (e) { DS.toast(e.message); });
+      });
+    }).catch(function () {});
+  }
+
+  // =============================================================== template editor (a real editor)
+  var ts = null;  // { id, tpl, all }
+  var tplSaveTimer = null;
+
   function renderTemplateEditor(params) {
     var id = (params && params.id) || st.slug;
     var root = document.getElementById("dsPage");
     DS.api("list_templates", {}).then(function (r) {
       var tpl = (r.templates || []).filter(function (t) { return t.id === id; })[0];
       if (!tpl) { root.innerHTML = '<div class="ds-stub"><p>Template not found.</p></div>'; return; }
-      var ps = tpl.page_style || {};
-      root.innerHTML =
-        '<header class="ds-topbar">' +
-          '<button class="ds-back" id="dsTBack"><i class="fas fa-arrow-left"></i> Back</button>' +
-          '<h1>Template — ' + DS.esc(tpl.name) + '</h1>' +
-        '</header>' +
-        '<div class="ds-tpl">' +
-          '<div class="ds-tpl-card">' +
-            '<h3>Page frame</h3>' +
-            '<p class="ds-dlg-say">Every page based on this template shows this top menu and footer. Their contents are edited from Blocks on the home screen.</p>' +
-            '<div class="ds-frame-row"><i class="fas fa-lock"></i> ' + DS.esc(blockLabel((tpl.header && tpl.header.type) || "site_header")) + ' <span class="ds-tile-meta">top of every page</span></div>' +
-            '<div class="ds-frame-row"><i class="fas fa-lock"></i> ' + DS.esc(blockLabel((tpl.footer && tpl.footer.type) || "footer")) + ' <span class="ds-tile-meta">bottom of every page</span></div>' +
-          '</div>' +
-          '<div class="ds-tpl-card">' +
-            '<h3>Page margins &amp; width</h3>' +
-            styleField("Maximum width", "container_max", ps.container_max || "1200px") +
-            styleField("Side gutter", "gutter", ps.gutter || "24px") +
-            styleField("Outer margin", "margin", ps.margin || "0") +
-            styleField("Inner padding", "padding", ps.padding || "0") +
-            '<label class="ds-f"><span>Background</span><input type="color" data-k="background" value="' + DS.esc(toHex(ps.background || "#ffffff")) + '"></label>' +
-            '<div class="ds-dlg-actions"><button class="ds-btn ds-btn-primary" id="dsTSave">Save template</button></div>' +
-            '<p class="ds-dlg-say" id="dsTmsg"></p>' +
-          '</div>' +
-        '</div>';
-      root.querySelector("#dsTBack").addEventListener("click", function () { history.back(); });
-      root.querySelector("#dsTSave").addEventListener("click", function () {
-        var card = root;
-        var style = {};
-        card.querySelectorAll("[data-k]").forEach(function (inp) { style[inp.dataset.k] = inp.value; });
-        var all = r.templates.map(function (t) {
-          if (t.id === id) { var c = DS.clone(t); c.page_style = Object.assign({}, c.page_style || {}, style); return c; }
-          return t;
-        });
-        DS.api("save_templates", { meta_json: JSON.stringify({ templates: all }) })
-          .then(function () { DS.toast("Template saved"); })
-          .catch(function (e) { DS.toast(e.message); });
-      });
+      ts = { id: id, tpl: DS.clone(tpl), all: r.templates };
+      renderTpl(root);
     }).catch(function (e) { root.innerHTML = '<div class="ds-stub"><p>' + DS.esc(e.message) + '</p></div>'; });
   }
 
-  function styleField(label, key, val) {
-    return '<label class="ds-f"><span>' + DS.esc(label) + '</span><input type="text" data-k="' + key + '" value="' + DS.esc(val) + '"></label>';
+  function numOf(v, def) { var m = String(v == null ? "" : v).match(/-?\d+/); return m ? parseInt(m[0], 10) : def; }
+
+  function renderTpl(root) {
+    var tpl = ts.tpl, ps = tpl.page_style || (tpl.page_style = {});
+    var hasHdr = tpl.header && tpl.header.type, hasFtr = tpl.footer && tpl.footer.type;
+    var delBtn = ts.id === "tpl_default" ? "" : '<button class="ds-btn ds-btn-danger" id="dsTDel"><i class="fas fa-trash"></i> Delete template</button>';
+    root.innerHTML =
+      '<header class="ds-topbar">' +
+        '<button class="ds-back" id="dsTBack"><i class="fas fa-arrow-left"></i> Design home</button>' +
+        '<h1>Template — ' + DS.esc(tpl.name) + '</h1>' +
+        '<div class="ds-grow"></div>' + delBtn +
+        '<button class="ds-btn ds-btn-ghost" id="dsTPreview"><i class="fas fa-up-right-from-square"></i> Preview</button>' +
+      '</header>' +
+      '<div class="ds-pe">' +
+        '<aside class="ds-pe-rail">' +
+          '<div class="ds-pe-sec"><h3>Page frame</h3>' +
+            frameRow("header", "Header (top)", hasHdr, tpl.header) +
+            frameRow("footer", "Footer (bottom)", hasFtr, tpl.footer) +
+            '<p class="ds-rail-hint">The header and footer appear on every page using this template. Edit their contents from Blocks on the home screen.</p>' +
+          '</div>' +
+          '<div class="ds-pe-sec"><h3>Page size &amp; spacing</h3>' +
+            sliderRow("Maximum width", "container_max", 700, 1920, numOf(ps.container_max, 1200), "px") +
+            sliderRow("Side gutter", "gutter", 0, 80, numOf(ps.gutter, 24), "px") +
+            sliderRow("Space above &amp; below", "padding", 0, 120, numOf(ps.padding, 0), "px") +
+            '<label class="ds-f"><span>Background colour</span><input type="color" id="dsTbg" value="' + DS.esc(toHex(ps.background || "#ffffff")) + '"></label>' +
+          '</div>' +
+        '</aside>' +
+        '<main class="ds-pe-preview"><iframe id="dsTplPv" title="Template preview"></iframe></main>' +
+      '</div>';
+
+    root.querySelector("#dsTBack").addEventListener("click", function () { DS.dsGo("home"); });
+    root.querySelector("#dsTPreview").addEventListener("click", function () {
+      window.open("https://" + DS.ds.host + "/design/?preview=1&template=" + encodeURIComponent(ts.id) + "&_=" + Date.now(), "_blank");
+    });
+    if (root.querySelector("#dsTDel")) {
+      root.querySelector("#dsTDel").addEventListener("click", deleteTemplate);
+    }
+    // frame add/remove
+    root.querySelectorAll("[data-frame-act]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var slot = b.getAttribute("data-slot"), act = b.getAttribute("data-frame-act");
+        if (act === "remove") { tpl[slot] = null; }
+        else { tpl[slot] = { type: slot === "header" ? "site_header" : "footer", settings: {} }; }
+        saveTpl(); renderTpl(root);
+      });
+    });
+    // sliders
+    root.querySelectorAll("input[type=range][data-ps]").forEach(function (sl) {
+      sl.addEventListener("input", function () {
+        var out = root.querySelector("#" + sl.id + "_out"); if (out) { out.textContent = sl.value + "px"; }
+        ps[sl.dataset.ps] = (sl.dataset.ps === "padding") ? (sl.value + "px 0") : (sl.value + "px");
+        saveTpl();
+      });
+    });
+    root.querySelector("#dsTbg").addEventListener("input", function () { ps.background = this.value; saveTpl(); });
+    refreshTplPreview();
   }
+
+  function frameRow(slot, label, present, block) {
+    if (present) {
+      return '<div class="ds-blk"><span class="ds-blk-name">' + DS.esc(label) + ': ' + DS.esc(blockLabel(block.type)) + '</span>' +
+        '<span class="ds-blk-acts"><button data-frame-act="remove" data-slot="' + slot + '" title="Remove"><i class="fas fa-trash"></i></button></span></div>';
+    }
+    return '<div class="ds-blk ds-blk-frame"><span class="ds-blk-name" style="color:#94a3b8">' + DS.esc(label) + ': none</span>' +
+      '<span class="ds-blk-acts"><button class="ds-addframe" data-frame-act="add" data-slot="' + slot + '"><i class="fas fa-plus"></i> Add</button></span></div>';
+  }
+
+  function sliderRow(label, key, min, max, val, unit) {
+    var id = "sl_" + key;
+    return '<div class="ds-slider-row"><label>' + label + ' <span class="ds-slider-out" id="' + id + '_out">' + val + unit + '</span></label>' +
+      '<input type="range" id="' + id + '" data-ps="' + key + '" min="' + min + '" max="' + max + '" value="' + val + '"></div>';
+  }
+
+  function refreshTplPreview() {
+    var f = document.getElementById("dsTplPv");
+    if (f) { f.src = "https://" + DS.ds.host + "/design/?preview=1&template=" + encodeURIComponent(ts.id) + "&_=" + Date.now(); }
+  }
+
+  function saveTpl() {
+    var all = ts.all.map(function (t) { return t.id === ts.id ? ts.tpl : t; });
+    clearTimeout(tplSaveTimer);
+    tplSaveTimer = setTimeout(function () {
+      DS.api("save_templates", { meta_json: JSON.stringify({ templates: all }) })
+        .then(refreshTplPreview)
+        .catch(function (e) { DS.toast(e.message); });
+    }, 350);
+  }
+
+  function deleteTemplate() {
+    if (!confirm("Delete this template? Pages using it will fall back to no template.")) { return; }
+    DS.api("delete_template", { id: ts.id })
+      .then(function () { DS.toast("Template deleted"); DS.dsGo("home"); })
+      .catch(function (e) { DS.toast(e.message); });
+  }
+
   function toHex(v) { return (/^#([0-9a-f]{6})$/i.test(String(v).trim())) ? v : "#ffffff"; }
 })();

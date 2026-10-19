@@ -1,29 +1,16 @@
 /* TEN Design Studio — Block Editor.
-   Live preview of the block (real data) on top; the full-width HTML editor below.
-   Edits save to the shared _blocks store (so a block changes everywhere it is used),
-   reflect immediately in the preview, and can be reverted with session Undo. */
+   A single full-height editing surface: the block is shown styled in the HTML
+   editor, where you click an element and edit it (toolbar or the </> HTML toggle).
+   Edits save to the shared _blocks store (so a block changes everywhere it is used)
+   and can be reverted with session Undo. "Preview" opens the block with real data
+   in a new tab. */
 (function () {
   "use strict";
   var DS = window.DS = window.DS || {};
   var bs = null;   // { type, name, store:{templates,settings,names}, html, undo, lastHtml }
   var saveTimer = null;
-  var msgBound = false;
-
-  function bindMessages() {
-    if (msgBound) { return; }
-    msgBound = true;
-    window.addEventListener("message", function (e) {
-      var d = e.data;
-      if (!d || d.source !== "ten-design" || !bs) { return; }
-      if (d.action === "select") {
-        var selr = d.elemSelector || d.selector;
-        if (selr) { DS.HtmlEditor.focusElement(selr); }
-      }
-    });
-  }
 
   DS.renderBlockEditor = function (params) {
-    bindMessages();
     var type = params && params.type;
     var name = (type && DS.REG[type] && DS.REG[type].label) || (params && params.name) || type || "block";
     bs = { type: type, name: name, store: { templates: {}, settings: {}, names: {} }, html: "", undo: null, lastHtml: "" };
@@ -31,28 +18,23 @@
     var root = document.getElementById("dsBlock");
     root.innerHTML =
       '<header class="ds-topbar">' +
-        '<button class="ds-back" id="dsBeBack"><i class="fas fa-arrow-left"></i> Back</button>' +
+        '<button class="ds-back" id="dsBeBack"><i class="fas fa-arrow-left"></i> Design home</button>' +
         '<h1>' + DS.esc(name) + '</h1>' +
         '<div class="ds-grow"></div>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeUndo"><i class="fas fa-rotate-left"></i> Undo</button>' +
-        '<button class="ds-btn ds-btn-ghost" id="dsBePreview"><i class="fas fa-up-right-from-square"></i> Preview</button>' +
+        '<button class="ds-btn ds-btn-ghost" id="dsBePreview"><i class="fas fa-up-right-from-square"></i> Preview with real content</button>' +
       '</header>' +
-      '<div class="ds-be">' +
-        '<div class="ds-be-preview"><iframe id="dsBePv" title="Live preview"></iframe></div>' +
-        '<div class="ds-be-editor" id="dsBeEditor"></div>' +
-      '</div>';
+      '<div class="ds-be"><div class="ds-be-editor" id="dsBeEditor"></div></div>';
 
-    root.querySelector("#dsBeBack").addEventListener("click", function () { if (bs.undo) { bs.undo.clear(); } history.back(); });
+    root.querySelector("#dsBeBack").addEventListener("click", function () { if (bs.undo) { bs.undo.clear(); } DS.dsGo("home"); });
     root.querySelector("#dsBePreview").addEventListener("click", function () { window.open(DS.previewUrl({ block: type }), "_blank"); });
     root.querySelector("#dsBeUndo").addEventListener("click", function () {
       if (bs.undo && bs.undo.canUndo()) { bs.undo.undo(); DS.toast("Reverted"); } else { DS.toast("Nothing to undo"); }
     });
 
     bs.undo = DsUndo(function () { return bs.html; }, function (h) {
-      bs.html = h; bs.lastHtml = h;
-      bs.store.templates[bs.type] = h;
-      DS.HtmlEditor.setHtml(h);
-      saveAndRefresh();
+      bs.html = h; bs.lastHtml = h; bs.store.templates[bs.type] = h;
+      DS.HtmlEditor.setHtml(h); scheduleSave();
     });
 
     DS.HtmlEditor.mount(document.getElementById("dsBeEditor"), { host: DS.ds.host, type: type });
@@ -64,11 +46,7 @@
   function loadTemplate(type) {
     DS.api("load", { page: "_blocks", device: "desktop" }).then(function (j) {
       var layout = j.layout || {};
-      bs.store = {
-        templates: layout.templates || {},
-        settings: layout.settings || {},
-        names: layout.names || {}
-      };
+      bs.store = { templates: layout.templates || {}, settings: layout.settings || {}, names: layout.names || {} };
       var saved = bs.store.templates[type];
       if (saved != null && saved !== "") { startEditor(saved); }
       else {
@@ -83,31 +61,22 @@
   function startEditor(html) {
     bs.html = html; bs.lastHtml = html;
     DS.HtmlEditor.setHtml(html);
-    previewReload();                // existing draft/default already renders; just show it
   }
 
   function onEditorChange(html) {
     if (html === bs.lastHtml) { return; }
-    bs.undo.push();                 // snapshot the state before this change
+    bs.undo.push();                 // snapshot before this change
     bs.lastHtml = html; bs.html = html;
     bs.store.templates[bs.type] = html;
-    saveAndRefresh();
+    scheduleSave();
   }
 
-  function previewReload() {
-    var f = document.getElementById("dsBePv");
-    if (f) { f.src = DS.previewUrl({ block: bs.type }); }
-  }
-
-  // Debounced: persist the _blocks store, then reload the preview so it shows
-  // the latest draft. Preserves settings + names so nothing is dropped.
-  function saveAndRefresh() {
+  function scheduleSave() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(function () {
       DS.api("save_draft", { page: "_blocks", device: "desktop",
         layout_json: JSON.stringify({ templates: bs.store.templates, settings: bs.store.settings, names: bs.store.names }) })
-        .then(previewReload)
-        .catch(function (e) { DS.toast(e.message); previewReload(); });
-    }, 400);
+        .catch(function (e) { DS.toast(e.message); });
+    }, 500);
   }
 })();
