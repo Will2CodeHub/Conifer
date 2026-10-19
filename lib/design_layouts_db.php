@@ -215,6 +215,15 @@ function dl_load_templates(string $pub): array {
     $hasDefault = false;
     foreach ($tpls as $t) { if (($t['id'] ?? '') === 'tpl_default') { $hasDefault = true; break; } }
     if (!$hasDefault) { array_unshift($tpls, dl_builtin_template()); }
+    // Normalise: every template has a 'blocks' array (derive from legacy header/footer).
+    foreach ($tpls as &$t) {
+        if (empty($t['blocks']) || !is_array($t['blocks'])) {
+            $t['blocks'] = [];
+            if (!empty($t['header'])) { $t['blocks'][] = $t['header']; }
+            if (!empty($t['footer'])) { $t['blocks'][] = $t['footer']; }
+        }
+    }
+    unset($t);
     return ['templates' => $tpls];
 }
 
@@ -234,15 +243,23 @@ function dl_load_blocks_meta(string $pub): array {
     ];
 }
 
-/** Create a new named template, cloned from tpl_default. Returns the new row. */
-function dl_create_template(string $pub, string $name, string $user): array {
+/** Create a new named template, cloned from a base template (default tpl_default). */
+function dl_create_template(string $pub, string $name, string $base, string $user): array {
     $name = trim($name);
     if ($name === '') { throw new RuntimeException('Template name required'); }
     $meta = dl_load_templates($pub);
-    $row = dl_builtin_template();
+    $baseTpl = null;
+    foreach ($meta['templates'] as $t) { if (($t['id'] ?? '') === $base) { $baseTpl = $t; break; } }
+    if (!$baseTpl) { $baseTpl = dl_builtin_template(); }
+    $row = $baseTpl;   // copy the base template's blocks + page_style
     $row['id']         = 'tpl_' . substr(bin2hex(random_bytes(4)), 0, 6);
     $row['name']       = $name;
     $row['created_by'] = $user;
+    if (empty($row['blocks']) || !is_array($row['blocks'])) {
+        $row['blocks'] = [];
+        if (!empty($baseTpl['header'])) { $row['blocks'][] = $baseTpl['header']; }
+        if (!empty($baseTpl['footer'])) { $row['blocks'][] = $baseTpl['footer']; }
+    }
     $meta['templates'][] = $row;
     dl_save_draft($pub, '_templates', 'desktop', $meta, $user);
     return $row;
@@ -261,8 +278,13 @@ function dl_create_page(string $pub, string $slug, string $title, string $templa
     foreach ($pages['pages'] as $p) {
         if (($p['slug'] ?? '') === $slug) { throw new RuntimeException('A page with that slug already exists'); }
     }
-    // Seed an empty body layout; header/footer come from the template at render time.
-    dl_save_draft($pub, $slug, 'desktop', ['theme' => [], 'blocks' => []], $user);
+    // Seed the page from its template's blocks so it starts as a real layout.
+    $tplId = $template !== '' ? $template : 'tpl_default';
+    $tplBlocks = [];
+    foreach (dl_load_templates($pub)['templates'] as $t) {
+        if (($t['id'] ?? '') === $tplId) { $tplBlocks = is_array($t['blocks'] ?? null) ? $t['blocks'] : []; break; }
+    }
+    dl_save_draft($pub, $slug, 'desktop', ['theme' => [], 'blocks' => $tplBlocks], $user);
     $row = [
         'slug'       => $slug,
         'title'      => trim($title) !== '' ? trim($title) : $slug,

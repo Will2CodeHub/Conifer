@@ -12,7 +12,18 @@
 
   function arrayMove(a, from, to) { var x = a.splice(from, 1)[0]; a.splice(to, 0, x); }
   function isFrame(type) { return !!DS.FRAME_BLOCKS[type]; }
+  // Frame blocks (top menu / footer) are locked on PAGES only. In a template the
+  // whole layout is editable.
+  function locked(type) { return st && st.kind !== "template" && isFrame(type); }
   function blockLabel(type) { return (DS.REG[type] && DS.REG[type].label) || type; }
+  // A template's block list (new 'blocks' array, or derived from legacy header/footer).
+  function templateBlocks(tpl) {
+    if (tpl.blocks && tpl.blocks.length) { return DS.clone(tpl.blocks); }
+    var b = [];
+    if (tpl.header && tpl.header.type) { b.push(DS.clone(tpl.header)); }
+    if (tpl.footer && tpl.footer.type) { b.push(DS.clone(tpl.footer)); }
+    return b;
+  }
 
   // --------------------------------------------------------------- scroll
   function bindMessages() {
@@ -31,37 +42,51 @@
     var kind = (params && params.kind) || "page";
     var slug = params && params.slug;
     var name = (params && params.name) || (DS.PAGE_LABELS[slug] || slug);
+    var isT = kind === "template";
     st = { slug: slug, kind: kind, name: name, layout: { theme: {}, blocks: [] },
-           undo: null, scrollY: 0 };
+           undo: null, scrollY: 0, tplId: (params && params.id) || slug, pageStyle: {} };
     st.undo = DsUndo(function () { return st.layout; },
       function (l) { st.layout = l; renderRail(); scheduleSave(0, true); });  // save THEN refresh, so the revert actually shows
 
-    if (kind === "template") { return renderTemplateEditor(params); }
-
     var root = document.getElementById("dsPage");
     root.innerHTML =
-      topbar(name) +
+      topbar(isT ? ("Template — " + name) : name) +
       '<div class="ds-pe">' +
         '<aside class="ds-pe-rail">' +
           '<div class="ds-pe-sec"><h3>Add a block</h3><div class="ds-pal" id="dsPal"></div></div>' +
-          '<div class="ds-pe-sec"><h3>Blocks on this page</h3><ul class="ds-blocklist" id="dsBlockList"></ul>' +
-            '<p class="ds-rail-hint">Drag to reorder. The top menu and footer are the page frame — edit their contents from Blocks on the home screen.</p>' +
+          '<div class="ds-pe-sec"><h3>Blocks</h3><ul class="ds-blocklist" id="dsBlockList"></ul>' +
+            '<p class="ds-rail-hint">' + (isT
+              ? "Drag to reorder. Pages based on this template start from these blocks; edit each block’s content from Blocks on the home screen."
+              : "Drag to reorder. The top menu and footer are the page frame — edit their contents from Blocks on the home screen.") + '</p>' +
           '</div>' +
-          '<div class="ds-pe-sec" id="dsPeTplSec"></div>' +
+          '<div class="ds-pe-sec" id="' + (isT ? "dsPeStyleSec" : "dsPeTplSec") + '"></div>' +
         '</aside>' +
         '<main class="ds-pe-preview"><iframe id="dsPvFrame" title="Live preview"></iframe></main>' +
       '</div>';
     wireTopbar(root, name);
     renderPalette();
-    loadTemplateAssign(slug);
 
-    DS.api("load", { page: slug, device: "desktop" }).then(function (j) {
-      var layout = j.layout;
-      if (!layout || !layout.blocks) { layout = { theme: {}, blocks: [] }; }
-      st.layout = layout;
-      renderRail();
-      refreshPreview();
-    }).catch(function (e) { DS.toast(e.message); });
+    if (isT) {
+      DS.api("list_templates", {}).then(function (r) {
+        st.allTemplates = r.templates || [];
+        var tpl = st.allTemplates.filter(function (t) { return t.id === st.tplId; })[0];
+        if (!tpl) { root.innerHTML = '<div class="ds-stub"><p>Template not found.</p></div>'; return; }
+        st.tpl = tpl;
+        st.layout = { theme: {}, blocks: templateBlocks(tpl) };
+        st.pageStyle = tpl.page_style || {};
+        renderStyleSection(root);
+        renderRail(); refreshPreview();
+      }).catch(function (e) { DS.toast(e.message); });
+    } else {
+      loadTemplateAssign(slug);
+      DS.api("load", { page: slug, device: "desktop" }).then(function (j) {
+        var layout = j.layout;
+        if (!layout || !layout.blocks) { layout = { theme: {}, blocks: [] }; }
+        st.layout = layout;
+        renderRail();
+        refreshPreview();
+      }).catch(function (e) { DS.toast(e.message); });
+    }
   };
 
   function topbar(name) {
@@ -71,7 +96,7 @@
       '<h1>' + DS.esc(name) + '</h1>' +
       '<div class="ds-grow"></div>' +
       '<button class="ds-btn ds-btn-ghost" id="dsPeUndo"><i class="fas fa-rotate-left"></i> Undo</button>' +
-      '<button class="ds-btn ds-btn-ghost" id="dsPeHistory"><i class="fas fa-clock-rotate-left"></i> History</button>' +
+      (st && st.kind === "template" ? "" : '<button class="ds-btn ds-btn-ghost" id="dsPeHistory"><i class="fas fa-clock-rotate-left"></i> History</button>') +
       '<div class="ds-seg" aria-label="Preview device">' +
         '<button data-dev="desktop" class="' + (ds.device === "desktop" ? "on" : "") + '">Desktop</button>' +
         '<button data-dev="mobile" class="' + (ds.device === "mobile" ? "on" : "") + '">Mobile</button>' +
@@ -83,27 +108,32 @@
 
   function wireTopbar(root, name) {
     root.querySelector("#dsPeBack").addEventListener("click", function () {
-      clearTimeout(saveTimer);                   // flush any pending layout edit before leaving
-      DS.api("save_draft", { page: st.slug, device: "desktop", layout_json: JSON.stringify(st.layout) }).catch(function () {});
+      clearTimeout(saveTimer);                   // flush any pending edit before leaving
+      saveLayout().catch(function () {});
       if (st && st.undo) { st.undo.clear(); } DS.dsGo("home");
     });
     root.querySelector("#dsPeUndo").addEventListener("click", function () {
       if (st.undo.canUndo()) { st.undo.undo(); DS.toast("Reverted"); } else { DS.toast("Nothing to undo"); }
     });
     root.querySelector("#dsPePreview").addEventListener("click", function () {
-      window.open(DS.previewUrl({ page: st.slug, device: DS.ds.device }), "_blank");
+      var url = st.kind === "template"
+        ? ("https://" + DS.ds.host + "/design/?preview=1&template=" + encodeURIComponent(st.tplId) + "&_=" + Date.now())
+        : DS.previewUrl({ page: st.slug, device: DS.ds.device });
+      window.open(url, "_blank");
     });
     root.querySelector("#dsPeSave").addEventListener("click", function () {
-      DS.api("save_draft", { page: st.slug, device: "desktop", layout_json: JSON.stringify(st.layout) })
-        .then(function () { DS.toast("Saved"); refreshPreview(); }).catch(function (e) { DS.toast(e.message); });
+      saveLayout().then(function () { DS.toast("Saved"); refreshPreview(); }).catch(function (e) { DS.toast(e.message); });
     });
-    root.querySelector("#dsPeHistory").addEventListener("click", function () {
-      DS.openItemHistory("page", st.slug, function (res) {
-        if (res.layout && res.layout.blocks) {
-          st.undo.push(); st.layout = res.layout; renderRail(); scheduleSave(0, true);
-        } else { DS.toast("That version has nothing for this page"); }
+    var hist = root.querySelector("#dsPeHistory");
+    if (hist) {
+      hist.addEventListener("click", function () {
+        DS.openItemHistory("page", st.slug, function (res) {
+          if (res.layout && res.layout.blocks) {
+            st.undo.push(); st.layout = res.layout; renderRail(); scheduleSave(0, true);
+          } else { DS.toast("That version has nothing for this page"); }
+        });
       });
-    });
+    }
     root.querySelectorAll(".ds-seg button").forEach(function (b) {
       b.addEventListener("click", function () {
         DS.ds.device = b.dataset.dev;
@@ -121,8 +151,8 @@
     var builtin = DS.PAGES.indexOf(slug) !== -1;
     pal.innerHTML = "";
     Object.keys(DS.REG).forEach(function (type) {
-      if (isFrame(type)) { return; }
-      var allowed = builtin ? (DS.REG[type].pages.indexOf(slug) !== -1) : true;
+      if (locked(type)) { return; }
+      var allowed = (st.kind === "template" || !builtin) ? true : (DS.REG[type].pages.indexOf(slug) !== -1);
       if (!allowed) { return; }
       var b = document.createElement("button");
       b.className = "ds-pal-item"; b.type = "button";
@@ -139,7 +169,7 @@
     list.innerHTML = "";
     var blocks = st.layout.blocks || [];
     blocks.forEach(function (b, i) {
-      var frame = isFrame(b.type);
+      var frame = locked(b.type);
       var li = document.createElement("li");
       li.className = "ds-blk" + (frame ? " ds-blk-frame" : "");
       li.draggable = !frame;
@@ -175,6 +205,7 @@
 
   function bodyRange() {
     var b = st.layout.blocks || [];
+    if (st.kind === "template") { return { min: 0, max: b.length - 1 }; } // full freedom in templates
     var min = (b.length && isFrame(b[0].type)) ? 1 : 0;
     var max = (b.length && isFrame(b[b.length - 1].type)) ? b.length - 2 : b.length - 1;
     return { min: min, max: max };
@@ -194,7 +225,7 @@
     var b = st.layout.blocks;
     var t = i + dir;
     if (t < 0 || t >= b.length) { return; }
-    if (isFrame(b[i].type) || isFrame(b[t].type)) { return; }
+    if (locked(b[i].type) || locked(b[t].type)) { return; }
     st.undo.push();
     arrayMove(b, i, t);
     renderRail(); scheduleSave(0, true);
@@ -202,7 +233,7 @@
 
   function dropMove(from, to) {
     var b = st.layout.blocks;
-    if (from === to || isFrame(b[from].type)) { return; }
+    if (from === to || locked(b[from].type)) { return; }
     var r = bodyRange();
     if (to < r.min) { to = r.min; }
     if (to > r.max) { to = r.max; }
@@ -212,28 +243,41 @@
   }
 
   function removeBlock(i) {
-    if (isFrame(st.layout.blocks[i].type)) { return; }
+    if (locked(st.layout.blocks[i].type)) { return; }
     st.undo.push();
     st.layout.blocks.splice(i, 1);
     renderRail(); scheduleSave(0, true);
   }
 
   // --------------------------------------------------------------- save + preview
+  // Save the current layout — to the page draft, or (for a template) into the
+  // template's own blocks + page_style in the _templates store.
+  function saveLayout() {
+    if (st.kind === "template") {
+      var all = (st.allTemplates || []).map(function (t) {
+        if (t.id === st.tplId) { var c = DS.clone(t); c.blocks = st.layout.blocks; c.page_style = st.pageStyle; delete c.header; delete c.footer; return c; }
+        return t;
+      });
+      st.allTemplates = all;
+      return DS.api("save_templates", { meta_json: JSON.stringify({ templates: all }) });
+    }
+    return DS.api("save_draft", { page: st.slug, device: "desktop", layout_json: JSON.stringify(st.layout) });
+  }
   function scheduleSave(delay, refreshAfter) {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(function () {
-      DS.api("save_draft", { page: st.slug, device: "desktop", layout_json: JSON.stringify(st.layout) })
-        .then(function () { if (refreshAfter) { refreshPreview(); } })
-        .catch(function (e) { DS.toast(e.message); });
+      saveLayout().then(function () { if (refreshAfter) { refreshPreview(); } }).catch(function (e) { DS.toast(e.message); });
     }, delay || 0);
   }
 
   function refreshPreview() {
     var f = document.getElementById("dsPvFrame");
     if (!f) { return; }
-    var url = DS.previewUrl({ page: st.slug, device: DS.ds.device });
-    url += "&scroll=" + Math.round(st.scrollY || 0);
-    f.src = url;
+    if (st.kind === "template") {
+      f.src = "https://" + DS.ds.host + "/design/?preview=1&template=" + encodeURIComponent(st.tplId) + "&_=" + Date.now();
+      return;
+    }
+    f.src = DS.previewUrl({ page: st.slug, device: DS.ds.device }) + "&scroll=" + Math.round(st.scrollY || 0);
   }
 
   // --------------------------------------------------------------- assign a template to this page
@@ -256,86 +300,32 @@
     }).catch(function () {});
   }
 
-  // =============================================================== template editor (a real editor)
-  var ts = null;  // { id, tpl, all }
-  var tplSaveTimer = null;
-
-  function renderTemplateEditor(params) {
-    var id = (params && params.id) || st.slug;
-    var root = document.getElementById("dsPage");
-    DS.api("list_templates", {}).then(function (r) {
-      var tpl = (r.templates || []).filter(function (t) { return t.id === id; })[0];
-      if (!tpl) { root.innerHTML = '<div class="ds-stub"><p>Template not found.</p></div>'; return; }
-      ts = { id: id, tpl: DS.clone(tpl), all: r.templates };
-      renderTpl(root);
-    }).catch(function (e) { root.innerHTML = '<div class="ds-stub"><p>' + DS.esc(e.message) + '</p></div>'; });
-  }
-
+  // =============================================================== template page-style section
   function numOf(v, def) { var m = String(v == null ? "" : v).match(/-?\d+/); return m ? parseInt(m[0], 10) : def; }
 
-  function renderTpl(root) {
-    var tpl = ts.tpl, ps = tpl.page_style || (tpl.page_style = {});
-    var hasHdr = tpl.header && tpl.header.type, hasFtr = tpl.footer && tpl.footer.type;
-    var delBtn = ts.id === "tpl_default" ? "" : '<button class="ds-btn ds-btn-danger" id="dsTDel"><i class="fas fa-trash"></i> Delete template</button>';
-    root.innerHTML =
-      '<header class="ds-topbar">' +
-        '<button class="ds-back" id="dsTBack"><i class="fas fa-arrow-left"></i> Design home</button>' +
-        '<h1>Template — ' + DS.esc(tpl.name) + '</h1>' +
-        '<div class="ds-grow"></div>' + delBtn +
-        '<button class="ds-btn ds-btn-ghost" id="dsTPreview"><i class="fas fa-up-right-from-square"></i> Preview</button>' +
-      '</header>' +
-      '<div class="ds-pe">' +
-        '<aside class="ds-pe-rail">' +
-          '<div class="ds-pe-sec"><h3>Page frame</h3>' +
-            frameRow("header", "Header (top)", hasHdr, tpl.header) +
-            frameRow("footer", "Footer (bottom)", hasFtr, tpl.footer) +
-            '<p class="ds-rail-hint">The header and footer appear on every page using this template. Edit their contents from Blocks on the home screen.</p>' +
-          '</div>' +
-          '<div class="ds-pe-sec"><h3>Page size &amp; spacing</h3>' +
-            sliderRow("Maximum width", "container_max", 700, 1920, numOf(ps.container_max, 1200), "px") +
-            sliderRow("Side gutter", "gutter", 0, 80, numOf(ps.gutter, 24), "px") +
-            sliderRow("Space above &amp; below", "padding", 0, 120, numOf(ps.padding, 0), "px") +
-            '<label class="ds-f"><span>Background colour</span><input type="color" id="dsTbg" value="' + DS.esc(toHex(ps.background || "#ffffff")) + '"></label>' +
-          '</div>' +
-        '</aside>' +
-        '<main class="ds-pe-preview"><iframe id="dsTplPv" title="Template preview"></iframe></main>' +
-      '</div>';
-
-    root.querySelector("#dsTBack").addEventListener("click", function () { DS.dsGo("home"); });
-    root.querySelector("#dsTPreview").addEventListener("click", function () {
-      window.open("https://" + DS.ds.host + "/design/?preview=1&template=" + encodeURIComponent(ts.id) + "&_=" + Date.now(), "_blank");
-    });
-    if (root.querySelector("#dsTDel")) {
-      root.querySelector("#dsTDel").addEventListener("click", deleteTemplate);
-    }
-    // frame add/remove
-    root.querySelectorAll("[data-frame-act]").forEach(function (b) {
-      b.addEventListener("click", function () {
-        var slot = b.getAttribute("data-slot"), act = b.getAttribute("data-frame-act");
-        if (act === "remove") { tpl[slot] = null; }
-        else { tpl[slot] = { type: slot === "header" ? "site_header" : "footer", settings: {} }; }
-        saveTpl(); renderTpl(root);
-      });
-    });
-    // sliders
-    root.querySelectorAll("input[type=range][data-ps]").forEach(function (sl) {
+  function renderStyleSection() {
+    var sec = document.getElementById("dsPeStyleSec");
+    if (!sec) { return; }
+    var ps = st.pageStyle || (st.pageStyle = {});
+    var delBtn = st.tplId === "tpl_default" ? "" :
+      '<button class="ds-btn ds-btn-danger ds-sm" id="dsTDel" style="margin-top:12px"><i class="fas fa-trash"></i> Delete template</button>';
+    sec.innerHTML =
+      '<h3>Page size &amp; spacing</h3>' +
+      sliderRow("Maximum width", "container_max", 700, 1920, numOf(ps.container_max, 1200), "px") +
+      sliderRow("Side gutter", "gutter", 0, 80, numOf(ps.gutter, 24), "px") +
+      sliderRow("Space above &amp; below", "padding", 0, 120, numOf(ps.padding, 0), "px") +
+      '<label class="ds-f"><span>Background colour</span><input type="color" id="dsTbg" value="' + DS.esc(toHex(ps.background || "#ffffff")) + '"></label>' +
+      delBtn;
+    sec.querySelectorAll("input[type=range][data-ps]").forEach(function (sl) {
       sl.addEventListener("input", function () {
-        var out = root.querySelector("#" + sl.id + "_out"); if (out) { out.textContent = sl.value + "px"; }
+        var out = document.getElementById(sl.id + "_out"); if (out) { out.textContent = sl.value + "px"; }
         ps[sl.dataset.ps] = (sl.dataset.ps === "padding") ? (sl.value + "px 0") : (sl.value + "px");
-        saveTpl();
+        scheduleSave(250, true);
       });
     });
-    root.querySelector("#dsTbg").addEventListener("input", function () { ps.background = this.value; saveTpl(); });
-    refreshTplPreview();
-  }
-
-  function frameRow(slot, label, present, block) {
-    if (present) {
-      return '<div class="ds-blk"><span class="ds-blk-name">' + DS.esc(label) + ': ' + DS.esc(blockLabel(block.type)) + '</span>' +
-        '<span class="ds-blk-acts"><button data-frame-act="remove" data-slot="' + slot + '" title="Remove"><i class="fas fa-trash"></i></button></span></div>';
-    }
-    return '<div class="ds-blk ds-blk-frame"><span class="ds-blk-name" style="color:#94a3b8">' + DS.esc(label) + ': none</span>' +
-      '<span class="ds-blk-acts"><button class="ds-addframe" data-frame-act="add" data-slot="' + slot + '"><i class="fas fa-plus"></i> Add</button></span></div>';
+    sec.querySelector("#dsTbg").addEventListener("input", function () { ps.background = this.value; scheduleSave(250, true); });
+    var del = sec.querySelector("#dsTDel");
+    if (del) { del.addEventListener("click", deleteTemplate); }
   }
 
   function sliderRow(label, key, min, max, val, unit) {
@@ -344,24 +334,9 @@
       '<input type="range" id="' + id + '" data-ps="' + key + '" min="' + min + '" max="' + max + '" value="' + val + '"></div>';
   }
 
-  function refreshTplPreview() {
-    var f = document.getElementById("dsTplPv");
-    if (f) { f.src = "https://" + DS.ds.host + "/design/?preview=1&template=" + encodeURIComponent(ts.id) + "&_=" + Date.now(); }
-  }
-
-  function saveTpl() {
-    var all = ts.all.map(function (t) { return t.id === ts.id ? ts.tpl : t; });
-    clearTimeout(tplSaveTimer);
-    tplSaveTimer = setTimeout(function () {
-      DS.api("save_templates", { meta_json: JSON.stringify({ templates: all }) })
-        .then(refreshTplPreview)
-        .catch(function (e) { DS.toast(e.message); });
-    }, 350);
-  }
-
   function deleteTemplate() {
     if (!confirm("Delete this template? Pages using it will fall back to no template.")) { return; }
-    DS.api("delete_template", { id: ts.id })
+    DS.api("delete_template", { id: st.tplId })
       .then(function () { DS.toast("Template deleted"); DS.dsGo("home"); })
       .catch(function (e) { DS.toast(e.message); });
   }

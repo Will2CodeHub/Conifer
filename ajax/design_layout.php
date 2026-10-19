@@ -132,7 +132,7 @@ try {
 
         case 'create_template':
             if (!isAdmin()) { echo json_encode(['success' => false, 'message' => 'Admin permission required']); exit; }
-            $row = dl_create_template($pub, (string)($_POST['name'] ?? ''), $user);
+            $row = dl_create_template($pub, (string)($_POST['name'] ?? ''), (string)($_POST['base'] ?? ''), $user);
             logActivity('design_create_template', 'publication', 0, "tpl $pub/{$row['id']}");
             echo json_encode(['success' => true, 'template' => $row]);
             break;

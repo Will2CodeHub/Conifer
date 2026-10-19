@@ -180,15 +180,19 @@
   }
 
   function openNewTemplate() {
+    var tpls = DS.ds._tpls || [];
+    var baseOpts = tpls.map(function (t) { return '<option value="' + DS.esc(t.id) + '">' + DS.esc(t.name) + '</option>'; }).join("");
     dialog({
       title: "New template",
       okLabel: "Create template",
       body: '<label class="ds-f"><span>Name</span><input id="ntName" type="text" placeholder="e.g. Long read"></label>' +
-            '<p class="ds-dlg-say">A template sets the page frame — the top menu and footer — plus page margins. New pages can be based on it.</p>',
+            '<label class="ds-f"><span>Base it on</span><select id="ntBase">' + baseOpts + '</select></label>' +
+            '<p class="ds-dlg-say">The new template starts as a copy of the base template’s blocks and page settings, which you can then change. New pages can be based on it.</p>',
       onOk: function (d) {
         var name = d.querySelector("#ntName").value.trim();
+        var base = d.querySelector("#ntBase").value;
         if (!name) { throw new Error("Give the template a name"); }
-        return DS.api("create_template", { name: name }).then(function (res) {
+        return DS.api("create_template", { name: name, base: base }).then(function (res) {
           DS.toast("Template created");
           DS.dsGo("page", { slug: res.template.id, kind: "template", id: res.template.id, name: res.template.name });
         });

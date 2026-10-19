@@ -52,6 +52,10 @@ function dl_builtin_template(): array {
         'id'         => 'tpl_default',
         'name'       => 'Default page',
         'created_by' => null,
+        'blocks'     => [
+            ['type' => 'site_header', 'settings' => ['show_search' => true, 'show_subscribe' => true]],
+            ['type' => 'footer', 'settings' => []],
+        ],
         'header'     => ['type' => 'site_header', 'settings' => ['show_search' => true, 'show_subscribe' => true]],
         'footer'     => ['type' => 'footer', 'settings' => []],
         'page_style' => [
