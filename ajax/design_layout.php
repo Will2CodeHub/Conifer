@@ -97,6 +97,69 @@ try {
             echo json_encode(['success' => true]);
             break;
 
+        case 'pub_info':
+            $conn = getDBConnection_TENAdmin(); $host = '';
+            if ($conn) {
+                $s = $conn->prepare("SELECT url FROM publications WHERE publication=? LIMIT 1");
+                $s->bind_param('s', $pub); $s->execute();
+                $host = (string)($s->get_result()->fetch_assoc()['url'] ?? '');
+                $s->close(); $conn->close();
+            }
+            $host = preg_replace('#^https?://#', '', $host);
+            $host = preg_replace('#/.*$#', '', $host);
+            echo json_encode(['success' => true, 'host' => $host]);
+            break;
+
+        case 'list_pages':
+            echo json_encode(['success' => true, 'builtin' => dl_builtin_pages(), 'pages' => dl_load_pages($pub)['pages']]);
+            break;
+
+        case 'list_templates':
+            echo json_encode(['success' => true, 'templates' => dl_load_templates($pub)['templates']]);
+            break;
+
+        case 'list_blocks':
+            $meta = dl_load_blocks_meta($pub);
+            echo json_encode(['success' => true, 'names' => $meta['names'], 'types' => array_keys($meta['templates'])]);
+            break;
+
+        case 'create_page':
+            if (!isAdmin()) { echo json_encode(['success' => false, 'message' => 'Admin permission required']); exit; }
+            $row = dl_create_page($pub, (string)($_POST['slug'] ?? ''), (string)($_POST['title'] ?? ''), (string)($_POST['template'] ?? 'tpl_default'), $user);
+            logActivity('design_create_page', 'publication', 0, "page $pub/{$row['slug']}");
+            echo json_encode(['success' => true, 'page' => $row]);
+            break;
+
+        case 'create_template':
+            if (!isAdmin()) { echo json_encode(['success' => false, 'message' => 'Admin permission required']); exit; }
+            $row = dl_create_template($pub, (string)($_POST['name'] ?? ''), $user);
+            logActivity('design_create_template', 'publication', 0, "tpl $pub/{$row['id']}");
+            echo json_encode(['success' => true, 'template' => $row]);
+            break;
+
+        case 'create_block':
+            if (!isAdmin()) { echo json_encode(['success' => false, 'message' => 'Admin permission required']); exit; }
+            $type = dl_create_named_block($pub, (string)($_POST['name'] ?? ''), $user);
+            logActivity('design_create_block', 'publication', 0, "block $pub/$type");
+            echo json_encode(['success' => true, 'type' => $type]);
+            break;
+
+        case 'rename_item':
+            if (!isAdmin()) { echo json_encode(['success' => false, 'message' => 'Admin permission required']); exit; }
+            dl_rename_item($pub, (string)($_POST['kind'] ?? ''), (string)($_POST['id'] ?? ''), (string)($_POST['name'] ?? ''), $user);
+            logActivity('design_rename', 'publication', 0, "rename $pub " . (string)($_POST['kind'] ?? '') . ":" . (string)($_POST['id'] ?? ''));
+            echo json_encode(['success' => true]);
+            break;
+
+        case 'save_pages':
+        case 'save_templates':
+            if (!isAdmin()) { echo json_encode(['success' => false, 'message' => 'Admin permission required']); exit; }
+            $meta = json_decode((string)($_POST['meta_json'] ?? ''), true);
+            if (!is_array($meta)) { echo json_encode(['success' => false, 'message' => 'Invalid meta_json']); exit; }
+            dl_save_draft($pub, $action === 'save_pages' ? '_pages' : '_templates', 'desktop', $meta, $user);
+            echo json_encode(['success' => true]);
+            break;
+
         default:
             echo json_encode(['success' => false, 'message' => "Unknown action: $action"]);
     }

@@ -30,6 +30,41 @@ function dl_page_label(string $page): string {
 }
 
 /**
+ * Built-in page types as [slug, title] rows for the Design Studio "Pages" column.
+ * Thin wrapper over dl_page_types()/dl_page_label() so the hub and the renderer
+ * agree on which pages are built in (and therefore not renameable/deletable).
+ */
+function dl_builtin_pages(): array {
+    $out = [];
+    foreach (dl_page_types() as $slug) {
+        $out[] = ['slug' => $slug, 'title' => dl_page_label($slug)];
+    }
+    return $out;
+}
+
+/**
+ * The built-in "mother" template every page inherits unless it names another.
+ * Owns the locked header + footer blocks and the page-level style box. It is
+ * built in (created_by=null) so it can never be renamed or deleted.
+ */
+function dl_builtin_template(): array {
+    return [
+        'id'         => 'tpl_default',
+        'name'       => 'Default page',
+        'created_by' => null,
+        'header'     => ['type' => 'site_header', 'settings' => ['show_search' => true, 'show_subscribe' => true]],
+        'footer'     => ['type' => 'footer', 'settings' => []],
+        'page_style' => [
+            'container_max' => '1200px',
+            'gutter'        => '24px',
+            'margin'        => '0',
+            'padding'       => '0',
+            'background'    => '#ffffff',
+        ],
+    ];
+}
+
+/**
  * Default theme tokens — the full editorial typographic + spacing scale.
  * Emitted as CSS variables (see theme.php) and consumed by every block's CSS.
  * 3-font system: Lora (display/headlines), Merriweather (article body only),
