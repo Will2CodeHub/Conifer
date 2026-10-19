@@ -177,6 +177,16 @@
     if (w.savedRange) { try { sel.removeAllRanges(); sel.addRange(w.savedRange); } catch (e) {} }
     return sel;
   }
+  // Select a whole element (used when a placeholder token is clicked) so the next
+  // style action applies to it.
+  function selectNode(node) {
+    try {
+      var r = w.doc.createRange(); r.selectNode(node);
+      var sel = w.win.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      w.savedRange = r.cloneRange();
+      node.classList.add("ds-he-hl"); setTimeout(function () { node.classList.remove("ds-he-hl"); }, 900);
+    } catch (e) {}
+  }
   function unwrap(node) { var p = node.parentNode; while (node.firstChild) { p.insertBefore(node.firstChild, node); } p.removeChild(node); }
   var INLINE_TAGS = ["STRONG", "B", "EM", "I", "U", "S", "STRIKE", "DEL", "MARK", "A", "SMALL", "SUP", "SUB", "SPAN"];
   var BLOCK_TAGS = ["P", "H1", "H2", "H3", "H4", "H5", "H6", "DIV", "BLOCKQUOTE", "LI", "PRE", "FIGCAPTION"];
@@ -534,6 +544,17 @@
       w.root.addEventListener("input", changed);
       w.root.addEventListener("keyup", rememberRange);
       w.root.addEventListener("mouseup", rememberRange);
+      // Click a placeholder to SELECT it, so font / size / colour apply to it
+      // (its text still can't be edited).
+      w.root.addEventListener("click", function (e) {
+        var tk = e.target && e.target.closest ? e.target.closest(".dl-tok") : null;
+        if (tk) { selectNode(tk); }
+      });
+      // Native drag of content reflows the editor into a mess; allow only the
+      // column resize handles to be dragged.
+      w.root.addEventListener("dragstart", function (e) {
+        if (!(e.target && e.target.classList && e.target.classList.contains("ds-colsplit"))) { e.preventDefault(); }
+      });
       w.src.style.display = "none"; w.frame.style.display = "";
     };
     w.frame.srcdoc = skeleton;

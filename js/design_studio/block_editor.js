@@ -1,13 +1,12 @@
 /* TEN Design Studio — Block Editor.
-   A single full-height editing surface: the block is shown styled in the HTML
-   editor, where you click an element and edit it (toolbar or the </> HTML toggle).
-   Edits save to the shared _blocks store (so a block changes everywhere it is used)
-   and can be reverted with session Undo. "Preview" opens the block with real data
-   in a new tab. */
+   Two panes: PREVIEW on top (the block rendered with real content, updates as you
+   edit) and the EDITING pane below (the HTML editor). The </> HTML toolbar button
+   toggles the editing pane between the visual view and raw HTML — in place, not a
+   separate pane. Edits save to the shared _blocks store and revert with Undo. */
 (function () {
   "use strict";
   var DS = window.DS = window.DS || {};
-  var bs = null;   // { type, name, store:{templates,settings,names}, html, undo, lastHtml }
+  var bs = null;   // { type, name, store, html, undo, lastHtml }
   var saveTimer = null;
 
   DS.renderBlockEditor = function (params) {
@@ -22,9 +21,12 @@
         '<h1>' + DS.esc(name) + '</h1>' +
         '<div class="ds-grow"></div>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeUndo"><i class="fas fa-rotate-left"></i> Undo</button>' +
-        '<button class="ds-btn ds-btn-ghost" id="dsBePreview"><i class="fas fa-up-right-from-square"></i> Preview with real content</button>' +
+        '<button class="ds-btn ds-btn-ghost" id="dsBePreview"><i class="fas fa-up-right-from-square"></i> Open preview</button>' +
       '</header>' +
-      '<div class="ds-be"><div class="ds-be-editor" id="dsBeEditor"></div></div>';
+      '<div class="ds-be">' +
+        '<div class="ds-be-preview"><div class="ds-be-label">Preview</div><iframe id="dsBePv" title="Live preview"></iframe></div>' +
+        '<div class="ds-be-editor" id="dsBeEditor"></div>' +
+      '</div>';
 
     root.querySelector("#dsBeBack").addEventListener("click", function () { if (bs.undo) { bs.undo.clear(); } DS.dsGo("home"); });
     root.querySelector("#dsBePreview").addEventListener("click", function () { window.open(DS.previewUrl({ block: type }), "_blank"); });
@@ -34,7 +36,7 @@
 
     bs.undo = DsUndo(function () { return bs.html; }, function (h) {
       bs.html = h; bs.lastHtml = h; bs.store.templates[bs.type] = h;
-      DS.HtmlEditor.setHtml(h); scheduleSave();
+      DS.HtmlEditor.setHtml(h); saveAndRefresh();
     });
 
     DS.HtmlEditor.mount(document.getElementById("dsBeEditor"), { host: DS.ds.host, type: type });
@@ -43,10 +45,15 @@
     loadTemplate(type);
   };
 
+  // PHP's json_decode turns an empty {} into []. An array with string keys
+  // serializes back to [] (JSON.stringify ignores non-index props), silently
+  // dropping the template. Coerce every store to a plain object.
+  function toObj(v) { return (v && typeof v === "object" && !Array.isArray(v)) ? v : {}; }
+
   function loadTemplate(type) {
     DS.api("load", { page: "_blocks", device: "desktop" }).then(function (j) {
       var layout = j.layout || {};
-      bs.store = { templates: layout.templates || {}, settings: layout.settings || {}, names: layout.names || {} };
+      bs.store = { templates: toObj(layout.templates), settings: toObj(layout.settings), names: toObj(layout.names) };
       var saved = bs.store.templates[type];
       if (saved != null && saved !== "") { startEditor(saved); }
       else {
@@ -61,22 +68,38 @@
   function startEditor(html) {
     bs.html = html; bs.lastHtml = html;
     DS.HtmlEditor.setHtml(html);
+    previewReload();
   }
 
   function onEditorChange(html) {
     if (html === bs.lastHtml) { return; }
-    bs.undo.push();                 // snapshot before this change
+    bs.undo.push();
     bs.lastHtml = html; bs.html = html;
     bs.store.templates[bs.type] = html;
-    scheduleSave();
+    saveAndRefresh();
   }
 
-  function scheduleSave() {
+  function previewReload() {
+    var f = document.getElementById("dsBePv");
+    if (f) { f.src = DS.previewUrl({ block: bs.type }); }
+  }
+
+  // Debounced: persist the _blocks store THEN reload the preview so it shows the
+  // edit. Preserves settings + names so nothing is dropped.
+  function saveAndRefresh() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(function () {
+      // Read the current editor content directly — robust against any async
+      // reset of block state during the no-stored-template (cross-origin) load.
+      var cur = "";
+      try { cur = (DS.HtmlEditor.getHtml && DS.HtmlEditor.getHtml()) || ""; } catch (e) {}
+      if (!cur) { cur = bs.html || ""; }
+      if (!cur) { return; }                       // never clobber a good template with empty
+      bs.store.templates[bs.type] = cur;
       DS.api("save_draft", { page: "_blocks", device: "desktop",
         layout_json: JSON.stringify({ templates: bs.store.templates, settings: bs.store.settings, names: bs.store.names }) })
-        .catch(function (e) { DS.toast(e.message); });
-    }, 500);
+        .then(previewReload)
+        .catch(function (e) { DS.toast(e.message); previewReload(); });
+    }, 450);
   }
 })();
