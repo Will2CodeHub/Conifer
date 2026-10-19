@@ -300,16 +300,34 @@
     var nr = w.doc.createRange(); nr.selectNodeContents(blk); sel.removeAllRanges(); sel.addRange(nr);
     rememberRange(); changed();
   }
-  function insertHR() {
-    if (w.srcMode || !w.doc) { return; }
+  function insertNodeAtCaret(node) {
     w.root.focus();
     var sel = restoreSelection();
-    var hr = w.doc.createElement("hr");
-    if (sel.rangeCount) {
-      var r = sel.getRangeAt(0); r.collapse(false); r.insertNode(hr);
-      r.setStartAfter(hr); r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
-    } else { w.root.appendChild(hr); }
+    if (sel && sel.rangeCount) {
+      var r = sel.getRangeAt(0); r.collapse(false); r.insertNode(node);
+      r.setStartAfter(node); r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
+    } else { w.root.appendChild(node); }
     rememberRange(); changed();
+  }
+  function insertHR() { if (w.srcMode || !w.doc) { return; } insertNodeAtCaret(w.doc.createElement("hr")); }
+  // Add a brand-new element (text, heading, line break, link, button, image,
+  // divider or box) at the cursor.
+  function insertElement(type) {
+    if (w.srcMode || !w.doc) { return; }
+    var el = null;
+    switch (type) {
+      case "p": el = w.doc.createElement("p"); el.textContent = "New text"; break;
+      case "h2": el = w.doc.createElement("h2"); el.textContent = "New heading"; break;
+      case "br": insertNodeAtCaret(w.doc.createElement("br")); return;
+      case "a": el = w.doc.createElement("a"); el.setAttribute("href", "#"); el.textContent = "New link"; break;
+      case "button": el = w.doc.createElement("button"); el.textContent = "Button"; break;
+      case "img": el = w.doc.createElement("img"); el.setAttribute("src", IMG_PH); el.setAttribute("alt", "Image"); el.style.maxWidth = "100%"; el.style.height = "auto"; break;
+      case "hr": el = w.doc.createElement("hr"); break;
+      case "div": el = w.doc.createElement("div"); el.textContent = "New box"; break;
+      default: return;
+    }
+    insertNodeAtCaret(el);
+    selectElement(el);   // select it so it can be styled / typed into straight away
   }
   function listSel(ordered) {
     if (w.srcMode || !w.doc) { return; }
@@ -635,6 +653,14 @@
       s.addEventListener("change", function () { if (s.value !== "") { onChange(s.value); } s.value = ""; });
       tb.appendChild(s); return s;
     }
+    w.srcBtn = btn("&lt;/&gt; HTML", "Switch between visual editing and the HTML code", function () {
+      var src = toggleSource();
+      w.srcBtn.classList.toggle("ds-on", src);
+      w.srcBtn.innerHTML = src ? "&#9998; Visual" : "&lt;/&gt; HTML";
+    });
+    sep();
+    sel("Add a new element", [["", "+ Insert"], ["p", "Text paragraph"], ["h2", "Heading"], ["br", "Line break"], ["a", "Link"], ["button", "Button"], ["img", "Image"], ["hr", "Divider line"], ["div", "Box / container"]], insertElement);
+    sep();
     sel("Paragraph / heading", [["", "Format"], ["p", "Paragraph"], ["h1", "Heading 1"], ["h2", "Heading 2"], ["h3", "Heading 3"], ["h4", "Heading 4"], ["blockquote", "Quote"]], formatBlockSel);
     sep();
     btn("<b>B</b>", "Bold", function () { wrapInline("strong", ["STRONG", "B"]); });
@@ -670,12 +696,6 @@
     btn("&minus; Column", "Remove the last column", removeColumn);
     sep();
     btn("&#10005; Clear", "Clear formatting", clearFormat);
-    sep();
-    w.srcBtn = btn("&lt;/&gt; HTML", "Switch between visual editing and the HTML code", function () {
-      var src = toggleSource();
-      w.srcBtn.classList.toggle("ds-on", src);
-      w.srcBtn.innerHTML = src ? "&#9998; Visual" : "&lt;/&gt; HTML";
-    }, "ds-he-src");
   }
   function colourControl(title, glyph, onPick) {
     var wrap = document.createElement("label"); wrap.className = "ds-he-colour"; wrap.title = title;
