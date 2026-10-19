@@ -82,7 +82,11 @@
   }
 
   function wireTopbar(root, name) {
-    root.querySelector("#dsPeBack").addEventListener("click", function () { if (st && st.undo) { st.undo.clear(); } DS.dsGo("home"); });
+    root.querySelector("#dsPeBack").addEventListener("click", function () {
+      clearTimeout(saveTimer);                   // flush any pending layout edit before leaving
+      DS.api("save_draft", { page: st.slug, device: "desktop", layout_json: JSON.stringify(st.layout) }).catch(function () {});
+      if (st && st.undo) { st.undo.clear(); } DS.dsGo("home");
+    });
     root.querySelector("#dsPeUndo").addEventListener("click", function () {
       if (st.undo.canUndo()) { st.undo.undo(); DS.toast("Reverted"); } else { DS.toast("Nothing to undo"); }
     });

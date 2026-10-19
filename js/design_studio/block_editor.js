@@ -30,7 +30,10 @@
         '<div class="ds-be-editor" id="dsBeEditor"></div>' +
       '</div>';
 
-    root.querySelector("#dsBeBack").addEventListener("click", function () { if (bs.undo) { bs.undo.clear(); } DS.dsGo("home"); });
+    root.querySelector("#dsBeBack").addEventListener("click", function () {
+      clearTimeout(saveTimer); saveNow();        // flush any pending edit before leaving
+      if (bs.undo) { bs.undo.clear(); } DS.dsGo("home");
+    });
     root.querySelector("#dsBePreview").addEventListener("click", function () { window.open(DS.previewUrl({ block: type }), "_blank"); });
     root.querySelector("#dsBeUndo").addEventListener("click", function () {
       if (bs.undo && bs.undo.canUndo()) { bs.undo.undo(); DS.toast("Reverted"); } else { DS.toast("Nothing to undo"); }
