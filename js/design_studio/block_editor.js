@@ -122,6 +122,6 @@
         layout_json: JSON.stringify({ templates: bs.store.templates, settings: bs.store.settings, names: bs.store.names }) })
         .then(previewReload)
         .catch(function (e) { DS.toast(e.message); previewReload(); });
-    }, 450);
+    }, 300);
   }
 })();

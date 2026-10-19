@@ -11,7 +11,8 @@
 
   var w = { frame: null, src: null, doc: null, win: null, root: null, type: null,
             host: "", srcMode: false, styleTag: "", savedRange: null, sections: [],
-            insSel: null, srcBtn: null, onChange: null };
+            insSel: null, srcBtn: null, onChange: null, container: null,
+            inspector: null, selEl: null };
   var changeTimer = null;
 
   // ---- field labels / destinations (ported) ----------------------------
@@ -362,8 +363,7 @@
       var c2 = w.doc.createElement("div"); c2.className = "ds-col-cell"; c2.appendChild(w.doc.createElement("br"));
       grid.appendChild(c1); grid.appendChild(c2);
     }
-    injectSplitters(grid);
-    changed();
+    changed(); mountGridHandles(grid);
   }
   function countCols(grid) { return grid.querySelectorAll(":scope > .ds-col-cell").length; }
   function repeatFr(n) { var a = []; for (var i = 0; i < n; i++) { a.push("1fr"); } return a.join(" "); }
@@ -377,37 +377,53 @@
     if (cells.length <= 1) { unwrap(grid); changed(); return; }
     cells[cells.length - 1].remove();
     grid.style.gridTemplateColumns = repeatFr(countCols(grid));
-    injectSplitters(grid); changed();
+    changed(); mountGridHandles(grid);
   }
-  // Draggable splitters between columns; they are view-only (stripped on save).
-  function injectSplitters(grid) {
-    grid.querySelectorAll(":scope > .ds-colsplit").forEach(function (s) { s.remove(); });
-    var cells = Array.prototype.slice.call(grid.querySelectorAll(":scope > .ds-col-cell"));
-    for (var i = 0; i < cells.length - 1; i++) {
+  // Remove all drag handles from the document (they are view-only, stripped on save).
+  function clearGridHandles() {
+    if (!w.doc) { return; }
+    w.doc.querySelectorAll(".ds-colsplit").forEach(function (s) { s.remove(); });
+  }
+  // Overlay a draggable divider over each column boundary of ANY grid, so the
+  // user can drag to resize the columns of a real multi-column block.
+  function mountGridHandles(grid) {
+    clearGridHandles();
+    if (!grid || !w.win) { return; }
+    var cs = w.win.getComputedStyle(grid);
+    if (cs.display.indexOf("grid") === -1) { return; }
+    var tracks = cs.gridTemplateColumns.split(/\s+/).map(parseFloat).filter(function (x) { return !isNaN(x); });
+    if (tracks.length < 2) { return; }
+    var gap = parseFloat(cs.columnGap || cs.gap || "0") || 0;
+    var padL = parseFloat(cs.paddingLeft) || 0, padT = parseFloat(cs.paddingTop) || 0, padB = parseFloat(cs.paddingBottom) || 0;
+    if (cs.position === "static") { grid.style.position = "relative"; }
+    var x = padL;
+    for (var i = 0; i < tracks.length - 1; i++) {
+      x += tracks[i];
       var h = w.doc.createElement("div");
-      h.className = "ds-colsplit"; h.setAttribute("contenteditable", "false"); h.title = "Drag to resize";
-      cells[i].parentNode.insertBefore(h, cells[i].nextSibling);
-      bindSplitter(grid, h);
+      h.className = "ds-colsplit"; h.setAttribute("contenteditable", "false"); h.title = "Drag to resize columns";
+      h.style.cssText = "position:absolute;top:" + padT + "px;left:" + (x + gap / 2 - 3) + "px;width:6px;height:calc(100% - " + (padT + padB) + "px);z-index:50;";
+      h.dataset.left = i; h.dataset.right = i + 1;
+      grid.appendChild(h);
+      bindGridSplitter(grid, h);
+      x += gap;
     }
   }
-  function bindSplitter(grid, handle) {
+  function bindGridSplitter(grid, handle) {
     handle.addEventListener("mousedown", function (e) {
-      e.preventDefault();
-      var rect = grid.getBoundingClientRect();
-      var cells = Array.prototype.slice.call(grid.querySelectorAll(":scope > .ds-col-cell"));
-      var idx = 0, prev = handle.previousElementSibling;
-      cells.forEach(function (c, i) { if (c === prev) { idx = i; } });
-      function onMove(ev) {
-        var total = rect.width || 1;
-        var fr = cells.map(function (c) { return c.getBoundingClientRect().width / total; });
-        var deltaPx = ev.clientX - (prev.getBoundingClientRect().right);
-        var d = deltaPx / total;
-        fr[idx] = Math.max(0.1, fr[idx] + d);
-        fr[idx + 1] = Math.max(0.1, fr[idx + 1] - d);
-        grid.style.gridTemplateColumns = fr.map(function (x) { return x.toFixed(3) + "fr"; }).join(" ");
+      e.preventDefault(); e.stopPropagation();
+      var li = parseInt(handle.dataset.left, 10), ri = parseInt(handle.dataset.right, 10);
+      var startX = e.clientX;
+      var widths = w.win.getComputedStyle(grid).gridTemplateColumns.split(/\s+/).map(parseFloat);
+      var total = widths.reduce(function (a, b) { return a + b; }, 0) || 1;
+      function move(ev) {
+        var dx = ev.clientX - startX;
+        var nw = widths.slice();
+        nw[li] = Math.max(20, widths[li] + dx);
+        nw[ri] = Math.max(20, widths[ri] - dx);
+        grid.style.gridTemplateColumns = nw.map(function (px) { return (px / total).toFixed(4) + "fr"; }).join(" ");
       }
-      function onUp() { w.doc.removeEventListener("mousemove", onMove); w.doc.removeEventListener("mouseup", onUp); changed(); }
-      w.doc.addEventListener("mousemove", onMove); w.doc.addEventListener("mouseup", onUp);
+      function up() { w.doc.removeEventListener("mousemove", move); w.doc.removeEventListener("mouseup", up); mountGridHandles(grid); changed(); }
+      w.doc.addEventListener("mousemove", move); w.doc.addEventListener("mouseup", up);
     });
   }
 
@@ -525,6 +541,10 @@
       t.parentNode.replaceChild(w.doc.createTextNode(t.getAttribute("data-tok") || ""), t);
     });
     clone.querySelectorAll(".ds-colsplit").forEach(function (s) { s.remove(); });
+    clone.querySelectorAll(".ds-he-sel, .ds-he-hl").forEach(function (e) {
+      e.classList.remove("ds-he-sel"); e.classList.remove("ds-he-hl");
+      if (!e.getAttribute("class")) { e.removeAttribute("class"); }
+    });
     clone.querySelectorAll("img[data-dl-src]").forEach(function (img) {
       img.setAttribute("src", img.getAttribute("data-dl-src"));
       if (img.hasAttribute("data-dl-alt")) { img.setAttribute("alt", img.getAttribute("data-dl-alt")); }
@@ -538,7 +558,7 @@
   function changed() {
     rememberRange();
     clearTimeout(changeTimer);
-    changeTimer = setTimeout(function () { if (w.onChange) { w.onChange(getTemplate()); } }, 500);
+    changeTimer = setTimeout(function () { if (w.onChange) { w.onChange(getTemplate()); } }, 350);
   }
 
   // ---- load ------------------------------------------------------------
@@ -561,28 +581,33 @@
         '.dl-edit-root a{color:#2563eb;text-decoration:underline}' +
         '.ds-cols{position:relative}' +
         '.ds-col-cell{min-height:24px;outline:1px dashed #e2e8f0;outline-offset:2px}' +
-        '.ds-colsplit{cursor:col-resize;background:#dbe6ff;width:6px;border-radius:3px;margin:0 -3px;position:relative;z-index:2}' +
+        '.ds-colsplit{background:rgba(37,99,235,.45);border-radius:3px;cursor:col-resize}' +
         '.ds-colsplit:hover{background:#2563eb}' +
         '.ds-he-hl{outline:2px solid #2563eb !important;outline-offset:2px}' +
+        '.ds-he-sel{outline:2px solid #2563eb !important;outline-offset:1px}' +
         '::selection{background:#bfdbfe}' +
       '</style></head><body><div class="dl-edit-root" contenteditable="true"></div></body></html>';
     w.frame.onload = function () {
       w.doc = w.frame.contentDocument; w.win = w.frame.contentWindow;
       w.root = w.doc.querySelector(".dl-edit-root");
       w.root.innerHTML = parts.html || "";
+      w.selEl = null; w.gridEl = null;
       tokenizeDom(w.root, w.doc);
       softenTemplateImages(w.root);
-      w.root.querySelectorAll(".ds-cols").forEach(injectSplitters);
       try { w.doc.execCommand("defaultParagraphSeparator", false, "p"); } catch (e) {}
       w.root.addEventListener("input", changed);
       w.root.addEventListener("keyup", rememberRange);
       w.root.addEventListener("mouseup", rememberRange);
-      // Click a placeholder to SELECT it, so font / size / colour apply to it
-      // (its text still can't be edited).
+      // Click an element to SELECT it for the style inspector; clicking a
+      // placeholder also range-selects it so the toolbar can style it.
       w.root.addEventListener("click", function (e) {
+        var elx = e.target;
+        if (elx && elx.classList && elx.classList.contains("ds-colsplit")) { return; }
+        selectElement(elx);
         var tk = e.target && e.target.closest ? e.target.closest(".dl-tok") : null;
         if (tk) { selectNode(tk); }
       });
+      renderInspector();
       // Native drag of content reflows the editor into a mess; allow only the
       // column resize handles to be dragged.
       w.root.addEventListener("dragstart", function (e) {
@@ -672,6 +697,195 @@
     w.insSel.appendChild(og2);
   }
 
+  // =====================================================================
+  //  Element style inspector — click an element, edit its full box model,
+  //  typography, border, background, layout and column widths. Current
+  //  values are read from the rendered (computed) style so a title shows
+  //  its real size/colour; edits are written as inline styles and reflected
+  //  live in the editor (and in the Preview pane on the next save).
+  // =====================================================================
+  function esc(s) { return DS.esc(s); }
+  function numOf(s) { var m = String(s == null ? "" : s).match(/-?\d*\.?\d+/); return m ? m[0] : ""; }
+  function unitOf(s) { var m = String(s == null ? "" : s).match(/(px|%|rem|em|vh|vw)/); return m ? m[1] : ""; }
+  function rgbToHex(c) {
+    if (!c) { return "#000000"; }
+    if (/^#([0-9a-f]{6})$/i.test(c)) { return c; }
+    var m = String(c).match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+    if (!m) { return "#000000"; }
+    function h(x) { x = parseInt(x, 10).toString(16); return x.length < 2 ? "0" + x : x; }
+    return "#" + h(m[1]) + h(m[2]) + h(m[3]);
+  }
+  // Current value of a property on the selected element: inline style wins,
+  // else the rendered (computed) value.
+  function cv(prop, el) {
+    el = el || w.selEl; if (!el) { return ""; }
+    if (el.style && el.style[prop]) { return el.style[prop]; }
+    try { return (w.win.getComputedStyle(el)[prop] || ""); } catch (e) { return ""; }
+  }
+  function friendlyEl(el) {
+    var tag = (el.tagName || "").toLowerCase();
+    var map = { h1: "heading", h2: "heading", h3: "subheading", h4: "subheading", p: "paragraph",
+      a: "link", img: "image", ul: "list", ol: "list", li: "list item", button: "button",
+      span: "text", div: "box", section: "section", header: "header", footer: "footer", nav: "navigation" };
+    var name = map[tag] || tag || "element";
+    var cls = el.className && typeof el.className === "string" ? el.className.split(/\s+/).filter(function (c) { return c && c !== "ds-he-sel" && c !== "ds-he-hl"; })[0] : "";
+    return name + (cls ? " ." + cls : "");
+  }
+  function findGrid(el) {
+    if (!el) { return null; }
+    if (cv("display", el).indexOf("grid") !== -1) { return el; }
+    var p = el.parentElement;
+    if (p && p !== w.root && cv("display", p).indexOf("grid") !== -1) { return p; }
+    return null;
+  }
+
+  function applyElTo(el, prop, val) { if (!el) { return; } try { el.style[prop] = val; } catch (e) {} changed(); }
+  function applyEl(prop, val) { applyElTo(w.selEl, prop, val); }
+
+  function selectElement(el) {
+    if (w.selEl) { try { w.selEl.classList.remove("ds-he-sel"); } catch (e) {} }
+    w.selEl = (el && el !== w.root && el.nodeType === 1) ? el : null;
+    if (w.selEl) { try { w.selEl.classList.add("ds-he-sel"); } catch (e) {} }
+    renderInspector();
+  }
+
+  // ---- control builders ----
+  function group(title, inner) { return '<details class="ds-insp-group" open><summary>' + esc(title) + '</summary><div class="ds-insp-body">' + inner + '</div></details>'; }
+  function selRow(label, prop, opts) {
+    var c = cv(prop);
+    return '<label class="ds-insp-row"><span>' + esc(label) + '</span><select class="ds-insp-sel" data-prop="' + prop + '">' +
+      opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (o[0] === c ? " selected" : "") + '>' + esc(o[1]) + '</option>'; }).join("") +
+      '</select></label>';
+  }
+  function colRow(label, prop) {
+    var c = rgbToHex(cv(prop));
+    return '<label class="ds-insp-row"><span>' + esc(label) + '</span><span class="ds-insp-col">' +
+      '<input type="color" class="ds-insp-color" data-prop="' + prop + '" value="' + c + '">' +
+      '<button type="button" class="ds-insp-clear" data-prop="' + prop + '" title="Remove">&#10005;</button></span></label>';
+  }
+  function lenRow(label, prop, units) {
+    units = units || ["px", "%", "rem", "em", "auto"];
+    var c = cv(prop), isAuto = (c === "auto" || c === ""), n = numOf(c), u = unitOf(c) || "px";
+    return '<label class="ds-insp-row"><span>' + esc(label) + '</span><span class="ds-insp-len">' +
+      '<input type="number" class="ds-insp-num" data-prop="' + prop + '" value="' + (isAuto ? "" : n) + '" placeholder="auto">' +
+      '<select class="ds-insp-unit" data-prop="' + prop + '">' +
+        units.map(function (x) { return '<option value="' + x + '"' + ((isAuto && x === "auto") || (!isAuto && x === u) ? " selected" : "") + '>' + x + '</option>'; }).join("") +
+      '</select></span></label>';
+  }
+  function box4(label, prefix) {
+    var sides = [["T", prefix + "Top"], ["R", prefix + "Right"], ["B", prefix + "Bottom"], ["L", prefix + "Left"]];
+    return '<div class="ds-insp-box4"><span class="ds-insp-b4lab">' + esc(label) + '</span><div class="ds-insp-b4grid">' +
+      sides.map(function (s) { return '<label><input type="number" class="ds-insp-b4" data-prop="' + s[1] + '" value="' + numOf(cv(s[1])) + '" placeholder="0"><em>' + s[0] + '</em></label>'; }).join("") +
+      '</div></div>';
+  }
+  function rangeRow(label, prop, factor) {
+    var raw = cv(prop); var v = Math.round((raw === "" ? 1 : parseFloat(raw)) * factor);
+    return '<label class="ds-insp-row"><span>' + esc(label) + '</span><input type="range" class="ds-insp-range" data-prop="' + prop + '" data-factor="' + factor + '" min="0" max="' + factor + '" value="' + v + '"></label>';
+  }
+  function columnsControl(grid) {
+    if (!grid) { return ""; }
+    var gtc = (grid.style.gridTemplateColumns || cv("gridTemplateColumns", grid) || "").trim();
+    if (!gtc || gtc === "none") { return ""; }
+    var tracks = gtc.split(/\s+/);
+    if (tracks.length < 2) { return ""; }
+    var inputs = tracks.map(function (t, i) { return '<label class="ds-insp-colw"><em>Col ' + (i + 1) + '</em><input type="text" class="ds-insp-coltrack" data-i="' + i + '" value="' + esc(t) + '"></label>'; }).join("");
+    return group("Columns (" + tracks.length + ")",
+      '<p class="ds-insp-note">Width of each column. Type a share (1, 2, 3) or a size (200px, 30%).</p>' +
+      '<div class="ds-insp-cols">' + inputs + '</div>' +
+      '<button type="button" class="ds-insp-coleq">Make all equal</button>');
+  }
+
+  function renderInspector() {
+    var ins = w.inspector; if (!ins) { return; }
+    var el = w.selEl;
+    if (!el) {
+      ins.innerHTML = '<div class="ds-insp-empty"><i class="fas fa-arrow-pointer"></i><p>Click any element in the editor to style it.</p><p class="ds-insp-note">Margins, padding, size, border, background, text and columns all appear here.</p></div>';
+      clearGridHandles();
+      return;
+    }
+    w.gridEl = findGrid(el);
+    var canParent = el.parentElement && el.parentElement !== w.root;
+    ins.innerHTML =
+      '<div class="ds-insp-head"><span>Editing <b>' + esc(friendlyEl(el)) + '</b></span>' +
+        (canParent ? '<button type="button" class="ds-insp-parent" title="Select the element around this one"><i class="fas fa-arrow-up"></i> Parent</button>' : "") + '</div>' +
+      group("Text",
+        colRow("Colour", "color") +
+        lenRow("Size", "fontSize") +
+        selRow("Weight", "fontWeight", WEIGHTS) +
+        selRow("Align", "textAlign", [["", "—"], ["left", "Left"], ["center", "Centre"], ["right", "Right"], ["justify", "Justify"]]) +
+        lenRow("Line height", "lineHeight", ["", "px", "em"]) +
+        lenRow("Letter spacing", "letterSpacing", ["px", "em"]) +
+        selRow("Capitalisation", "textTransform", [["", "—"], ["none", "Normal"], ["uppercase", "UPPERCASE"], ["lowercase", "lowercase"], ["capitalize", "Capitalise"]]) +
+        selRow("Decoration", "textDecorationLine", [["", "—"], ["none", "None"], ["underline", "Underline"], ["line-through", "Strikethrough"]])) +
+      group("Spacing", box4("Margin (outside)", "margin") + box4("Padding (inside)", "padding")) +
+      group("Size", lenRow("Width", "width") + lenRow("Height", "height") + lenRow("Max width", "maxWidth") + lenRow("Min height", "minHeight")) +
+      group("Border",
+        lenRow("Thickness", "borderWidth", ["px"]) +
+        selRow("Style", "borderStyle", [["", "—"], ["none", "None"], ["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["double", "Double"]]) +
+        colRow("Colour", "borderColor") +
+        lenRow("Rounded corners", "borderRadius", ["px", "%"])) +
+      group("Background", colRow("Colour", "backgroundColor")) +
+      (w.gridEl ? columnsControl(w.gridEl) : "") +
+      group("Layout",
+        selRow("Display", "display", [["", "—"], ["block", "Block"], ["inline-block", "Inline block"], ["flex", "Flex (row)"], ["grid", "Grid"], ["none", "Hidden"]]) +
+        lenRow("Gap", "gap", ["px", "rem"]) +
+        selRow("Justify", "justifyContent", [["", "—"], ["flex-start", "Start"], ["center", "Centre"], ["flex-end", "End"], ["space-between", "Space between"], ["space-around", "Space around"]]) +
+        selRow("Align items", "alignItems", [["", "—"], ["stretch", "Stretch"], ["flex-start", "Start"], ["center", "Centre"], ["flex-end", "End"]])) +
+      group("Effects",
+        rangeRow("Opacity", "opacity", 100) +
+        selRow("Shadow", "boxShadow", [["", "—"], ["none", "None"], ["0 1px 3px rgba(0,0,0,.2)", "Small"], ["0 6px 18px rgba(0,0,0,.15)", "Medium"], ["0 14px 40px rgba(0,0,0,.2)", "Large"]]));
+    wireInspector();
+    if (w.gridEl) { mountGridHandles(w.gridEl); } else { clearGridHandles(); }
+  }
+
+  function wireInspector() {
+    var ins = w.inspector;
+    ins.querySelectorAll(".ds-insp-b4").forEach(function (i) {
+      i.addEventListener("input", function () { applyEl(i.dataset.prop, i.value === "" ? "" : (i.value + "px")); });
+    });
+    ins.querySelectorAll(".ds-insp-num, .ds-insp-unit").forEach(function (i) {
+      i.addEventListener("input", function () { applyLen(i.dataset.prop); });
+      i.addEventListener("change", function () { applyLen(i.dataset.prop); });
+    });
+    ins.querySelectorAll(".ds-insp-sel").forEach(function (i) {
+      i.addEventListener("change", function () { applyEl(i.dataset.prop, i.value); setTimeout(renderInspector, 0); });
+    });
+    ins.querySelectorAll(".ds-insp-color").forEach(function (i) {
+      i.addEventListener("input", function () { applyEl(i.dataset.prop, i.value); });
+    });
+    ins.querySelectorAll(".ds-insp-clear").forEach(function (i) {
+      i.addEventListener("click", function () { applyEl(i.dataset.prop, ""); renderInspector(); });
+    });
+    ins.querySelectorAll(".ds-insp-range").forEach(function (i) {
+      i.addEventListener("input", function () { applyEl(i.dataset.prop, String((+i.value) / (+i.dataset.factor))); });
+    });
+    ins.querySelectorAll(".ds-insp-coltrack").forEach(function (i) {
+      i.addEventListener("input", applyColumns); i.addEventListener("change", applyColumns);
+    });
+    var eq = ins.querySelector(".ds-insp-coleq");
+    if (eq) { eq.addEventListener("click", function () {
+      var n = ins.querySelectorAll(".ds-insp-coltrack").length, a = [];
+      for (var k = 0; k < n; k++) { a.push("1fr"); }
+      applyElTo(w.gridEl, "gridTemplateColumns", a.join(" ")); renderInspector();
+    }); }
+    var par = ins.querySelector(".ds-insp-parent");
+    if (par) { par.addEventListener("click", function () { if (w.selEl && w.selEl.parentElement && w.selEl.parentElement !== w.root) { selectElement(w.selEl.parentElement); } }); }
+  }
+
+  function applyLen(prop) {
+    var num = w.inspector.querySelector('.ds-insp-num[data-prop="' + prop + '"]');
+    var unit = w.inspector.querySelector('.ds-insp-unit[data-prop="' + prop + '"]');
+    if (!num || !unit) { return; }
+    if (unit.value === "auto") { applyEl(prop, "auto"); return; }
+    if (unit.value === "") { applyEl(prop, num.value === "" ? "" : num.value); return; }
+    applyEl(prop, num.value === "" ? "" : (num.value + unit.value));
+  }
+  function applyColumns() {
+    var ins = w.inspector.querySelectorAll(".ds-insp-coltrack");
+    var vals = Array.prototype.map.call(ins, function (i) { var v = i.value.trim(); if (/^\d*\.?\d+$/.test(v)) { v = v + "fr"; } return v || "1fr"; });
+    applyElTo(w.gridEl, "gridTemplateColumns", vals.join(" "));
+  }
+
   // ---- public API ------------------------------------------------------
   DS.HtmlEditor = {
     mount: function (container, opts) {
@@ -681,17 +895,22 @@
       w.onChange = null; w.srcMode = false; w.savedRange = null;
       container.innerHTML =
         '<div class="ds-he">' +
-          '<div class="ds-he-tb" id="dsHeTb"></div>' +
-          '<div class="ds-he-hint">Grey dotted text is filled in automatically on the live site — you can colour and resize it, but not retype it. Everything else you can click and edit.</div>' +
-          '<div class="ds-he-stage">' +
-            '<iframe class="ds-he-frame" id="dsHeFrame" title="Block editor"></iframe>' +
-            '<textarea class="ds-he-src" id="dsHeSrc" spellcheck="false" style="display:none"></textarea>' +
+          '<div class="ds-he-main">' +
+            '<div class="ds-he-tb" id="dsHeTb"></div>' +
+            '<div class="ds-he-hint">Click any element to style it in the panel on the right (margins, padding, size, border, background, columns…). Grey dotted text fills in automatically on the live site — you can style it but not retype it.</div>' +
+            '<div class="ds-he-stage">' +
+              '<iframe class="ds-he-frame" id="dsHeFrame" title="Block editor"></iframe>' +
+              '<textarea class="ds-he-src" id="dsHeSrc" spellcheck="false" style="display:none"></textarea>' +
+            '</div>' +
           '</div>' +
+          '<aside class="ds-he-inspector" id="dsHeInsp"></aside>' +
         '</div>';
       w.container = container.querySelector(".ds-he");
+      w.inspector = container.querySelector("#dsHeInsp");
       w.frame = container.querySelector("#dsHeFrame");
       w.src = container.querySelector("#dsHeSrc");
       w.src.addEventListener("input", changed);
+      renderInspector();
       buildToolbar(container.querySelector("#dsHeTb"));
       fillInsertMenu(w.type);
       // live section list for the link picker
