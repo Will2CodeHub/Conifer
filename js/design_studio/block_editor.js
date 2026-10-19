@@ -21,6 +21,7 @@
         '<button class="ds-back" id="dsBeBack"><i class="fas fa-arrow-left"></i> Design home</button>' +
         '<h1>' + DS.esc(name) + '</h1>' +
         '<div class="ds-grow"></div>' +
+        '<button class="ds-btn ds-btn-ghost" id="dsBeContent"><i class="fas fa-sliders"></i> Content</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeUndo"><i class="fas fa-rotate-left"></i> Undo</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeHistory"><i class="fas fa-clock-rotate-left"></i> History</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBePreview"><i class="fas fa-up-right-from-square"></i> Preview</button>' +
@@ -42,6 +43,7 @@
     root.querySelector("#dsBeSave").addEventListener("click", function () {
       saveNow().then(function () { DS.toast("Saved"); previewReload(); }).catch(function (e) { DS.toast(e.message); });
     });
+    root.querySelector("#dsBeContent").addEventListener("click", function () { openContentDialog(type); });
     root.querySelector("#dsBeHistory").addEventListener("click", function () {
       DS.openItemHistory("block", type, function (res) {
         var tpl = res.template || "";
@@ -117,6 +119,43 @@
   function previewReload() {
     var f = document.getElementById("dsBePv");
     if (f) { f.src = DS.previewUrl({ block: bs.type }); }
+  }
+
+  function humanizeKey(k) { return k.replace(/_/g, " ").replace(/^\w/, function (c) { return c.toUpperCase(); }); }
+
+  // Edit the block's content settings (tagline, headings, counts, etc.). These
+  // are the {{placeholders}} the template fills in. Saved to the shared _blocks
+  // global settings so they apply wherever the block is used.
+  function openContentDialog(type) {
+    var defs = (DS.REG[type] && DS.REG[type].defaults) || {};
+    var keys = Object.keys(defs).filter(function (k) { return k !== "styles"; });
+    if (!keys.length) { DS.toast("This block has no content fields to set"); return; }
+    DS.api("block_settings", { type: type }).then(function (r) {
+      var cur = r.settings || {};
+      var body = keys.map(function (k) {
+        var dv = defs[k], v = (cur[k] !== undefined ? cur[k] : dv), lab = DS.esc(humanizeKey(k));
+        if (typeof dv === "boolean") {
+          return '<label class="ds-f ds-f-chk"><input type="checkbox" data-k="' + k + '"' + (v ? " checked" : "") + '> ' + lab + '</label>';
+        }
+        if (typeof dv === "number") {
+          return '<label class="ds-f"><span>' + lab + '</span><input type="number" data-k="' + k + '" value="' + DS.esc(v) + '"></label>';
+        }
+        return '<label class="ds-f"><span>' + lab + '</span><input type="text" data-k="' + k + '" value="' + DS.esc(v) + '"></label>';
+      }).join("");
+      var dlg = DS.dialog({ title: "Content — " + ((DS.REG[type] && DS.REG[type].label) || type),
+        body: body + '<div class="ds-dlg-actions"><button class="ds-btn ds-btn-primary" id="dsCtSave">Save content</button></div>' });
+      dlg.el.querySelector("#dsCtSave").addEventListener("click", function () {
+        var vals = {};
+        dlg.el.querySelectorAll("[data-k]").forEach(function (i) {
+          var dv = defs[i.dataset.k];
+          vals[i.dataset.k] = (typeof dv === "boolean") ? i.checked : (typeof dv === "number" ? (i.value === "" ? dv : Number(i.value)) : i.value);
+        });
+        if (cur.styles) { vals.styles = cur.styles; }
+        bs.store.settings[type] = Object.assign({}, bs.store.settings[type] || {}, vals);
+        saveNow().then(function () { DS.toast("Content saved"); previewReload(); }).catch(function (e) { DS.toast(e.message); });
+        dlg.close();
+      });
+    }).catch(function (e) { DS.toast(e.message); });
   }
 
   // Explicit, immediate save (the Save button). Autosave also runs on change.

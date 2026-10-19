@@ -187,6 +187,22 @@ try {
             }
             break;
 
+        case 'block_settings':
+            // Current settings for a block type: global _blocks.settings, else the
+            // first instance found on any page (for the Content editor to prefill).
+            $btype = preg_replace('/[^a-z0-9_]/i', '', (string)($_GET['type'] ?? $_POST['type'] ?? ''));
+            $bmeta = dl_load_blocks_meta($pub);
+            $out = (!empty($bmeta['settings'][$btype]) && is_array($bmeta['settings'][$btype])) ? $bmeta['settings'][$btype] : [];
+            if (!$out) {
+                foreach (dl_all_drafts($pub) as $dev) {
+                    foreach (($dev['desktop']['blocks'] ?? []) as $b) {
+                        if (($b['type'] ?? '') === $btype && !empty($b['settings'])) { $out = $b['settings']; break 2; }
+                    }
+                }
+            }
+            echo json_encode(['success' => true, 'settings' => $out]);
+            break;
+
         case 'list_assign':
             echo json_encode(['success' => true, 'assign' => dl_load_assign($pub)]);
             break;
