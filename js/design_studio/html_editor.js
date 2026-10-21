@@ -78,7 +78,7 @@
   };
   var GENERIC_HREF = ["{{href}}", "Current item's link (inside a list)"];
 
-  var FONTS = [["", "Font"], ['"Lora", Georgia, serif', "Lora (headlines)"], ['"Merriweather", Georgia, serif', "Merriweather (body)"],
+  var FONTS = [["", "Font"], ['"Playfair Display", Georgia, serif', "Playfair Display"], ['"Lora", Georgia, serif', "Lora (headlines)"], ['"Merriweather", Georgia, serif', "Merriweather (body)"],
     ['"Inter", system-ui, sans-serif', "Inter (UI)"], ['"Public Sans", sans-serif', "Public Sans"], ["Georgia, serif", "Georgia"],
     ['"Times New Roman", serif', "Times"], ["Arial, sans-serif", "Arial"], ['"Helvetica Neue", Helvetica, sans-serif', "Helvetica"],
     ["Verdana, sans-serif", "Verdana"], ['"Courier New", monospace', "Courier"]];
@@ -591,7 +591,7 @@
     var parts = splitStyle(tpl); w.styleTag = parts.style;
     var skeleton =
       '<!doctype html><html><head><meta charset="utf-8">' +
-      '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lora:wght@400;700&family=Merriweather&family=Inter:wght@400;600;700&display=swap">' +
+      '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,400;1,600&family=Lora:wght@400;700&family=Merriweather&family=Inter:wght@400;600;700&display=swap">' +
       '<link rel="stylesheet" href="https://' + w.host + '/design/assets/design.css">' +
       '<style>' +
         'html,body{margin:0}body{padding:18px;background:#fff;color:#111}' +

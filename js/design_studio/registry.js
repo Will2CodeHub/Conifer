@@ -4,9 +4,10 @@
   "use strict";
   var DS = window.DS = window.DS || {};
 
-  DS.PAGES = ["front", "section", "article", "author", "impressum", "contact", "about", "privacy", "terms", "disclaimer"];
+  DS.PAGES = ["front", "section", "article", "author", "search", "impressum", "contact", "about", "privacy", "terms", "disclaimer"];
   DS.PAGE_LABELS = {
     front: "Front page", section: "Section page", article: "Article page", author: "Author page",
+    search: "Search",
     impressum: "Impressum", contact: "Contact", about: "About us",
     privacy: "Privacy policy", terms: "Terms", disclaimer: "Disclaimer"
   };
@@ -36,6 +37,9 @@
     ticker:             { label: "News ticker",        pages: ["front"],                         defaults: {} },
     breaking_news:      { label: "Breaking news",      pages: ["front"],                         defaults: { count: 6 } },
     rich_text:          { label: "Rich text",          pages: ["impressum", "contact", "about", "privacy", "terms", "disclaimer"], defaults: { content_key: "" } },
+    about_page:         { label: "About page",         pages: ["about"],                         defaults: {} },
+    contact_page:       { label: "Contact page",       pages: ["contact"],                       defaults: { action: "/backend/contact_form_handler.php" } },
+    search_results:     { label: "Search results",     pages: ["search"],                        defaults: { per_page: 40 } },
     footer:             { label: "Footer",             pages: P,                                 defaults: {} }
   };
 

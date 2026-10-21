@@ -15,14 +15,14 @@ function dl_static_pages(): array {
 
 /** The pages a publication's design can cover. */
 function dl_page_types(): array {
-    return array_merge(['front', 'section', 'article', 'author'], dl_static_pages());
+    return array_merge(['front', 'section', 'article', 'author', 'search'], dl_static_pages());
 }
 
 /** Human labels for the page selector. */
 function dl_page_label(string $page): string {
     $map = [
         'front' => 'Front page', 'section' => 'Section page', 'article' => 'Article page',
-        'author' => 'Author page',
+        'author' => 'Author page', 'search' => 'Search',
         'impressum' => 'Impressum', 'contact' => 'Contact', 'about' => 'About us',
         'privacy' => 'Privacy policy', 'terms' => 'Terms', 'disclaimer' => 'Disclaimer',
     ];
@@ -147,6 +147,9 @@ function dl_registry(): array {
         'ticker'           => ['label' => 'News ticker',       'pages' => ['front'],                           'defaults' => []],
         'breaking_news'    => ['label' => 'Breaking news',     'pages' => ['front'],                           'defaults' => ['count' => 6]],
         'rich_text'        => ['label' => 'Rich text',         'pages' => dl_static_pages(),                   'defaults' => ['content_key' => '']],
+        'about_page'       => ['label' => 'About page',        'pages' => ['about'],                           'defaults' => []],
+        'contact_page'     => ['label' => 'Contact page',      'pages' => ['contact'],                         'defaults' => ['action' => '/backend/contact_form_handler.php']],
+        'search_results'   => ['label' => 'Search results',    'pages' => ['search'],                          'defaults' => ['per_page' => 40]],
         'footer'           => ['label' => 'Footer',            'pages' => $all,                                'defaults' => []],
     ];
 }
