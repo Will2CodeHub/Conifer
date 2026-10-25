@@ -55,26 +55,30 @@
     return { el: d, close: close };
   };
 
-  // Per-editor history: revert one block/page to a published version's content.
+  // Record a Save in this item's history (one snapshot per explicit Save).
+  DS.addHistory = function (kind, id, snapshot) {
+    return DS.api("add_history", { kind: kind, id: id, snapshot_json: JSON.stringify(snapshot) }).catch(function () {});
+  };
+
+  // Per-editor history: each Save is a revertable version (persists across sessions).
   DS.openItemHistory = function (kind, id, onRestore) {
-    DS.api("list_versions", {}).then(function (r) {
-      var versions = r.versions || [];
-      var rows = versions.length ? versions.map(function (v) {
-        return '<div class="ds-hist-row"><div><span class="ds-hist-v">v' + DS.esc(v.version_no) +
-          (v.label ? ' · ' + DS.esc(v.label) : '') + '</span>' +
-          (parseInt(v.is_live, 10) ? '<span class="ds-live-pill">Live</span>' : '') +
-          '<span class="ds-tile-meta">' + DS.esc(v.created_at) + ' · ' + DS.esc(v.created_by || '') + '</span></div>' +
-          '<button class="ds-btn ds-btn-ghost ds-sm" data-v="' + DS.esc(v.version_no) + '">Restore this</button></div>';
-      }).join("") : '<p class="ds-dlg-say">No saved versions yet. Use Publish on the Design home to save one.</p>';
-      var dlg = DS.dialog({ title: "Revert to a saved version",
-        body: '<p class="ds-dlg-say">Restore this ' + (kind === "block" ? "block" : "page") +
-          '’s content from a published version. Nothing else is changed, and it stays a draft until you Publish.</p>' +
+    DS.api("list_history", { kind: kind, id: id }).then(function (r) {
+      var items = r.history || [];
+      var rows = items.length ? items.map(function (v, i) {
+        return '<div class="ds-hist-row"><div><span class="ds-hist-v">' + DS.esc(v.created_at) +
+          (i === 0 ? ' <span class="ds-live-pill">Latest</span>' : '') + '</span>' +
+          '<span class="ds-tile-meta">saved by ' + DS.esc(v.created_by || '') + '</span></div>' +
+          '<button class="ds-btn ds-btn-ghost ds-sm" data-h="' + DS.esc(v.id) + '">Restore</button></div>';
+      }).join("") : '<p class="ds-dlg-say">No saved versions yet. Each time you press Save, a version is added here.</p>';
+      var dlg = DS.dialog({ title: "Saved versions",
+        body: '<p class="ds-dlg-say">Every Save adds a version. Restore one to roll this ' +
+          (kind === "block" ? "block" : (kind === "template" ? "template" : "page")) + ' back to how it was.</p>' +
           '<div class="ds-hist">' + rows + '</div>' });
-      dlg.el.querySelectorAll("[data-v]").forEach(function (b) {
+      dlg.el.querySelectorAll("[data-h]").forEach(function (b) {
         b.addEventListener("click", function () {
           b.disabled = true;
-          DS.api("get_version_item", { version_no: b.dataset.v, kind: kind, id: id })
-            .then(function (res) { onRestore(res); dlg.close(); DS.toast("Reverted to v" + b.dataset.v); })
+          DS.api("get_history", { hist_id: b.dataset.h })
+            .then(function (res) { onRestore(res.snapshot); dlg.close(); DS.toast("Reverted"); })
             .catch(function (e) { b.disabled = false; DS.toast(e.message); });
         });
       });

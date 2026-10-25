@@ -27,7 +27,7 @@
     col1_label: "Column 1 title", col2_label: "Column 2 title", col3_label: "Column 3 title", col4_label: "Column 4 title",
     viewall_label: "View-all label", viewall_href: "View-all link", headlines_label: "Headlines title",
     url: "Link", role: "Role", photo: "Photo", email: "Email", x_url: "X link", linkedin_url: "LinkedIn link",
-    nav: "menu link", sections: "section", items: "item", cards: "story", mid: "story", side: "story",
+    nav: "menu link", sections: "section", items: "item", cards: "story", mid: "story", side: "story", stories: "story",
     show_search: "search is on", show_subscribe: "subscribe is on", hero: "there is a lead story", lead: "there is a lead story"
   };
   var GLOBAL_FIELDS = [
@@ -62,6 +62,11 @@
     rich_text: "{{title}}, {{body}}",
     article_comments: "{{heading}}, {{note}}, {{placeholder}}, {{guest_label}}, {{button_label}}"
   };
+  // Custom (user-created, blk_*) blocks have no fixed field set: they receive a
+  // generic context (see dl_custom_block_context on the engine) with a `stories`
+  // list of the latest articles. Offer those so Summary etc. can be inserted.
+  var CUSTOM_BLOCK_PLACEHOLDERS = "{{#each stories}}{{title}} {{image}} {{summary}} {{section}} {{href}} {{meta}}{{/each}}";
+  function isCustomBlock(type) { return /^blk_/.test(String(type || "")); }
   var FIXED_PAGES = [
     ["/design/", "Home page"], ["/design/about", "About us"], ["/design/contact", "Contact"],
     ["/design/impressum", "Impressum"], ["/design/privacy", "Privacy policy"],
@@ -89,7 +94,7 @@
 
   // ---- tokens ----------------------------------------------------------
   function fieldsFor(type) {
-    var out = [], s = BLOCK_PLACEHOLDERS[type] || "", re = /\{\{\{?[^{}]*?\}?\}\}/g, m;
+    var out = [], s = BLOCK_PLACEHOLDERS[type] || (isCustomBlock(type) ? CUSTOM_BLOCK_PLACEHOLDERS : ""), re = /\{\{\{?[^{}]*?\}?\}\}/g, m;
     while ((m = re.exec(s))) { if (out.indexOf(m[0]) === -1) { out.push(m[0]); } }
     return out;
   }
@@ -168,6 +173,51 @@
       }
       if (last < s.length) { frag.appendChild(doc.createTextNode(s.slice(last))); }
       tn.parentNode.replaceChild(frag, tn);
+    });
+  }
+
+  // ---- repeat-region cue -----------------------------------------------
+  // The live site repeats a {{#each}} body for every item, but the editor shows
+  // the body just once. Wrap each repeating region in a labelled, outlined box
+  // and append faded ghost copies so the editor resembles the many-item page.
+  // Everything added here is tagged data-ds-decor / data-ds-loopwrap and stripped
+  // on serialize (see templateHtml), so it never reaches the saved template.
+  // Falls back silently when a loop's open/end tokens are not simple siblings.
+  function decorateLoops(root, doc) {
+    var opens = [].slice.call(root.querySelectorAll(".dl-tok-loop"));
+    opens.forEach(function (open) {
+      if (!open.parentNode || open.getAttribute("data-ds-looped")) { return; }
+      var parent = open.parentNode, depth = 1, node = open.nextSibling, body = [], end = null;
+      while (node) {
+        if (node.nodeType === 1 && node.classList) {
+          if (node.classList.contains("dl-tok-loop")) { depth++; }
+          else if (node.classList.contains("dl-tok-end")) { depth--; if (depth === 0) { end = node; break; } }
+        }
+        body.push(node); node = node.nextSibling;
+      }
+      if (!end) { return; }                       // open/end not siblings — leave as-is
+      var hasEl = body.some(function (n) { return n.nodeType === 1; });
+      if (!hasEl) { return; }                      // nothing visible to repeat
+
+      var region = doc.createElement("div");
+      region.className = "dl-loop-region"; region.setAttribute("data-ds-loopwrap", "1");
+      var label = doc.createElement("div");
+      label.className = "dl-loop-label"; label.setAttribute("data-ds-decor", "1");
+      label.setAttribute("contenteditable", "false");
+      label.textContent = "↻ " + tokInfo(open.getAttribute("data-tok")).text;
+      parent.insertBefore(region, open);
+      region.appendChild(label);
+      region.appendChild(open);                    // keep the real tokens + body
+      body.forEach(function (n) { region.appendChild(n); });
+      region.appendChild(end);
+      open.setAttribute("data-ds-looped", "1");
+      for (var g = 0; g < 2; g++) {                // two faded, non-editable copies
+        var ghost = doc.createElement("div");
+        ghost.className = "dl-loop-ghost"; ghost.setAttribute("data-ds-decor", "1");
+        ghost.setAttribute("contenteditable", "false"); ghost.setAttribute("aria-hidden", "true");
+        body.forEach(function (n) { if (!(n.nodeType === 1 && n.classList && (n.classList.contains("dl-tok-loop") || n.classList.contains("dl-tok-end")))) { ghost.appendChild(n.cloneNode(true)); } });
+        region.appendChild(ghost);
+      }
     });
   }
 
@@ -559,6 +609,14 @@
   function templateHtml() {
     if (!w.root) { return ""; }
     var clone = w.root.cloneNode(true);
+    // Strip the editor-only repeat-region cue (ghosts + labels first, then unwrap
+    // the region), leaving the original {{#each}} … {{/each}} token sequence.
+    clone.querySelectorAll("[data-ds-decor]").forEach(function (n) { n.remove(); });
+    clone.querySelectorAll("[data-ds-loopwrap]").forEach(function (region) {
+      var p = region.parentNode; if (!p) { return; }
+      while (region.firstChild) { p.insertBefore(region.firstChild, region); }
+      p.removeChild(region);
+    });
     clone.querySelectorAll(".dl-tok").forEach(function (t) {
       t.parentNode.replaceChild(w.doc.createTextNode(t.getAttribute("data-tok") || ""), t);
     });
@@ -599,6 +657,10 @@
         '.dl-tok{font:inherit;white-space:nowrap}' +
         '.dl-tok-field{color:#6b7a90;text-decoration:underline dotted #b6c0cf;text-underline-offset:3px;cursor:help}' +
         '.dl-tok-loop,.dl-tok-cond,.dl-tok-end{display:none}' +
+        '.dl-loop-region{position:relative;outline:1px dashed #94a3b8;outline-offset:7px;border-radius:4px;margin:18px 0}' +
+        '.dl-loop-label{position:absolute;top:-11px;left:10px;z-index:2;background:#eef2ff;color:#4f46e5;font:600 11px/1 Inter,system-ui,sans-serif;padding:3px 8px;border-radius:10px;border:1px solid #c7d2fe;letter-spacing:.02em;white-space:nowrap}' +
+        '.dl-loop-ghost{opacity:.4;pointer-events:none;filter:grayscale(.15)}' +
+        '.dl-loop-ghost *{cursor:default !important}' +
         '.dl-tplimg{width:44px;height:30px;border:1px solid #cdd7e5;border-radius:4px;vertical-align:middle;object-fit:cover;opacity:.75}' +
         '.dl-edit-root a{color:#2563eb;text-decoration:underline}' +
         '.ds-cols{position:relative}' +
@@ -616,6 +678,7 @@
       w.selEl = null; w.gridEl = null;
       tokenizeDom(w.root, w.doc);
       softenTemplateImages(w.root);
+      decorateLoops(w.root, w.doc);
       try { w.doc.execCommand("defaultParagraphSeparator", false, "p"); } catch (e) {}
       w.root.addEventListener("input", changed);
       w.root.addEventListener("keyup", rememberRange);
@@ -767,7 +830,7 @@
     if (!w.insSel) { return; }
     w.insSel.innerHTML = "";
     var first = document.createElement("option"); first.value = ""; first.textContent = "Placeholder…"; w.insSel.appendChild(first);
-    var og1 = document.createElement("optgroup"); og1.label = "This block";
+    var og1 = document.createElement("optgroup"); og1.label = isCustomBlock(type) ? "Latest stories" : "This block";
     fieldsFor(type).forEach(function (f) { var o = document.createElement("option"); o.value = f; o.textContent = tokInfo(f).text; og1.appendChild(o); });
     if (og1.children.length) { w.insSel.appendChild(og1); }
     var og2 = document.createElement("optgroup"); og2.label = "General";
@@ -823,6 +886,9 @@
   function selectElement(el, silent) {
     if (w.selEl) { try { w.selEl.classList.remove("ds-he-sel"); } catch (e) {} }
     w.selEl = (el && el !== w.root && el.nodeType === 1) ? el : null;
+    // The repeat-region box, its label and the ghost copies are editor-only cues —
+    // not real content, so don't let them be selected / styled / deleted.
+    if (w.selEl && (w.selEl.hasAttribute("data-ds-loopwrap") || (w.selEl.closest && w.selEl.closest("[data-ds-decor]")))) { w.selEl = null; }
     if (w.selEl) { try { w.selEl.classList.add("ds-he-sel"); } catch (e) {} }
     w.gridEl = findGrid(w.selEl);
     syncToolbar();
@@ -836,7 +902,7 @@
     while (node && node !== w.root) {
       if (node.classList) {
         var dl = [].slice.call(node.classList).find(function (c) {
-          return c.indexOf("dl-") === 0 && c.indexOf("dl-block") !== 0 && c !== "dl-tok" && c.indexOf("dl-tok-") !== 0 && c !== "ds-he-sel";
+          return c.indexOf("dl-") === 0 && c.indexOf("dl-block") !== 0 && c !== "dl-tok" && c.indexOf("dl-tok-") !== 0 && c.indexOf("dl-loop") !== 0 && c !== "ds-he-sel";
         });
         if (dl) { return node === el ? ("." + dl) : ("." + dl + (tag ? " " + tag : "")); }
       }

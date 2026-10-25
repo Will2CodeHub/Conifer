@@ -16,6 +16,10 @@
   // whole layout is editable.
   function locked(type) { return st && st.kind !== "template" && isFrame(type); }
   function blockLabel(type) { return (DS.REG[type] && DS.REG[type].label) || type; }
+  // History identity + snapshot for the current page or template.
+  function histKind() { return st.kind === "template" ? "template" : "page"; }
+  function histId() { return st.kind === "template" ? st.tplId : st.slug; }
+  function histSnapshot() { return st.kind === "template" ? { blocks: st.layout.blocks, page_style: st.pageStyle } : st.layout; }
   // A template's block list (new 'blocks' array, or derived from legacy header/footer).
   function templateBlocks(tpl) {
     if (tpl.blocks && tpl.blocks.length) { return DS.clone(tpl.blocks); }
@@ -96,7 +100,8 @@
       '<h1>' + DS.esc(name) + '</h1>' +
       '<div class="ds-grow"></div>' +
       '<button class="ds-btn ds-btn-ghost" id="dsPeUndo"><i class="fas fa-rotate-left"></i> Undo</button>' +
-      (st && st.kind === "template" ? "" : '<button class="ds-btn ds-btn-ghost" id="dsPeHistory"><i class="fas fa-clock-rotate-left"></i> History</button>') +
+      '<button class="ds-btn ds-btn-ghost" id="dsPeRedo"><i class="fas fa-rotate-right"></i> Redo</button>' +
+      '<button class="ds-btn ds-btn-ghost" id="dsPeHistory"><i class="fas fa-clock-rotate-left"></i> History</button>' +
       '<div class="ds-seg" aria-label="Preview device">' +
         '<button data-dev="desktop" class="' + (ds.device === "desktop" ? "on" : "") + '">Desktop</button>' +
         '<button data-dev="mobile" class="' + (ds.device === "mobile" ? "on" : "") + '">Mobile</button>' +
@@ -115,6 +120,9 @@
     root.querySelector("#dsPeUndo").addEventListener("click", function () {
       if (st.undo.canUndo()) { st.undo.undo(); DS.toast("Reverted"); } else { DS.toast("Nothing to undo"); }
     });
+    root.querySelector("#dsPeRedo").addEventListener("click", function () {
+      if (st.undo.canRedo()) { st.undo.redo(); DS.toast("Redone"); } else { DS.toast("Nothing to redo"); }
+    });
     root.querySelector("#dsPePreview").addEventListener("click", function () {
       var url = st.kind === "template"
         ? ("https://" + DS.ds.host + "/design/?preview=1&template=" + encodeURIComponent(st.tplId) + "&_=" + Date.now())
@@ -122,14 +130,21 @@
       window.open(url, "_blank");
     });
     root.querySelector("#dsPeSave").addEventListener("click", function () {
-      saveLayout().then(function () { DS.toast("Saved"); refreshPreview(); }).catch(function (e) { DS.toast(e.message); });
+      saveLayout().then(function () {
+        DS.addHistory(histKind(), histId(), histSnapshot());   // record this Save in history
+        DS.toast("Saved"); refreshPreview();
+      }).catch(function (e) { DS.toast(e.message); });
     });
     var hist = root.querySelector("#dsPeHistory");
     if (hist) {
       hist.addEventListener("click", function () {
-        DS.openItemHistory("page", st.slug, function (res) {
-          if (res.layout && res.layout.blocks) {
-            st.undo.push(); st.layout = res.layout; renderRail(); scheduleSave(0, true);
+        DS.openItemHistory(histKind(), histId(), function (snap) {
+          if (!snap) { DS.toast("That version is empty"); return; }
+          if (st.kind === "template") {
+            st.layout.blocks = snap.blocks || []; st.pageStyle = snap.page_style || {};
+            renderRail(); renderStyleSection(); scheduleSave(0, true);
+          } else if (snap.blocks) {
+            st.undo.push(); st.layout = snap; renderRail(); scheduleSave(0, true);
           } else { DS.toast("That version has nothing for this page"); }
         });
       });

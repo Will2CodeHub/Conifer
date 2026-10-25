@@ -27,6 +27,7 @@
         '</div>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeContent"><i class="fas fa-sliders"></i> Content</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeUndo"><i class="fas fa-rotate-left"></i> Undo</button>' +
+        '<button class="ds-btn ds-btn-ghost" id="dsBeRedo"><i class="fas fa-rotate-right"></i> Redo</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeHistory"><i class="fas fa-clock-rotate-left"></i> History</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBePreview"><i class="fas fa-up-right-from-square"></i> Preview</button>' +
         '<button class="ds-btn ds-btn-primary" id="dsBeSave"><i class="fas fa-floppy-disk"></i> Save</button>' +
@@ -44,8 +45,15 @@
     root.querySelector("#dsBeUndo").addEventListener("click", function () {
       if (bs.undo && bs.undo.canUndo()) { bs.undo.undo(); DS.toast("Reverted"); } else { DS.toast("Nothing to undo"); }
     });
+    root.querySelector("#dsBeRedo").addEventListener("click", function () {
+      if (bs.undo && bs.undo.canRedo()) { bs.undo.redo(); DS.toast("Redone"); } else { DS.toast("Nothing to redo"); }
+    });
     root.querySelector("#dsBeSave").addEventListener("click", function () {
-      saveNow().then(function () { DS.toast("Saved"); previewReload(); }).catch(function (e) { DS.toast(e.message); });
+      saveNow().then(function () {
+        var html = ""; try { html = (DS.HtmlEditor.getHtml && DS.HtmlEditor.getHtml()) || ""; } catch (e) {}
+        DS.addHistory("block", bs.type, { template: html || bs.html || "", settings: bs.store.settings[bs.type] || {} });
+        DS.toast("Saved"); previewReload();
+      }).catch(function (e) { DS.toast(e.message); });
     });
     root.querySelectorAll(".ds-seg button").forEach(function (b) {
       b.addEventListener("click", function () {
@@ -56,9 +64,11 @@
     });
     root.querySelector("#dsBeContent").addEventListener("click", function () { openContentDialog(type); });
     root.querySelector("#dsBeHistory").addEventListener("click", function () {
-      DS.openItemHistory("block", type, function (res) {
-        var tpl = res.template || "";
+      DS.openItemHistory("block", type, function (snap) {
+        if (!snap) { return; }
+        var tpl = snap.template || "";
         bs.undo.push(); bs.html = tpl; bs.lastHtml = tpl; bs.store.templates[bs.type] = tpl;
+        if (snap.settings) { bs.store.settings[bs.type] = snap.settings; }
         DS.HtmlEditor.setHtml(tpl); saveNow().then(previewReload);
       });
     });
