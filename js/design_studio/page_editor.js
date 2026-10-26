@@ -15,7 +15,7 @@
   // Frame blocks (top menu / footer) are locked on PAGES only. In a template the
   // whole layout is editable.
   function locked(type) { return st && st.kind !== "template" && isFrame(type); }
-  function blockLabel(type) { return (DS.REG[type] && DS.REG[type].label) || type; }
+  function blockLabel(type) { return DS.blockLabel(type); }
   // History identity + snapshot for the current page or template.
   function histKind() { return st.kind === "template" ? "template" : "page"; }
   function histId() { return st.kind === "template" ? st.tplId : st.slug; }
@@ -48,7 +48,10 @@
     var name = (params && params.name) || (DS.PAGE_LABELS[slug] || slug);
     var isT = kind === "template";
     st = { slug: slug, kind: kind, name: name, layout: { theme: {}, blocks: [] },
-           undo: null, scrollY: 0, tplId: (params && params.id) || slug, pageStyle: {} };
+           undo: null, scrollY: 0, tplId: (params && params.id) || slug, pageStyle: {}, dirty: false };
+    DS.setDirty(false);
+    // Load custom blocks so they appear in the palette (#1) and get proper labels.
+    DS.api("list_blocks", {}).then(function (r) { DS.ingestBlocks(r); renderPalette(); }).catch(function () {});
     st.undo = DsUndo(function () { return st.layout; },
       function (l) { st.layout = l; renderRail(); scheduleSave(0, true); });  // save THEN refresh, so the revert actually shows
 
@@ -106,16 +109,29 @@
         '<button data-dev="desktop" class="' + (ds.device === "desktop" ? "on" : "") + '">Desktop</button>' +
         '<button data-dev="mobile" class="' + (ds.device === "mobile" ? "on" : "") + '">Mobile</button>' +
       '</div>' +
+      '<button class="ds-btn ds-btn-ghost" id="dsPePlaceholders"><i class="fas fa-code"></i> Placeholders</button>' +
       '<button class="ds-btn ds-btn-ghost" id="dsPePreview"><i class="fas fa-up-right-from-square"></i> Preview</button>' +
       '<button class="ds-btn ds-btn-primary" id="dsPeSave"><i class="fas fa-floppy-disk"></i> Save</button>' +
     '</header>';
   }
 
   function wireTopbar(root, name) {
+    root.querySelector("#dsPePlaceholders").addEventListener("click", function () { DS.openPlaceholders({}); });
     root.querySelector("#dsPeBack").addEventListener("click", function () {
-      clearTimeout(saveTimer);                   // flush any pending edit before leaving
-      saveLayout().catch(function () {});
-      if (st && st.undo) { st.undo.clear(); } DS.dsGo("home");
+      function go(save) {
+        clearTimeout(saveTimer);
+        st.dirty = false; DS.setDirty(false);
+        if (save) {
+          saveLayout().then(function () {
+            DS.addHistory(histKind(), histId(), histSnapshot());
+            if (st && st.undo) { st.undo.clear(); } DS.dsGo("home");
+          }).catch(function (e) { DS.toast(e.message); });
+        } else {
+          if (st && st.undo) { st.undo.clear(); } DS.dsGo("home");
+        }
+      }
+      if (st && st.dirty) { DS.confirmLeave(function () { go(true); }, function () { go(false); }); }
+      else { clearTimeout(saveTimer); saveLayout().catch(function () {}); if (st && st.undo) { st.undo.clear(); } DS.dsGo("home"); }
     });
     root.querySelector("#dsPeUndo").addEventListener("click", function () {
       if (st.undo.canUndo()) { st.undo.undo(); DS.toast("Reverted"); } else { DS.toast("Nothing to undo"); }
@@ -132,6 +148,7 @@
     root.querySelector("#dsPeSave").addEventListener("click", function () {
       saveLayout().then(function () {
         DS.addHistory(histKind(), histId(), histSnapshot());   // record this Save in history
+        st.dirty = false; DS.setDirty(false);
         DS.toast("Saved"); refreshPreview();
       }).catch(function (e) { DS.toast(e.message); });
     });
@@ -172,6 +189,14 @@
       var b = document.createElement("button");
       b.className = "ds-pal-item"; b.type = "button";
       b.innerHTML = '<i class="fas fa-plus"></i> ' + DS.esc(DS.REG[type].label);
+      b.addEventListener("click", function () { addBlock(type); });
+      pal.appendChild(b);
+    });
+    // Custom blocks (blk_*) are generic and may be placed on any page or template (#1).
+    Object.keys(DS.customNames).forEach(function (type) {
+      var b = document.createElement("button");
+      b.className = "ds-pal-item ds-pal-custom"; b.type = "button";
+      b.innerHTML = '<i class="fas fa-plus"></i> ' + DS.esc(DS.customNames[type]);
       b.addEventListener("click", function () { addBlock(type); });
       pal.appendChild(b);
     });
@@ -279,6 +304,7 @@
     return DS.api("save_draft", { page: st.slug, device: "desktop", layout_json: JSON.stringify(st.layout) });
   }
   function scheduleSave(delay, refreshAfter) {
+    if (st) { st.dirty = true; DS.setDirty(true); }   // a change happened (save guard #3)
     clearTimeout(saveTimer);
     saveTimer = setTimeout(function () {
       saveLayout().then(function () { if (refreshAfter) { refreshPreview(); } }).catch(function (e) { DS.toast(e.message); });

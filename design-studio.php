@@ -33,6 +33,7 @@ $pub = preg_replace('/[^a-z0-9_-]/i', '', (string)($_GET['pub'] ?? ''));
   <script src="js/design_studio/page_editor.js?v=<?php echo @filemtime(__DIR__.'/js/design_studio/page_editor.js'); ?>"></script>
   <script src="js/design_studio/block_editor.js?v=<?php echo @filemtime(__DIR__.'/js/design_studio/block_editor.js'); ?>"></script>
   <script src="js/design_studio/home.js?v=<?php echo @filemtime(__DIR__.'/js/design_studio/home.js'); ?>"></script>
+  <script src="js/design_studio/placeholders.js?v=<?php echo @filemtime(__DIR__.'/js/design_studio/placeholders.js'); ?>"></script>
   <script src="js/design_studio/core.js?v=<?php echo @filemtime(__DIR__.'/js/design_studio/core.js'); ?>"></script>
 </body>
 </html>

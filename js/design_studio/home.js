@@ -12,8 +12,24 @@
   }
 
   // ---- tiles ------------------------------------------------------------
+  injectMenuStyles();
+  function injectMenuStyles() {
+    if (document.querySelector("style[data-ds-tilemenu]")) { return; }
+    var css =
+      ".ds-tile-wrap{position:relative;display:flex}" +
+      ".ds-tile-wrap>.ds-tile{flex:1}" +
+      ".ds-tile-menu-btn{position:absolute;top:8px;right:8px;z-index:2;width:30px;height:30px;border-radius:7px;border:1px solid #d7d7e0;background:rgba(255,255,255,.92);cursor:pointer;color:#2a2a33;display:flex;align-items:center;justify-content:center}" +
+      ".ds-tile-menu-btn:hover{background:#eef1f8}" +
+      ".ds-tile-menu{position:absolute;top:42px;right:8px;z-index:5;background:#fff;border:1px solid #d7d7e0;border-radius:8px;box-shadow:0 8px 24px rgba(20,20,43,.14);min-width:150px;overflow:hidden}" +
+      ".ds-tile-menu button{display:block;width:100%;text-align:left;padding:9px 13px;border:0;background:none;cursor:pointer;font:inherit;color:#2a2a33}" +
+      ".ds-tile-menu button:hover{background:#f3f4fa}" +
+      ".ds-tile-menu button.ds-danger{color:#b00020}";
+    var s = document.createElement("style"); s.setAttribute("data-ds-tilemenu", "1");
+    s.textContent = css; document.head.appendChild(s);
+  }
+
   function tile(opts) {
-    // opts: {thumb, icon, title, meta, onClick, cls}
+    // opts: {thumb, icon, title, meta, onClick, cls, menu:[{label,danger,onClick}]}
     var t = el("button", "ds-tile " + (opts.cls || ""));
     t.type = "button";
     var thumbHtml;
@@ -28,8 +44,32 @@
     t.addEventListener("click", opts.onClick);
     var ifr = t.querySelector("iframe");
     if (ifr) { ifr.addEventListener("load", function () { ifr.setAttribute("data-loaded", "1"); }); }
-    return t;
+    if (!opts.menu || !opts.menu.length) { return t; }
+    // Wrap so a ⋯ menu button can sit over the tile (buttons can't nest).
+    var wrap = el("div", "ds-tile-wrap");
+    wrap.appendChild(t);
+    var mb = el("button", "ds-tile-menu-btn"); mb.type = "button";
+    mb.title = "More"; mb.setAttribute("aria-label", "More"); mb.innerHTML = '<i class="fas fa-ellipsis"></i>';
+    wrap.appendChild(mb);
+    mb.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var open = wrap.querySelector(".ds-tile-menu");
+      if (open) { open.remove(); return; }
+      closeAllMenus();
+      var m = el("div", "ds-tile-menu");
+      opts.menu.forEach(function (it) {
+        var b = el("button", it.danger ? "ds-danger" : "");
+        b.type = "button"; b.textContent = it.label;
+        b.addEventListener("click", function (ev) { ev.stopPropagation(); m.remove(); it.onClick(); });
+        m.appendChild(b);
+      });
+      wrap.appendChild(m);
+    });
+    return wrap;
   }
+
+  function closeAllMenus() { document.querySelectorAll(".ds-tile-menu").forEach(function (m) { m.remove(); }); }
+  document.addEventListener("click", closeAllMenus);
 
   // ---- screen -----------------------------------------------------------
   DS.renderHome = function () {
@@ -44,6 +84,7 @@
           '<button data-dev="desktop" class="' + (ds.device === "desktop" ? "on" : "") + '">Desktop</button>' +
           '<button data-dev="mobile" class="' + (ds.device === "mobile" ? "on" : "") + '">Mobile</button>' +
         '</div>' +
+        '<button class="ds-btn ds-btn-ghost" id="dsPlaceholders"><i class="fas fa-code"></i> Placeholders</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsHistory"><i class="fas fa-clock-rotate-left"></i> History</button>' +
         '<button class="ds-btn ds-btn-primary" id="dsPublish"><i class="fas fa-rocket"></i> Publish</button>' +
       '</header>' +
@@ -63,6 +104,7 @@
     });
     root.querySelector("#dsPublish").addEventListener("click", openPublish);
     root.querySelector("#dsHistory").addEventListener("click", openHistory);
+    root.querySelector("#dsPlaceholders").addEventListener("click", function () { DS.openPlaceholders({}); });
 
     loadPageTiles();
     loadBlockTiles();
@@ -87,35 +129,74 @@
   }
 
   function pageTile(p) {
+    var custom = !!p.created_by;
     return tile({
       thumb: DS.previewUrl({ page: p.slug, thumb: true }),
       title: p.title || p.slug,
-      meta: p.created_by ? "Custom page" : null,
-      onClick: function () { DS.dsGo("page", { slug: p.slug, kind: "page" }); }
+      meta: custom ? "Custom page" : null,
+      onClick: function () { DS.dsGo("page", { slug: p.slug, kind: "page" }); },
+      menu: custom ? [
+        { label: "Rename", onClick: function () { openRename("page", p.slug, p.title || p.slug, DS.renderHome); } },
+        { label: "Delete", danger: true, onClick: function () { confirmDelete("page", p.slug, "page", DS.renderHome); } }
+      ] : null
     });
   }
 
   function loadBlockTiles() {
     var wrap = document.getElementById("dsBlockTiles");
     DS.api("list_blocks", {}).then(function (r) {
+      DS.ingestBlocks(r);
       var names = r.names || {};
       wrap.innerHTML = "";
       Object.keys(DS.REG).forEach(function (type) {
         wrap.appendChild(tile({
           thumb: DS.previewUrl({ block: type, thumb: true }),
-          title: DS.REG[type].label,
-          onClick: function () { DS.dsGo("block", { type: type }); }
+          title: DS.blockLabel(type),
+          onClick: function () { DS.dsGo("block", { type: type }); },
+          menu: [{ label: "Rename", onClick: function () { openRename("block", type, DS.blockLabel(type), DS.renderHome); } }]
         }));
       });
       Object.keys(names).forEach(function (type) {
         wrap.appendChild(tile({
           thumb: DS.previewUrl({ block: type, thumb: true }),
           title: names[type].name, meta: "Custom block",
-          onClick: function () { DS.dsGo("block", { type: type, name: names[type].name }); }
+          onClick: function () { DS.dsGo("block", { type: type, name: names[type].name }); },
+          menu: [
+            { label: "Rename", onClick: function () { openRename("block", type, names[type].name, DS.renderHome); } },
+            { label: "Delete", danger: true, onClick: function () { confirmDelete("block", type, "block", DS.renderHome); } }
+          ]
         }));
       });
       wrap.appendChild(tile({ icon: "fa-plus", title: "New block", cls: "ds-tile-new", onClick: openNewBlock }));
     }).catch(function (e) { wrap.innerHTML = '<p class="ds-err">' + DS.esc(e.message) + '</p>'; });
+  }
+
+  // ---- rename / delete --------------------------------------------------
+  function openRename(kind, id, current, after) {
+    dialog({
+      title: "Rename",
+      okLabel: "Save name",
+      body: '<label class="ds-f"><span>Name</span><input id="rnName" type="text" value="' + DS.esc(current || "") + '"></label>',
+      onOk: function (d) {
+        var name = d.querySelector("#rnName").value.trim();
+        if (!name) { throw new Error("Give it a name"); }
+        return DS.api("rename_item", { kind: kind, id: id, name: name }).then(function () { DS.toast("Renamed"); if (after) { after(); } });
+      }
+    });
+  }
+
+  function confirmDelete(kind, id, label, after) {
+    dialog({
+      title: "Delete " + label + "?",
+      okLabel: "Delete",
+      okClass: "ds-btn-danger",
+      body: '<p class="ds-dlg-say">This removes the ' + DS.esc(label) + ' from the design.' +
+        (kind === "block" ? " It will also be taken off any pages that used it." : "") +
+        ' You can’t undo this.</p>',
+      onOk: function () {
+        return DS.api("delete_item", { kind: kind, id: id }).then(function () { DS.toast("Deleted"); if (after) { after(); } });
+      }
+    });
   }
 
   // ---- dialog helper ----------------------------------------------------
@@ -220,10 +301,17 @@
   function openTemplatePicker() {
     var tpls = DS.ds._tpls || [];
     var rows = tpls.map(function (t) {
-      return '<button class="ds-pick-row" data-id="' + DS.esc(t.id) + '">' +
-        '<span class="ds-pick-name">' + DS.esc(t.name) + '</span>' +
-        (t.created_by ? '<span class="ds-tile-meta">yours</span>' : '<span class="ds-tile-meta">built-in</span>') +
-        '</button>';
+      var custom = !!t.created_by && t.id !== "tpl_default";
+      return '<div class="ds-pick-row-wrap" style="display:flex;align-items:center;gap:6px">' +
+        '<button class="ds-pick-row" data-id="' + DS.esc(t.id) + '" style="flex:1">' +
+          '<span class="ds-pick-name">' + DS.esc(t.name) + '</span>' +
+          (t.created_by ? '<span class="ds-tile-meta">yours</span>' : '<span class="ds-tile-meta">built-in</span>') +
+        '</button>' +
+        (custom
+          ? '<button class="ds-btn ds-btn-ghost ds-sm" data-rn="' + DS.esc(t.id) + '" title="Rename"><i class="fas fa-pen"></i></button>' +
+            '<button class="ds-btn ds-btn-ghost ds-sm ds-danger" data-del="' + DS.esc(t.id) + '" title="Delete"><i class="fas fa-trash"></i></button>'
+          : '') +
+        '</div>';
     }).join("");
     var dlg = dialog({
       title: "Page templates",
@@ -236,6 +324,18 @@
         var t = tpls.filter(function (x) { return x.id === id; })[0] || {};
         dlg.close();
         DS.dsGo("page", { slug: id, kind: "template", id: id, name: t.name });
+      });
+    });
+    dlg.el.querySelectorAll("[data-rn]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var id = b.dataset.rn, t = tpls.filter(function (x) { return x.id === id; })[0] || {};
+        dlg.close(); openRename("template", id, t.name, function () { DS.renderHome(); });
+      });
+    });
+    dlg.el.querySelectorAll("[data-del]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var id = b.dataset.del;
+        dlg.close(); confirmDelete("template", id, "template", function () { DS.renderHome(); });
       });
     });
   }

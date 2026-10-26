@@ -234,3 +234,96 @@ function dl_merge_mobile(array $desktop, array $mobileDiff): array {
     $theme = array_merge($desktop['theme'] ?? dl_default_theme(), $mobileDiff['theme'] ?? []);
     return ['theme' => $theme, 'blocks' => $blocks];
 }
+
+/**
+ * Placeholder reference ("manual"). Dependency-free static definitions of every
+ * {{token}} the engine can fill, so the Design Studio can list them and the user
+ * can copy them (e.g. for AI). Two parts:
+ *   'shared' — page-level groups (article / author / site). Every token in a
+ *              page's group is usable in ANY block on that page (the engine merges
+ *              the shared context beneath each block — see design/lib/placeholders.php).
+ *   'blocks' — the tokens each block's own context provides. Tokens with
+ *              'loop'=>true live inside that block's repeating {{#each ...}} list.
+ * Each item: ['token'=>'name', 'label'=>'Friendly name', 'example'=>'sample'].
+ */
+function dl_placeholder_defs(): array {
+    $P = function (string $t, string $l, string $e = '', bool $loop = false): array {
+        return ['token' => $t, 'label' => $l, 'example' => $e, 'loop' => $loop];
+    };
+    return [
+        'shared' => [
+            'article' => [
+                'label' => 'Article — usable in any block on the Article page',
+                'items' => [
+                    $P('title', 'Article title', 'France unveils new budget'),
+                    $P('standfirst', 'Standfirst / summary', 'A short summary of the story.'),
+                    $P('section', 'Section name', 'POLITICS'),
+                    $P('section_href', 'Section link', '/design/politics'),
+                    $P('date', 'Date (published)', 'March 16 2026'),
+                    $P('date_published', 'Date published', 'March 16 2026'),
+                    $P('date_updated', 'Date last updated', 'March 18 2026'),
+                    $P('read_time', 'Read time (minutes)', '4'),
+                    $P('image', 'Lead image URL', 'https://…/photo.jpg'),
+                    $P('url', 'Article link', '/design/read/123/slug'),
+                    $P('byline', 'Byline (author line)', 'By Jane Doe'),
+                    $P('author_name', 'Author name', 'Jane Doe'),
+                    $P('author_role', 'Author role', 'Senior Reporter'),
+                    $P('author_bio', 'Author bio', 'Jane writes about French politics.'),
+                    $P('author_photo', 'Author photo URL', 'https://…/jane.jpg'),
+                    $P('author_href', 'Author page link', '/design/author/5'),
+                ],
+            ],
+            'author' => [
+                'label' => 'Author — usable in any block on the Author page',
+                'items' => [
+                    $P('name', 'Author name', 'Jane Doe'),
+                    $P('role', 'Role', 'Senior Reporter'),
+                    $P('bio', 'Bio', 'Jane writes about French politics.'),
+                    $P('photo', 'Photo URL', 'https://…/jane.jpg'),
+                    $P('email', 'Email', 'jane@example.com'),
+                    $P('x_url', 'X / Twitter URL', 'https://x.com/jane'),
+                    $P('linkedin_url', 'LinkedIn URL', 'https://linkedin.com/in/jane'),
+                ],
+            ],
+            'site' => [
+                'label' => 'Site — usable in any block on any page',
+                'items' => [
+                    $P('site_name', 'Publication name', 'The Paris Eye'),
+                    $P('logo', 'Logo URL', '/design/site/logo.png'),
+                    $P('search_icon', 'Search icon URL', '/design/assets/search.svg'),
+                    $P('subscribe_href', 'Subscribe link', '/design/contact'),
+                    $P('contact_href', 'Contact link', '/design/contact'),
+                ],
+            ],
+        ],
+        'blocks' => [
+            'masthead'        => ['label' => 'Masthead', 'items' => [$P('site_name', 'Publication name'), $P('tagline', 'Tagline')]],
+            'section_title'   => ['label' => 'Section title', 'items' => [$P('name', 'Section name'), $P('cls', 'CSS class')]],
+            'advert'          => ['label' => 'Advert slot', 'items' => [$P('slot', 'Slot id'), $P('label', 'Placeholder label')]],
+            'ticker'          => ['label' => 'News ticker', 'items' => [$P('label', 'Ticker label'), $P('title', 'Item headline', '', true), $P('href', 'Item link', '', true)]],
+            'rich_text'       => ['label' => 'Rich text', 'items' => [$P('title', 'Heading'), $P('body', 'Body HTML')]],
+            'headlines_list'  => ['label' => 'Latest headlines', 'items' => [$P('headlines_label', 'Heading'), $P('title', 'Headline', '', true), $P('href', 'Link', '', true), $P('section', 'Section', '', true), $P('section_href', 'Section link', '', true), $P('meta', 'Meta (date · read time)', '', true)]],
+            'breaking_news'   => ['label' => 'Breaking news', 'items' => [$P('heading', 'Heading'), $P('viewall_href', 'View-all link'), $P('viewall_label', 'View-all label'), $P('title', 'Headline', '', true), $P('href', 'Link', '', true), $P('read_time', 'Read time', '', true)]],
+            'triple_box'      => ['label' => 'Triple box', 'items' => [$P('pkv_title', 'Box 1 title'), $P('pkv_href', 'Box 1 link'), $P('pkv_text', 'Box 1 text'), $P('clinics_title', 'Box 2 title'), $P('clinics_href', 'Box 2 link'), $P('clinics_text', 'Box 2 text'), $P('events_title', 'Box 3 title'), $P('events_href', 'Box 3 link')]],
+            'site_header'     => ['label' => 'Top menu / header', 'items' => [$P('logo', 'Logo URL'), $P('site_name', 'Publication name'), $P('search_icon', 'Search icon'), $P('subscribe_label', 'Subscribe label'), $P('name', 'Menu item name', '', true), $P('href', 'Menu item link', '', true)]],
+            'front_feature'   => ['label' => 'Front feature', 'items' => [$P('headlines_label', 'Sidebar heading'), $P('hero_ratio', 'Hero image ratio'), $P('hero.title', 'Hero title'), $P('hero.href', 'Hero link'), $P('hero.image', 'Hero image'), $P('hero.summary', 'Hero summary'), $P('hero.meta', 'Hero meta'), $P('title', 'Card title', '', true), $P('href', 'Card link', '', true), $P('image', 'Card image', '', true), $P('summary', 'Card summary', '', true)]],
+            'front_sections'  => ['label' => 'Section blocks', 'items' => [$P('name', 'Section name', '', true), $P('href', 'Section link', '', true), $P('viewall_label', 'View-all label', '', true), $P('title', 'Card title', '', true), $P('snippet', 'Card snippet', '', true), $P('image', 'Card image', '', true)]],
+            'section_lead'    => ['label' => 'Section lead', 'items' => [$P('headlines_label', 'Sidebar heading'), $P('lead.title', 'Lead title'), $P('lead.href', 'Lead link'), $P('lead.image', 'Lead image'), $P('lead.summary', 'Lead summary'), $P('title', 'Sidebar item', '', true), $P('href', 'Sidebar link', '', true), $P('meta', 'Sidebar meta', '', true)]],
+            'section_carousel' => ['label' => 'More stories carousel', 'items' => [$P('title', 'Carousel title'), $P('href', 'Item link', '', true), $P('image', 'Item image', '', true), $P('section', 'Item section', '', true)]],
+            'article_grid'    => ['label' => 'Article grid', 'items' => [$P('columns', 'Column count'), $P('title', 'Card title', '', true), $P('href', 'Card link', '', true), $P('image', 'Card image', '', true), $P('read_time', 'Read time', '', true)]],
+            'article_header'  => ['label' => 'Article header', 'items' => [$P('section', 'Section'), $P('section_href', 'Section link'), $P('title', 'Article title'), $P('standfirst', 'Standfirst'), $P('date', 'Date'), $P('read_time', 'Read time (minutes)'), $P('meta', 'Date · read time (combined)')]],
+            'article_hero'    => ['label' => 'Article hero image', 'items' => [$P('image', 'Image URL'), $P('title', 'Alt text / title')]],
+            'article_body'    => ['label' => 'Article body', 'items' => [$P('body', 'Article body HTML')]],
+            'article_byline'  => ['label' => 'Byline', 'items' => [$P('name', 'Author name'), $P('role', 'Author role'), $P('photo', 'Author photo'), $P('href', 'Author link'), $P('email', 'Email'), $P('linkedin_url', 'LinkedIn'), $P('byline', 'Byline text'), $P('read_all_label', '“Read all by…” label')]],
+            'article_related' => ['label' => 'Related articles', 'items' => [$P('heading', 'Heading'), $P('title', 'Card title', '', true), $P('href', 'Card link', '', true), $P('image', 'Card image', '', true), $P('section', 'Card section', '', true), $P('meta', 'Card meta', '', true)]],
+            'article_quickreads' => ['label' => 'Quick reads', 'items' => [$P('heading', 'Heading'), $P('title', 'Card title', '', true), $P('href', 'Card link', '', true), $P('section', 'Card section', '', true), $P('meta', 'Card meta', '', true)]],
+            'article_comments' => ['label' => 'Comments', 'items' => [$P('heading', 'Heading'), $P('note', 'Note'), $P('placeholder', 'Input placeholder'), $P('guest_label', 'Guest label'), $P('button_label', 'Button label')]],
+            'author_profile'  => ['label' => 'Author profile', 'items' => [$P('name', 'Name'), $P('role', 'Role'), $P('photo', 'Photo'), $P('crumb_label', 'Breadcrumb label'), $P('x_url', 'X / Twitter'), $P('linkedin_url', 'LinkedIn'), $P('email', 'Email'), $P('value', 'Bio paragraph', '', true)]],
+            'author_articles' => ['label' => 'Author article list', 'items' => [$P('heading', 'Heading'), $P('title', 'Article title', '', true), $P('href', 'Article link', '', true), $P('standfirst', 'Standfirst', '', true), $P('section', 'Section', '', true), $P('image', 'Image', '', true), $P('meta', 'Meta', '', true)]],
+            'footer'          => ['label' => 'Footer', 'items' => [$P('site_name', 'Publication name'), $P('blurb', 'Blurb'), $P('col1_label', 'Column 1 label'), $P('col2_label', 'Column 2 label'), $P('col3_label', 'Column 3 label'), $P('copyright', 'Copyright line'), $P('facebook', 'Facebook URL'), $P('twitter', 'X URL'), $P('instagram', 'Instagram URL'), $P('name', 'Link name', '', true), $P('url', 'Link URL', '', true)]],
+            'about_page'      => ['label' => 'About page', 'items' => [$P('site_name', 'Publication name'), $P('contact_href', 'Contact link'), $P('subscribe_href', 'Subscribe link')]],
+            'contact_page'    => ['label' => 'Contact page', 'items' => [$P('site_name', 'Publication name'), $P('action', 'Form action URL')]],
+            'search_results'  => ['label' => 'Search results', 'items' => [$P('q', 'Query'), $P('action', 'Search URL'), $P('placeholder', 'Input placeholder'), $P('count_label', 'Result count label'), $P('title', 'Result title', '', true), $P('href', 'Result link', '', true), $P('teaser', 'Result teaser', '', true), $P('date', 'Result date', '', true)]],
+        ],
+    ];
+}

@@ -85,6 +85,24 @@
     }).catch(function (e) { DS.toast(e.message); });
   };
 
+  // Save guard (#3): editors set DS._dirty on change and clear it on Save. The
+  // back button confirms before leaving, and a tab close/reload warns.
+  DS._dirty = false;
+  DS.setDirty = function (v) { DS._dirty = !!v; };
+  DS.confirmLeave = function (onSaveLeave, onLeave) {
+    var dlg = DS.dialog({ title: "Unsaved changes",
+      body: '<p class="ds-dlg-say">You’ve made changes. Save them before leaving?</p>' +
+        '<div class="ds-dlg-actions">' +
+          '<button class="ds-btn ds-btn-ghost" data-g="leave">Leave without saving</button>' +
+          '<button class="ds-btn ds-btn-primary" data-g="save">Save &amp; leave</button>' +
+        '</div>' });
+    dlg.el.querySelector('[data-g="save"]').addEventListener("click", function () { dlg.close(); onSaveLeave(); });
+    dlg.el.querySelector('[data-g="leave"]').addEventListener("click", function () { dlg.close(); onLeave(); });
+  };
+  window.addEventListener("beforeunload", function (e) {
+    if (DS._dirty) { e.preventDefault(); e.returnValue = ""; return ""; }
+  });
+
   var SCREENS = { home: "dsHome", page: "dsPage", block: "dsBlock" };
   function show(screen) {
     Object.keys(SCREENS).forEach(function (k) {

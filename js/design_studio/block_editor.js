@@ -13,7 +13,8 @@
   DS.renderBlockEditor = function (params) {
     var type = params && params.type;
     var name = (type && DS.REG[type] && DS.REG[type].label) || (params && params.name) || type || "block";
-    bs = { type: type, name: name, store: { templates: {}, settings: {}, names: {} }, html: "", undo: null, lastHtml: "" };
+    bs = { type: type, name: name, store: { templates: {}, settings: {}, names: {} }, html: "", undo: null, lastHtml: "", dirty: false };
+    DS.setDirty(false);
 
     var root = document.getElementById("dsBlock");
     root.innerHTML =
@@ -28,6 +29,7 @@
         '<button class="ds-btn ds-btn-ghost" id="dsBeContent"><i class="fas fa-sliders"></i> Content</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeUndo"><i class="fas fa-rotate-left"></i> Undo</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeRedo"><i class="fas fa-rotate-right"></i> Redo</button>' +
+        '<button class="ds-btn ds-btn-ghost" id="dsBePlaceholders"><i class="fas fa-code"></i> Placeholders</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeHistory"><i class="fas fa-clock-rotate-left"></i> History</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBePreview"><i class="fas fa-up-right-from-square"></i> Preview</button>' +
         '<button class="ds-btn ds-btn-primary" id="dsBeSave"><i class="fas fa-floppy-disk"></i> Save</button>' +
@@ -38,9 +40,23 @@
       '</div>';
 
     root.querySelector("#dsBeBack").addEventListener("click", function () {
-      clearTimeout(saveTimer); saveNow();        // flush any pending edit before leaving
-      if (bs.undo) { bs.undo.clear(); } DS.dsGo("home");
+      function go(save) {
+        clearTimeout(saveTimer);
+        bs.dirty = false; DS.setDirty(false);
+        if (save) {
+          saveNow().then(function () {
+            var html = ""; try { html = (DS.HtmlEditor.getHtml && DS.HtmlEditor.getHtml()) || ""; } catch (e) {}
+            DS.addHistory("block", bs.type, { template: html || bs.html || "", settings: bs.store.settings[bs.type] || {} });
+            if (bs.undo) { bs.undo.clear(); } DS.dsGo("home");
+          }).catch(function (e) { DS.toast(e.message); });
+        } else {
+          if (bs.undo) { bs.undo.clear(); } DS.dsGo("home");
+        }
+      }
+      if (bs && bs.dirty) { DS.confirmLeave(function () { go(true); }, function () { go(false); }); }
+      else { clearTimeout(saveTimer); saveNow(); if (bs.undo) { bs.undo.clear(); } DS.dsGo("home"); }
     });
+    root.querySelector("#dsBePlaceholders").addEventListener("click", function () { DS.openPlaceholders({ block: type }); });
     root.querySelector("#dsBePreview").addEventListener("click", function () { window.open(DS.previewUrl({ block: type }), "_blank"); });
     root.querySelector("#dsBeUndo").addEventListener("click", function () {
       if (bs.undo && bs.undo.canUndo()) { bs.undo.undo(); DS.toast("Reverted"); } else { DS.toast("Nothing to undo"); }
@@ -52,6 +68,7 @@
       saveNow().then(function () {
         var html = ""; try { html = (DS.HtmlEditor.getHtml && DS.HtmlEditor.getHtml()) || ""; } catch (e) {}
         DS.addHistory("block", bs.type, { template: html || bs.html || "", settings: bs.store.settings[bs.type] || {} });
+        bs.dirty = false; DS.setDirty(false);
         DS.toast("Saved"); previewReload();
       }).catch(function (e) { DS.toast(e.message); });
     });
@@ -134,6 +151,7 @@
     bs.undo.push();
     bs.lastHtml = html; bs.html = html;
     bs.store.templates[bs.type] = html;
+    bs.dirty = true; DS.setDirty(true);   // save guard (#3)
     saveAndRefresh();
   }
 

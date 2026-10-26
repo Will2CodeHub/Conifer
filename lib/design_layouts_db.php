@@ -139,6 +139,54 @@ function dl_list_versions(string $pub): array {
     return $out;
 }
 
+/* ---- per-item Save history (ten_design_history) ---------------------------
+ * Each explicit Save appends one snapshot for that page/block/template, kept in
+ * its own table so it persists across sessions and is revertable. Capped per item. */
+
+function dl_add_history(string $pub, string $kind, string $id, string $snapshot, ?string $user): void {
+    $conn = getDBConnection_TENAdmin();
+    if (!$conn) { return; }
+    $st = $conn->prepare("INSERT INTO ten_design_history (publication, item_kind, item_id, snapshot_json, created_by) VALUES (?, ?, ?, ?, ?)");
+    $st->bind_param('sssss', $pub, $kind, $id, $snapshot, $user);
+    $st->execute();
+    $st->close();
+    // Keep only the newest 60 for this item.
+    $cap = $conn->prepare("DELETE FROM ten_design_history WHERE publication=? AND item_kind=? AND item_id=? AND id NOT IN (
+        SELECT id FROM (SELECT id FROM ten_design_history WHERE publication=? AND item_kind=? AND item_id=? ORDER BY id DESC LIMIT 60) t)");
+    $cap->bind_param('ssssss', $pub, $kind, $id, $pub, $kind, $id);
+    $cap->execute();
+    $cap->close();
+    $conn->close();
+}
+
+/** History rows (id, created_at, created_by) for one item, newest first. */
+function dl_list_history(string $pub, string $kind, string $id): array {
+    $conn = getDBConnection_TENAdmin();
+    if (!$conn) { return []; }
+    $st = $conn->prepare("SELECT id, created_at, created_by FROM ten_design_history WHERE publication=? AND item_kind=? AND item_id=? ORDER BY id DESC");
+    $st->bind_param('sss', $pub, $kind, $id);
+    $st->execute();
+    $res = $st->get_result();
+    $out = [];
+    while ($r = $res->fetch_assoc()) { $out[] = $r; }
+    $st->close();
+    $conn->close();
+    return $out;
+}
+
+/** One history snapshot (decoded), or null. Scoped to the pub for safety. */
+function dl_get_history(string $pub, int $histId): ?array {
+    $conn = getDBConnection_TENAdmin();
+    if (!$conn) { return null; }
+    $st = $conn->prepare("SELECT snapshot_json FROM ten_design_history WHERE id=? AND publication=? LIMIT 1");
+    $st->bind_param('is', $histId, $pub);
+    $st->execute();
+    $row = $st->get_result()->fetch_assoc();
+    $st->close();
+    $conn->close();
+    return $row ? json_decode($row['snapshot_json'], true) : null;
+}
+
 /** A specific version's snapshot bundle, or null. */
 function dl_get_version(string $pub, int $version_no): ?array {
     $conn = getDBConnection_TENAdmin();
@@ -240,6 +288,7 @@ function dl_load_blocks_meta(string $pub): array {
         'templates' => is_array($raw['templates'] ?? null) ? $raw['templates'] : [],
         'settings'  => is_array($raw['settings'] ?? null)  ? $raw['settings']  : [],
         'names'     => is_array($raw['names'] ?? null)     ? $raw['names']     : [],
+        'labels'    => is_array($raw['labels'] ?? null)    ? $raw['labels']    : [],  // built-in block display-label overrides {type:label}
     ];
 }
 
@@ -385,12 +434,116 @@ function dl_rename_item(string $pub, string $kind, string $id, string $name, str
         return;
     }
 
-    // block
+    // block — either a custom (blk_*) block's name, or a built-in block's studio
+    // display label (an override stored in the _blocks 'labels' map; does not
+    // affect the rendered site).
     $meta = dl_load_blocks_meta($pub);
-    if (!isset($meta['names'][$id])) { throw new RuntimeException('Only blocks you created can be renamed'); }
-    if (($meta['names'][$id]['created_by'] ?? null) !== $user) {
-        throw new RuntimeException('You can only rename blocks you created');
+    if (isset($meta['names'][$id])) {
+        if (($meta['names'][$id]['created_by'] ?? null) !== $user) {
+            throw new RuntimeException('You can only rename blocks you created');
+        }
+        $meta['names'][$id]['name'] = $name;
+    } elseif (array_key_exists($id, dl_registry())) {
+        $meta['labels'][$id] = $name;   // built-in block: rename its studio label only
+    } else {
+        throw new RuntimeException('Unknown block');
     }
-    $meta['names'][$id]['name'] = $name;
     dl_save_draft($pub, '_blocks', 'desktop', $meta, $user);
+}
+
+/** Remove every instance of a block $type from all page drafts and templates.
+ *  Used when a custom block is deleted. Runs inside the caller's transaction. */
+function dl_strip_block_type(string $pub, string $type, ?string $user, mysqli $conn): void {
+    $drafts = dl_all_drafts($pub, $conn);
+    foreach ($drafts as $page => $devices) {
+        if ($page === '' || $page[0] === '_') { continue; }   // skip meta rows
+        foreach ($devices as $device => $layout) {
+            if (!is_array($layout) || empty($layout['blocks']) || !is_array($layout['blocks'])) { continue; }
+            $before = count($layout['blocks']);
+            $layout['blocks'] = array_values(array_filter($layout['blocks'], function ($b) use ($type) {
+                return ($b['type'] ?? '') !== $type;
+            }));
+            if (count($layout['blocks']) !== $before) {
+                dl_save_draft($pub, (string)$page, (string)$device, $layout, $user, $conn);
+            }
+        }
+    }
+    $tplRaw = dl_load_draft($pub, '_templates', 'desktop');
+    if ($tplRaw && isset($tplRaw['templates']) && is_array($tplRaw['templates'])) {
+        $changed = false;
+        foreach ($tplRaw['templates'] as &$t) {
+            if (empty($t['blocks']) || !is_array($t['blocks'])) { continue; }
+            $before = count($t['blocks']);
+            $t['blocks'] = array_values(array_filter($t['blocks'], function ($b) use ($type) {
+                return ($b['type'] ?? '') !== $type;
+            }));
+            if (count($t['blocks']) !== $before) { $changed = true; }
+        }
+        unset($t);
+        if ($changed) { dl_save_draft($pub, '_templates', 'desktop', $tplRaw, $user, $conn); }
+    }
+}
+
+/** Delete a user-created (blk_*) block: remove its meta and strip every instance
+ *  from pages + templates, atomically. Built-in blocks cannot be deleted. */
+function dl_delete_block(string $pub, string $type, string $user): void {
+    if (strpos($type, 'blk_') !== 0) { throw new RuntimeException('Built-in blocks cannot be deleted'); }
+    $meta = dl_load_blocks_meta($pub);
+    if (!isset($meta['names'][$type]) && !isset($meta['templates'][$type])) {
+        throw new RuntimeException('Block not found');
+    }
+    if (isset($meta['names'][$type]) && ($meta['names'][$type]['created_by'] ?? null) !== $user) {
+        throw new RuntimeException('You can only delete blocks you created');
+    }
+    $conn = getDBConnection_TENAdmin();
+    if (!$conn) { throw new RuntimeException('admin_ten connection failed'); }
+    $conn->begin_transaction();
+    try {
+        unset($meta['names'][$type], $meta['templates'][$type], $meta['settings'][$type], $meta['labels'][$type]);
+        dl_save_draft($pub, '_blocks', 'desktop', $meta, $user, $conn);
+        dl_strip_block_type($pub, $type, $user, $conn);
+        $conn->commit();
+    } catch (Throwable $e) {
+        $conn->rollback(); $conn->close(); throw $e;
+    }
+    $conn->close();
+}
+
+/** Delete a custom page: its meta row, its layout rows, and its assignment.
+ *  Built-in page types cannot be deleted. Creator-only. */
+function dl_delete_page(string $pub, string $slug, string $user): void {
+    $slug = strtolower(trim($slug));
+    foreach (dl_builtin_pages() as $b) {
+        if ($b['slug'] === $slug) { throw new RuntimeException('Built-in pages cannot be deleted'); }
+    }
+    $pages = dl_load_pages($pub);
+    $found = false; $kept = [];
+    foreach ($pages['pages'] as $p) {
+        if (($p['slug'] ?? '') === $slug) {
+            $found = true;
+            if (($p['created_by'] ?? null) !== $user) { throw new RuntimeException('You can only delete pages you created'); }
+            continue;
+        }
+        $kept[] = $p;
+    }
+    if (!$found) { throw new RuntimeException('Page not found'); }
+    $conn = getDBConnection_TENAdmin();
+    if (!$conn) { throw new RuntimeException('admin_ten connection failed'); }
+    $conn->begin_transaction();
+    try {
+        dl_save_draft($pub, '_pages', 'desktop', ['pages' => $kept], $user, $conn);
+        $del = $conn->prepare("DELETE FROM ten_design_layouts WHERE publication=? AND page_type=?");
+        $del->bind_param('ss', $pub, $slug);
+        $del->execute();
+        $del->close();
+        $assign = dl_load_assign($pub);
+        if (array_key_exists($slug, $assign)) {
+            unset($assign[$slug]);
+            dl_save_draft($pub, '_assign', 'desktop', ['assign' => $assign], $user, $conn);
+        }
+        $conn->commit();
+    } catch (Throwable $e) {
+        $conn->rollback(); $conn->close(); throw $e;
+    }
+    $conn->close();
 }

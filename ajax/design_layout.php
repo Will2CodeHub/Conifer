@@ -120,7 +120,7 @@ try {
 
         case 'list_blocks':
             $meta = dl_load_blocks_meta($pub);
-            echo json_encode(['success' => true, 'names' => $meta['names'], 'types' => array_keys($meta['templates'])]);
+            echo json_encode(['success' => true, 'names' => $meta['names'], 'types' => array_keys($meta['templates']), 'labels' => $meta['labels']]);
             break;
 
         case 'create_page':
@@ -148,6 +148,24 @@ try {
             if (!isAdmin()) { echo json_encode(['success' => false, 'message' => 'Admin permission required']); exit; }
             dl_rename_item($pub, (string)($_POST['kind'] ?? ''), (string)($_POST['id'] ?? ''), (string)($_POST['name'] ?? ''), $user);
             logActivity('design_rename', 'publication', 0, "rename $pub " . (string)($_POST['kind'] ?? '') . ":" . (string)($_POST['id'] ?? ''));
+            echo json_encode(['success' => true]);
+            break;
+
+        case 'placeholders':
+            // The placeholder "manual": static token/label/example definitions
+            // (dependency-free; see dl_placeholder_defs in lib/design_registry.php).
+            echo json_encode(['success' => true, 'placeholders' => dl_placeholder_defs()]);
+            break;
+
+        case 'delete_item':
+            if (!isAdmin()) { echo json_encode(['success' => false, 'message' => 'Admin permission required']); exit; }
+            $kind = (string)($_POST['kind'] ?? '');
+            $id   = (string)($_POST['id'] ?? '');
+            if ($kind === 'block')         { dl_delete_block($pub, $id, $user); }
+            elseif ($kind === 'page')      { dl_delete_page($pub, $id, $user); }
+            elseif ($kind === 'template')  { dl_delete_template($pub, $id, $user); }
+            else { echo json_encode(['success' => false, 'message' => 'Unknown kind']); exit; }
+            logActivity('design_delete', 'publication', 0, "delete $pub $kind:$id");
             echo json_encode(['success' => true]);
             break;
 
@@ -185,6 +203,22 @@ try {
             } else {
                 echo json_encode(['success' => false, 'message' => 'Unknown kind']);
             }
+            break;
+
+        case 'add_history':
+            if (!isAdmin()) { echo json_encode(['success' => false, 'message' => 'Admin permission required']); exit; }
+            $snap = (string)($_POST['snapshot_json'] ?? '');
+            if ($snap === '' || json_decode($snap, true) === null) { echo json_encode(['success' => false, 'message' => 'Invalid snapshot']); exit; }
+            dl_add_history($pub, (string)($_POST['kind'] ?? ''), (string)($_POST['id'] ?? ''), $snap, $user);
+            echo json_encode(['success' => true]);
+            break;
+
+        case 'list_history':
+            echo json_encode(['success' => true, 'history' => dl_list_history($pub, (string)($_POST['kind'] ?? $_GET['kind'] ?? ''), (string)($_POST['id'] ?? $_GET['id'] ?? ''))]);
+            break;
+
+        case 'get_history':
+            echo json_encode(['success' => true, 'snapshot' => dl_get_history($pub, (int)($_POST['hist_id'] ?? $_GET['hist_id'] ?? 0))]);
             break;
 
         case 'block_settings':

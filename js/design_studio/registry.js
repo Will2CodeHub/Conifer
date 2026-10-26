@@ -45,4 +45,22 @@
 
   // Blocks that belong to a page template's locked frame (header + footer).
   DS.FRAME_BLOCKS = { site_header: 1, footer: 1 };
+
+  // Custom-block names {type:name} and built-in label overrides {type:label},
+  // populated from the `list_blocks` AJAX response. The display label for any
+  // block type resolves: label override → custom name → built-in label → type.
+  DS.customNames = {};
+  DS.labels = {};
+  DS.ingestBlocks = function (r) {
+    r = r || {};
+    DS.customNames = {};
+    var names = r.names || {};
+    Object.keys(names).forEach(function (t) { DS.customNames[t] = names[t].name; });
+    DS.labels = r.labels || {};
+  };
+  DS.blockLabel = function (type) {
+    return DS.labels[type] || DS.customNames[type] || (DS.REG[type] && DS.REG[type].label) || type;
+  };
+  // True for a user-created block (no built-in PHP renderer).
+  DS.isCustomBlock = function (type) { return /^blk_/.test(String(type)); };
 })();
