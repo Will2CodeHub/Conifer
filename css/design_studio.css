@@ -351,6 +351,17 @@ body {
 .ds-insp-clear { border: 1px solid var(--ds-line-2); background: #fff; border-radius: 6px; cursor: pointer; font-size: 11px; color: var(--ds-muted); padding: 3px 6px; }
 .ds-insp-clear:hover { color: #b91c1c; border-color: #fecaca; }
 .ds-insp-range { width: 130px; accent-color: var(--ds-accent); }
+/* Plain-English "?" help marker on a control label. */
+.ds-help { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px;
+  margin-left: 4px; border-radius: 50%; border: 1px solid var(--ds-line-2); background: var(--ds-surface);
+  color: var(--ds-muted); font-size: 10px; font-weight: 700; font-style: normal; line-height: 1;
+  cursor: help; vertical-align: middle; }
+.ds-help:hover, .ds-help:focus { color: var(--ds-accent-ink); border-color: var(--ds-accent); background: var(--ds-canvas); outline: none; }
+.ds-insp-unit-static { font-size: 12px; color: var(--ds-muted); font-style: normal; align-self: center; }
+.ds-insp-divrow { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--ds-line-2); }
+.ds-coldiv-on { width: 16px; height: 16px; accent-color: var(--ds-accent); cursor: pointer; }
+.ds-coldiv-col { width: 30px; height: 26px; border: 1px solid var(--ds-line-2); border-radius: 6px; padding: 0; background: none; cursor: pointer; }
+.ds-coldiv-w { width: 56px; font: inherit; font-size: 12px; padding: 4px 6px; border: 1px solid var(--ds-line-2); border-radius: 6px; }
 .ds-insp-box4 { margin-bottom: 10px; }
 .ds-insp-b4lab { display: block; font-size: 12px; color: var(--ds-ink-2); margin-bottom: 5px; }
 .ds-insp-b4grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }

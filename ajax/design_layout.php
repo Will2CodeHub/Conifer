@@ -71,15 +71,22 @@ try {
             $sections = [];
             $conn = getDBConnection_TENAdmin();
             if ($conn) {
-                $st = $conn->prepare("SELECT name FROM main_menu
-                    WHERE edition = ? AND section_item = '1' AND parent_item = 0
-                    ORDER BY position ASC");
+                // Every section in this publication's header menu — top-level first,
+                // then sub-sections — so the designer can pull articles from any of
+                // them (e.g. News, Politics, Travel and any nested sections).
+                $st = $conn->prepare("SELECT DISTINCT name FROM main_menu
+                    WHERE edition = ? AND section_item = '1' AND name <> ''
+                    ORDER BY (parent_item = 0) DESC, position ASC, name ASC");
                 $st->bind_param('s', $pub);
                 $st->execute();
                 $res = $st->get_result();
+                $seen = [];
                 while ($row = $res->fetch_assoc()) {
                     $name = trim((string)$row['name']);
                     if ($name === '') { continue; }
+                    $key = strtolower($name);
+                    if (isset($seen[$key])) { continue; }
+                    $seen[$key] = true;
                     $slug = strtolower(str_replace(' ', '-', $name));
                     $sections[] = ['name' => $name, 'href' => '/design/' . $slug];
                 }

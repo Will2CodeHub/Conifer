@@ -135,9 +135,13 @@
     if (/^\/if$/.test(inner)) { return { cls: "end", text: "end" }; }
     if ((m = inner.match(ART_TOK_RE))) {
       var asec = (!m[1] || m[1].toLowerCase() === "latest") ? "Latest" : titleCaseSlug(m[1]);
-      var afld = { title: "headline", titlelink: "headline link", snippet: "snippet" }[m[3].toLowerCase()];
+      var af = m[3].toLowerCase();
+      var afld = { title: "headline", titlelink: "headline link", snippet: "snippet",
+        standfirst: "summary", summary: "summary", author: "author", byline: "author",
+        date: "date", datepublished: "date", dateupdated: "updated", readtime: "read time",
+        section: "section", image: "image" }[af] || af;
       var atext = asec + " · " + afld + " " + m[2];
-      if (m[3].toLowerCase() === "snippet") { atext += " (" + (m[4] || "40") + "w)"; }
+      if (af === "snippet" || af === "standfirst" || af === "summary") { atext += " (" + (m[4] || "40") + "w)"; }
       return { cls: "field", text: atext };
     }
     return { cls: "field", text: tokHumanize(inner) };
@@ -146,8 +150,9 @@
   // snippet word-count). Kept identical to the engine resolver in
   // design/lib/article_slots.php so both sides agree. Matches the INNER token
   // (no braces); ART_TOK_FULL_RE matches a whole {{…}} string.
-  var ART_TOK_RE = /^article:([a-z0-9-]*):(\d+):(title|titlelink|snippet)(?::(\d+))?$/i;
-  var ART_TOK_FULL_RE = /^\{\{\s*article:([a-z0-9-]*):(\d+):(title|titlelink|snippet)(?::(\d+))?\s*\}\}$/i;
+  var ART_TOK_FIELDS = "titlelink|title|snippet|standfirst|summary|author|byline|datepublished|dateupdated|date|readtime|section|image";
+  var ART_TOK_RE = new RegExp("^article:([a-z0-9-]*):(\\d+):(" + ART_TOK_FIELDS + ")(?::(\\d+))?$", "i");
+  var ART_TOK_FULL_RE = new RegExp("^\\{\\{\\s*article:([a-z0-9-]*):(\\d+):(" + ART_TOK_FIELDS + ")(?::(\\d+))?\\s*\\}\\}$", "i");
   function titleCaseSlug(slug) {
     return String(slug).replace(/-/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
   }
@@ -382,6 +387,7 @@
     rememberRange(); changed();
   }
   function insertNodeAtCaret(node) {
+    if (w.srcMode) { insertRawAtSrcCaret(nodeHtml(node)); return; }
     w.root.focus();
     var sel = restoreSelection();
     if (sel && sel.rangeCount) {
@@ -390,11 +396,36 @@
     } else { w.root.appendChild(node); }
     rememberRange(); changed();
   }
+  // Serialise a node to HTML (text nodes keep their text) so it can drop into the
+  // code textarea when the HTML view is open.
+  function nodeHtml(node) {
+    if (!node) { return ""; }
+    if (node.nodeType === 3) { return node.nodeValue || ""; }
+    var d = w.doc.createElement("div"); d.appendChild(node.cloneNode(true));
+    return d.innerHTML;
+  }
+  // Remember the code textarea's caret (it survives clicking a button/dropdown,
+  // but we store it so inserts always land exactly where the user last was).
+  function rememberSrcSel() {
+    if (!w.src) { return; }
+    w.srcSelStart = w.src.selectionStart; w.srcSelEnd = w.src.selectionEnd;
+  }
+  // Drop raw text/HTML at the remembered caret in the code textarea.
+  function insertRawAtSrcCaret(raw) {
+    var ta = w.src; if (!ta) { return; }
+    var p = (w.srcSelStart != null) ? w.srcSelStart : (ta.selectionStart || 0);
+    var e = (w.srcSelEnd != null) ? w.srcSelEnd : (ta.selectionEnd || p);
+    if (p > ta.value.length) { p = ta.value.length; } if (e > ta.value.length) { e = ta.value.length; }
+    ta.value = ta.value.slice(0, p) + raw + ta.value.slice(e);
+    ta.focus(); ta.selectionStart = ta.selectionEnd = p + raw.length;
+    w.srcSelStart = w.srcSelEnd = p + raw.length;
+    changed();
+  }
   function insertHR() { if (w.srcMode || !w.doc) { return; } insertNodeAtCaret(w.doc.createElement("hr")); }
   // Add a brand-new element (text, heading, line break, link, button, image,
   // divider or box) at the cursor.
   function insertElement(type) {
-    if (w.srcMode || !w.doc) { return; }
+    if (!w.doc) { return; }
     var el = null, nest = false;
     switch (type) {
       case "p": el = w.doc.createElement("p"); el.textContent = "New text"; break;
@@ -405,7 +436,7 @@
       case "subscribe":
         el = w.doc.createElement("a"); el.className = "dl-subscribe"; el.setAttribute("href", "/subscribe");
         el.textContent = "{{subscribe_label}}";
-        insertNodeAtCaret(el); tokenizeDom(el, w.doc); selectElement(el); return;
+        insertNodeAtCaret(el); if (!w.srcMode) { tokenizeDom(el, w.doc); selectElement(el); } return;
       case "img": el = w.doc.createElement("img"); el.setAttribute("src", IMG_PH); el.setAttribute("alt", "Image"); el.style.maxWidth = "100%"; el.style.height = "auto"; break;
       case "imgurl": openImageDialog(); return;   // custom image (not an article image)
       case "hr": el = w.doc.createElement("hr"); break;
@@ -415,15 +446,39 @@
       default: return;
     }
     insertSmart(el, nest);
-    selectElement(el);   // select it so it can be styled / typed into straight away
+    if (!w.srcMode) { selectElement(el); }   // select it so it can be styled / typed into straight away
   }
-  // Place a new node. When a box/column is selected it drops in at the TOP of
-  // that box (so you can reach the top of a column you just made); otherwise it
-  // goes in at the cursor. Container inserts always nest inside a selected box.
+  // True for elements that can hold other elements (a box, row, column, section…),
+  // so a new element can drop INSIDE them rather than beside them.
+  var NEST_TAGS = ["DIV", "SECTION", "ASIDE", "HEADER", "FOOTER", "NAV", "MAIN", "ARTICLE", "FORM", "UL", "OL", "FIGURE"];
+  function canNest(node) {
+    if (!node || node.nodeType !== 1) { return false; }
+    if (node.classList && node.classList.contains("dl-tok")) { return false; }
+    return NEST_TAGS.indexOf(node.tagName) !== -1;
+  }
+  // Place a new node relative to what is selected, so every spot is reachable:
+  //  • a box/column/container selected → drop IN at the top (fills empty cells and
+  //    reaches the top of a box — select the outer box to get above everything);
+  //  • any other element selected → drop right AFTER it;
+  //  • nothing selected → use the cursor, or append to the very end (empty canvas).
   function insertSmart(el, nest) {
-    // Insert where the cursor is (the last place clicked or typed in the editor).
-    // If there is no caret in the editor yet, insertNodeAtCaret appends to the end.
+    if (w.srcMode) { insertNodeAtCaret(el); return; }
+    var sel = w.selEl;
+    if (sel && sel !== w.root && sel.parentNode) {
+      if (canNest(sel)) { sel.insertBefore(el, sel.firstChild); }
+      else { sel.parentNode.insertBefore(el, sel.nextSibling); }
+      placeCaretInto(el); changed(); return;
+    }
     insertNodeAtCaret(el);
+  }
+  // Drop the caret inside a freshly inserted node so the user can type straight away.
+  function placeCaretInto(node) {
+    try {
+      w.root.focus();
+      var r = w.doc.createRange(); r.selectNodeContents(node); r.collapse(false);
+      var s = w.win.getSelection(); s.removeAllRanges(); s.addRange(r);
+      rememberRange();
+    } catch (e) {}
   }
   // Insert a custom image: upload a file, crop it, and save it to the image
   // store (crop_save_image.php → WebP in /article_images/…, returns an absolute
@@ -809,11 +864,7 @@
 
   // ---- source view + insert token --------------------------------------
   function insertToken(raw) {
-    if (w.srcMode) {
-      var ta = w.src, p = ta.selectionStart || 0;
-      ta.value = ta.value.slice(0, p) + raw + ta.value.slice(ta.selectionEnd || p);
-      ta.focus(); ta.selectionStart = ta.selectionEnd = p + raw.length; changed(); return;
-    }
+    if (w.srcMode) { insertRawAtSrcCaret(raw); return; }
     if (!w.doc) { return; }
     w.root.focus();
     var sel = w.win.getSelection();
@@ -858,11 +909,25 @@
       '<p class="ds-dlg-say">Drop in a live article. It fills with the chosen section’s latest stories on the site. Insert more than one and they number automatically (1, 2, 3…) as different stories — a headline and a snippet with the same number are the same article.</p>' +
       '<label class="ds-f"><span>Section</span><select id="dsArtSec">' + secOpts + '</select></label>' +
       '<label class="ds-f"><span>Show</span><select id="dsArtField">' +
-        '<option value="titlelink">Headline — links to the article</option>' +
-        '<option value="title">Headline — text only</option>' +
-        '<option value="snippet">Snippet — teaser text</option>' +
+        '<optgroup label="Headline">' +
+          '<option value="titlelink">Headline — links to the article</option>' +
+          '<option value="title">Headline — text only</option>' +
+        '</optgroup>' +
+        '<optgroup label="Text">' +
+          '<option value="snippet">Snippet — short teaser</option>' +
+          '<option value="standfirst">Summary / standfirst — full</option>' +
+        '</optgroup>' +
+        '<optgroup label="Details">' +
+          '<option value="author">Author (byline)</option>' +
+          '<option value="date">Date published</option>' +
+          '<option value="readtime">Read time</option>' +
+          '<option value="section">Section name</option>' +
+        '</optgroup>' +
+        '<optgroup label="Media">' +
+          '<option value="image">Article image</option>' +
+        '</optgroup>' +
       '</select></label>' +
-      '<label class="ds-f" id="dsArtWordsWrap"><span>Snippet length (words)</span>' +
+      '<label class="ds-f" id="dsArtWordsWrap"><span>Length (words)</span>' +
         '<input type="number" id="dsArtWords" min="1" step="1" value="40"></label>' +
       '<div class="ds-dlg-actions">' +
         '<button type="button" class="ds-btn" id="dsArtCancel">Cancel</button>' +
@@ -872,7 +937,7 @@
     var root = dlg.el;
     var fieldSel = root.querySelector("#dsArtField");
     var wordsWrap = root.querySelector("#dsArtWordsWrap");
-    function syncWords() { wordsWrap.style.display = (fieldSel.value === "snippet") ? "" : "none"; }
+    function syncWords() { wordsWrap.style.display = (fieldSel.value === "snippet" || fieldSel.value === "standfirst") ? "" : "none"; }
     fieldSel.addEventListener("change", syncWords); syncWords();
     root.querySelector("#dsArtCancel").addEventListener("click", function () { dlg.close(); });
     root.querySelector("#dsArtDo").addEventListener("click", function () {
@@ -880,7 +945,7 @@
       var field = fieldSel.value;
       var n = nextArtIndex(slug, field);
       var tok = "{{article:" + slug + ":" + n + ":" + field;
-      if (field === "snippet") {
+      if (field === "snippet" || field === "standfirst") {
         var wds = Math.max(1, parseInt(root.querySelector("#dsArtWords").value, 10) || 40);
         if (wds !== 40) { tok += ":" + wds; }
       }
@@ -896,6 +961,8 @@
       w.src.style.display = ""; w.frame.style.display = "none"; w.srcMode = true;
       if (w.container) { w.container.classList.add("ds-he-src-mode"); }
       w.src.focus();
+      try { w.src.selectionStart = w.src.selectionEnd = w.src.value.length; } catch (e) {}
+      rememberSrcSel();
     } else {
       var raw = w.src.value;
       w.srcMode = false;
@@ -981,6 +1048,10 @@
         '.ds-colsplit:hover{background:#2563eb}' +
         '.ds-padbar,.ds-marbar{position:fixed;z-index:40}' +
         '.ds-padbar.h,.ds-marbar.h{height:3px;cursor:ns-resize}.ds-padbar.v,.ds-marbar.v{width:3px;cursor:ew-resize}' +
+        // transparent grab zone around the thin line — easy to hit without thickening the visible bar
+        '.ds-padbar::before,.ds-marbar::before{content:"";position:absolute;background:transparent}' +
+        '.ds-padbar.h::before,.ds-marbar.h::before{left:0;right:0;top:-8px;bottom:-8px}' +
+        '.ds-padbar.v::before,.ds-marbar.v::before{top:0;bottom:0;left:-8px;right:-8px}' +
         '.ds-padbar{background:rgba(239,68,68,.65)}.ds-padbar:hover{background:#ef4444}' +
         '.ds-marbar{background:rgba(245,158,11,.7)}.ds-marbar:hover{background:#f59e0b}' +
         // a clearly visible, grabbable grip knob in the middle of each side
@@ -1485,9 +1556,14 @@
 
   // ---- control builders ----
   function group(title, inner) { return '<details class="ds-insp-group" open><summary>' + esc(title) + '</summary><div class="ds-insp-body">' + inner + '</div></details>'; }
-  function selRow(label, prop, opts) {
+  // A small "?" that explains a control in plain English (hover / focus tooltip).
+  function helpIcon(text) {
+    if (!text) { return ""; }
+    return ' <i class="ds-help" tabindex="0" role="note" title="' + esc(text) + '" aria-label="' + esc(text) + '">?</i>';
+  }
+  function selRow(label, prop, opts, help) {
     var c = cv(prop);
-    return '<label class="ds-insp-row"><span>' + esc(label) + '</span><select class="ds-insp-sel" data-prop="' + prop + '">' +
+    return '<label class="ds-insp-row"><span>' + esc(label) + helpIcon(help) + '</span><select class="ds-insp-sel" data-prop="' + prop + '">' +
       opts.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (o[0] === c ? " selected" : "") + '>' + esc(o[1]) + '</option>'; }).join("") +
       '</select></label>';
   }
@@ -1497,10 +1573,10 @@
       '<input type="color" class="ds-insp-color" data-prop="' + prop + '" value="' + c + '">' +
       '<button type="button" class="ds-insp-clear" data-prop="' + prop + '" title="Remove">&#10005;</button></span></label>';
   }
-  function lenRow(label, prop, units) {
+  function lenRow(label, prop, units, help) {
     units = units || ["px", "%", "rem", "em", "auto"];
     var c = cv(prop), isAuto = (c === "auto" || c === ""), n = numOf(c), u = unitOf(c) || "px";
-    return '<label class="ds-insp-row"><span>' + esc(label) + '</span><span class="ds-insp-len">' +
+    return '<label class="ds-insp-row"><span>' + esc(label) + helpIcon(help) + '</span><span class="ds-insp-len">' +
       '<input type="number" class="ds-insp-num" data-prop="' + prop + '" value="' + (isAuto ? "" : n) + '" placeholder="auto">' +
       '<select class="ds-insp-unit" data-prop="' + prop + '">' +
         units.map(function (x) { return '<option value="' + x + '"' + ((isAuto && x === "auto") || (!isAuto && x === u) ? " selected" : "") + '>' + x + '</option>'; }).join("") +
@@ -1525,10 +1601,49 @@
     var tracks = gtc.split(/\s+/);
     if (tracks.length < 2) { return ""; }
     var inputs = tracks.map(function (t, i) { return '<label class="ds-insp-colw"><em>Col ' + (i + 1) + '</em><input type="text" class="ds-insp-coltrack" data-i="' + i + '" value="' + esc(t) + '"></label>'; }).join("");
+    // Current divider state, read from the first non-first real column's left edge.
+    var kids = colDivKids(grid);
+    var probe = kids[1];
+    var bw = probe ? (parseFloat(probe.style.borderLeftWidth) || 0) : 0;
+    var divOn = !!(probe && bw > 0 && probe.style.borderLeftStyle && probe.style.borderLeftStyle !== "none");
+    var divCol = (probe && probe.style.borderLeftColor) ? rgbToHex(probe.style.borderLeftColor) : "#dddddd";
+    var divW = bw || 1;
+    var divider =
+      '<div class="ds-insp-divrow">' +
+        '<label class="ds-insp-row"><span>Line between columns' + helpIcon("Draws a vertical line in the gap between the columns, to separate them.") + '</span>' +
+          '<input type="checkbox" class="ds-coldiv-on"' + (divOn ? " checked" : "") + '></label>' +
+        '<label class="ds-insp-row"><span>Line colour</span><span class="ds-insp-col"><input type="color" class="ds-coldiv-col" value="' + esc(divCol) + '"></span></label>' +
+        '<label class="ds-insp-row"><span>Line thickness</span><span class="ds-insp-len"><input type="number" min="1" step="1" class="ds-coldiv-w" value="' + divW + '"><em class="ds-insp-unit-static">px</em></span></label>' +
+      '</div>';
     return group("Columns (" + tracks.length + ")",
       '<p class="ds-insp-note">Width of each column. Type a share (1, 2, 3) or a size (200px, 30%).</p>' +
       '<div class="ds-insp-cols">' + inputs + '</div>' +
-      '<button type="button" class="ds-insp-coleq">Make all equal</button>');
+      '<button type="button" class="ds-insp-coleq">Make all equal</button>' +
+      divider);
+  }
+  // Real column children of a grid/row (skips editor-only resize handles & decor).
+  function colDivKids(grid) {
+    if (!grid) { return []; }
+    return [].slice.call(grid.children).filter(function (k) {
+      return k.nodeType === 1 &&
+        !(k.classList && k.classList.contains("ds-colsplit")) &&
+        !(k.hasAttribute && k.hasAttribute("data-ds-decor"));
+    });
+  }
+  // Apply (or clear) the between-column divider from the inspector's controls.
+  function applyColDivider() {
+    var grid = w.gridEl; if (!grid || !w.inspector) { return; }
+    var onEl = w.inspector.querySelector(".ds-coldiv-on");
+    var colEl = w.inspector.querySelector(".ds-coldiv-col");
+    var wEl = w.inspector.querySelector(".ds-coldiv-w");
+    if (!onEl) { return; }
+    var on = onEl.checked;
+    var width = Math.max(1, parseInt(wEl && wEl.value, 10) || 1);
+    var color = (colEl && colEl.value) || "#dddddd";
+    colDivKids(grid).forEach(function (k, i) {
+      k.style.borderLeft = (on && i > 0) ? (width + "px solid " + color) : "";
+    });
+    changed();
   }
 
   // Full rich-text button row: inline styles, scripts, lists, links.
@@ -1570,13 +1685,15 @@
       formatBlockRow(el) +
       colRow("Text colour", "color") +
       colRow("Highlight", "backgroundColor") +
-      lenRow("Size", "fontSize") +
-      selRow("Weight", "fontWeight", WEIGHTS) +
-      selRow("Align", "textAlign", [["", "—"], ["left", "Left"], ["center", "Centre"], ["right", "Right"], ["justify", "Justify"]]) +
-      lenRow("Line height", "lineHeight", ["", "px", "em"]) +
-      lenRow("Letter spacing", "letterSpacing", ["px", "em"]) +
-      selRow("Capitalisation", "textTransform", [["", "—"], ["none", "Normal"], ["uppercase", "UPPERCASE"], ["lowercase", "lowercase"], ["capitalize", "Capitalise"]]) +
-      selRow("Decoration", "textDecorationLine", [["", "—"], ["none", "None"], ["underline", "Underline"], ["line-through", "Strikethrough"]]));
+      lenRow("Size", "fontSize", null, "How big the text is.") +
+      selRow("Weight", "fontWeight", WEIGHTS, "How thick or bold the text looks.") +
+      selRow("Align", "textAlign", [["", "—"], ["left", "Left"], ["center", "Centre"], ["right", "Right"], ["justify", "Justify"]], "Which edge the text lines up to. Justify stretches lines to both edges.") +
+      lenRow("Line height", "lineHeight", ["", "px", "em"], "The vertical space between lines of text. More height gives roomier, easier-to-read paragraphs.") +
+      lenRow("Letter spacing", "letterSpacing", ["px", "em"], "The gap between individual letters. A small increase makes small-caps or headings feel airy; a small decrease tightens them.") +
+      lenRow("Word spacing", "wordSpacing", ["px", "em"], "The gap between words. Nudge it up or down to loosen or tighten the overall line.") +
+      selRow("Kerning", "fontKerning", [["", "—"], ["normal", "On"], ["none", "Off"]], "Fine spacing the font suggests between specific letter pairs (such as ‘A’ and ‘V’). Usually best left On.") +
+      selRow("Capitalisation", "textTransform", [["", "—"], ["none", "Normal"], ["uppercase", "UPPERCASE"], ["lowercase", "lowercase"], ["capitalize", "Capitalise"]], "Forces the text into capitals, lower-case, or Capitalised Words — without retyping it.") +
+      selRow("Decoration", "textDecorationLine", [["", "—"], ["none", "None"], ["underline", "Underline"], ["line-through", "Strikethrough"]], "Adds an underline or a line through the text."));
   }
   function gSpacing() {
     var mode = w.spaceMode || "padding";
@@ -1604,16 +1721,18 @@
       (withCols ? '<div class="ds-insp-fmt"><button type="button" data-col="add">+ column</button><button type="button" data-col="rm">&minus; column</button></div>' : ""));
   }
 
-  // If the selected element is a numbered-article SNIPPET chip, return its parts
-  // so the inspector can offer a word-length control; otherwise null.
+  // If the selected element is a numbered-article SNIPPET or SUMMARY chip, return
+  // its parts so the inspector can offer a word-length control; otherwise null.
   function selectedArtSnippet(el) {
     if (!el || !el.classList || !el.classList.contains("dl-tok")) { return null; }
     var m = ART_TOK_FULL_RE.exec(el.getAttribute("data-tok") || "");
-    if (!m || m[3].toLowerCase() !== "snippet") { return null; }
-    return { slug: m[1], n: m[2], words: (m[4] ? parseInt(m[4], 10) : 40) };
+    if (!m) { return null; }
+    var f = m[3].toLowerCase();
+    if (f !== "snippet" && f !== "standfirst" && f !== "summary") { return null; }
+    return { slug: m[1], n: m[2], field: f, words: (m[4] ? parseInt(m[4], 10) : 40) };
   }
   function gArtSnippet(info) {
-    return group("Article snippet",
+    return group(info.field === "snippet" ? "Article snippet" : "Article summary",
       '<label class="ds-insp-row"><span>Length (words)</span><span class="ds-insp-len">' +
         '<input type="number" min="1" step="1" class="ds-insp-num ds-art-words" value="' + info.words + '"></span></label>');
   }
@@ -1711,13 +1830,24 @@
       artWords.addEventListener("change", function () {
         var el = w.selEl; if (!el) { return; }
         var m = ART_TOK_FULL_RE.exec(el.getAttribute("data-tok") || "");
-        if (!m || m[3].toLowerCase() !== "snippet") { return; }
+        if (!m) { return; }
+        var f = m[3].toLowerCase();
+        if (f !== "snippet" && f !== "standfirst" && f !== "summary") { return; }
         var n = Math.max(1, parseInt(artWords.value, 10) || 40);
-        var tok = "{{article:" + m[1] + ":" + m[2] + ":snippet" + (n !== 40 ? ":" + n : "") + "}}";
+        var tok = "{{article:" + m[1] + ":" + m[2] + ":" + f + (n !== 40 ? ":" + n : "") + "}}";
         el.setAttribute("data-tok", tok);
         el.textContent = tokInfo(tok).text;
         rememberRange(); changed();
       });
+    }
+    // Column divider — a line in the gap between grid/row columns.
+    var cdOn = ins.querySelector(".ds-coldiv-on");
+    if (cdOn) {
+      cdOn.addEventListener("change", applyColDivider);
+      var cdCol = ins.querySelector(".ds-coldiv-col");
+      var cdW = ins.querySelector(".ds-coldiv-w");
+      if (cdCol) { cdCol.addEventListener("input", applyColDivider); cdCol.addEventListener("change", applyColDivider); }
+      if (cdW) { cdW.addEventListener("input", applyColDivider); cdW.addEventListener("change", applyColDivider); }
     }
     ins.querySelectorAll(".ds-insp-num, .ds-insp-unit").forEach(function (i) {
       i.addEventListener("input", function () { applyLen(i.dataset.prop); });
@@ -1834,7 +1964,10 @@
       w.inspector = container.querySelector("#dsHeInsp");
       w.layers = container.querySelector("#dsHeLayers");
       w.insMenu = container.querySelector("#dsHeInsMenu");
-      w.src.addEventListener("input", changed);
+      w.src.addEventListener("input", function () { rememberSrcSel(); changed(); });
+      w.src.addEventListener("keyup", rememberSrcSel);
+      w.src.addEventListener("mouseup", rememberSrcSel);
+      w.src.addEventListener("blur", rememberSrcSel);
       buildRail(container);
       fillInsertMenu(w.type);
       renderInspector();
