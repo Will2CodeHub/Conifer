@@ -161,6 +161,21 @@
       img.classList.add("dl-tplimg");
     });
   }
+  // A styled placeholder saves as <span style="…">{{token}}</span>; on reload the
+  // tokenizer makes a fresh chip inside that span. Merge the wrapper's style onto
+  // the chip and unwrap it, so the style lives on the chip (one level) and editing
+  // the token again updates the same element instead of nesting more spans.
+  function hoistTokenStyles(root) {
+    [].slice.call(root.querySelectorAll("span.dl-tok-field")).forEach(function (chip) {
+      var p = chip.parentNode;
+      if (p && p.tagName === "SPAN" && !p.classList.contains("dl-tok") &&
+          p.getAttribute("style") && p.childNodes.length === 1) {
+        var ps = p.getAttribute("style") || "", cs = chip.getAttribute("style") || "";
+        chip.setAttribute("style", ps + (ps && cs ? ";" : "") + cs);
+        p.parentNode.replaceChild(chip, p);
+      }
+    });
+  }
   function tokenizeDom(root, doc) {
     var walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, null), nodes = [], n;
     while ((n = walker.nextNode())) { if (/\{\{[\s\S]*?\}\}/.test(n.nodeValue)) { nodes.push(n); } }
@@ -364,7 +379,7 @@
   // divider or box) at the cursor.
   function insertElement(type) {
     if (w.srcMode || !w.doc) { return; }
-    var el = null;
+    var el = null, nest = false;
     switch (type) {
       case "p": el = w.doc.createElement("p"); el.textContent = "New text"; break;
       case "h2": el = w.doc.createElement("h2"); el.textContent = "New heading"; break;
@@ -376,12 +391,131 @@
         el.textContent = "{{subscribe_label}}";
         insertNodeAtCaret(el); tokenizeDom(el, w.doc); selectElement(el); return;
       case "img": el = w.doc.createElement("img"); el.setAttribute("src", IMG_PH); el.setAttribute("alt", "Image"); el.style.maxWidth = "100%"; el.style.height = "auto"; break;
+      case "imgurl": openImageDialog(); return;   // custom image (not an article image)
       case "hr": el = w.doc.createElement("hr"); break;
-      case "div": el = w.doc.createElement("div"); el.textContent = "New box"; break;
+      case "div": el = w.doc.createElement("div"); el.textContent = "New box"; el.style.padding = "16px"; el.style.border = "1px dashed #cbd5e1"; nest = true; break;
+      case "row": el = makeFlexRow(2); nest = true; break;
+      case "columns": el = makeGridCols(2); nest = true; break;
       default: return;
     }
-    insertNodeAtCaret(el);
+    insertSmart(el, nest);
     selectElement(el);   // select it so it can be styled / typed into straight away
+  }
+  // Place a new node. When a box/column is selected it drops in at the TOP of
+  // that box (so you can reach the top of a column you just made); otherwise it
+  // goes in at the cursor. Container inserts always nest inside a selected box.
+  function insertSmart(el, nest) {
+    // Insert where the cursor is (the last place clicked or typed in the editor).
+    // If there is no caret in the editor yet, insertNodeAtCaret appends to the end.
+    insertNodeAtCaret(el);
+  }
+  // Insert a custom image: upload a file, crop it, and save it to the image
+  // store (crop_save_image.php → WebP in /article_images/…, returns an absolute
+  // URL that works on any publication's pages). Or paste a URL that is already
+  // online. The image drops in at the cursor position.
+  function openImageDialog() {
+    if (w.srcMode || !w.doc) { return; }
+    rememberRange();
+    var cropper = null;
+    var dlg = DS.dialog({ title: "Insert an image", body:
+      '<div class="ds-img-dlg">' +
+        '<div class="ds-img-drop" id="dsImgDrop">' +
+          '<i class="fas fa-cloud-arrow-up"></i>' +
+          '<p>Choose an image to upload &amp; crop</p>' +
+          '<input type="file" id="dsImgFile" accept="image/*">' +
+        '</div>' +
+        '<div class="ds-crop-wrap" id="dsCropWrap" hidden><img id="dsCropImg" alt=""></div>' +
+        '<div class="ds-crop-tools" id="dsCropTools" hidden>' +
+          '<span>Shape:</span>' +
+          '<button type="button" class="ds-btn ds-btn-ghost ds-sm" data-ar="NaN">Free</button>' +
+          '<button type="button" class="ds-btn ds-btn-ghost ds-sm" data-ar="1.7777">16:9</button>' +
+          '<button type="button" class="ds-btn ds-btn-ghost ds-sm" data-ar="1.3333">4:3</button>' +
+          '<button type="button" class="ds-btn ds-btn-ghost ds-sm" data-ar="1">Square</button>' +
+          '<button type="button" class="ds-btn ds-btn-ghost ds-sm" id="dsCropRot"><i class="fas fa-rotate-right"></i> Rotate</button>' +
+        '</div>' +
+        '<label class="ds-f"><span>Alt text (describes the image)</span><input type="text" id="dsImgAlt" placeholder="e.g. Eiffel Tower at dusk"></label>' +
+        '<details class="ds-img-url"><summary>Already online? Paste its address instead</summary>' +
+          '<label class="ds-f"><span>Image URL</span><input type="url" id="dsImgUrl" placeholder="https://…/photo.jpg"></label>' +
+        '</details>' +
+        '<div class="ds-dlg-actions">' +
+          '<button class="ds-btn ds-btn-primary" id="dsImgIns"><i class="fas fa-check"></i> Insert image</button>' +
+        '</div>' +
+      '</div>' });
+
+    var fileInput = dlg.el.querySelector("#dsImgFile");
+    var cropWrap = dlg.el.querySelector("#dsCropWrap");
+    var cropImg = dlg.el.querySelector("#dsCropImg");
+    var cropTools = dlg.el.querySelector("#dsCropTools");
+    var insBtn = dlg.el.querySelector("#dsImgIns");
+
+    function destroyCropper() { if (cropper) { try { cropper.destroy(); } catch (e) {} cropper = null; } }
+
+    fileInput.addEventListener("change", function () {
+      var f = fileInput.files && fileInput.files[0];
+      if (!f) { return; }
+      var reader = new FileReader();
+      reader.onload = function (ev) {
+        cropImg.src = ev.target.result;
+        cropWrap.hidden = false; cropTools.hidden = false;
+        destroyCropper();
+        if (window.Cropper) {
+          cropper = new Cropper(cropImg, { viewMode: 1, autoCropArea: 1, background: false, movable: true, zoomable: true });
+        }
+      };
+      reader.readAsDataURL(f);
+    });
+
+    dlg.el.querySelectorAll("[data-ar]").forEach(function (b) {
+      b.addEventListener("click", function () { if (cropper) { cropper.setAspectRatio(parseFloat(b.getAttribute("data-ar"))); } });
+    });
+    var rot = dlg.el.querySelector("#dsCropRot");
+    if (rot) { rot.addEventListener("click", function () { if (cropper) { cropper.rotate(90); } }); }
+
+    function placeImg(url) {
+      var img = w.doc.createElement("img");
+      img.setAttribute("src", url);
+      img.setAttribute("alt", (dlg.el.querySelector("#dsImgAlt").value || "").trim());
+      img.style.maxWidth = "100%"; img.style.height = "auto";
+      insertSmart(img, false); selectElement(img);
+      destroyCropper(); dlg.close();
+    }
+
+    insBtn.addEventListener("click", function () {
+      var url = (dlg.el.querySelector("#dsImgUrl").value || "").trim();
+      if (cropper) {
+        var canvas = cropper.getCroppedCanvas({ maxWidth: 2000, maxHeight: 2000 });
+        if (!canvas) { DS.toast("Could not read the crop"); return; }
+        var data = canvas.toDataURL("image/jpeg", 0.92);
+        insBtn.disabled = true; insBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading…';
+        fetch("crop_save_image.php", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: data, attribution: (dlg.el.querySelector("#dsImgAlt").value || "").trim() })
+        }).then(function (r) { return r.json(); }).then(function (j) {
+          if (j && j.status === "success" && j.url) { placeImg(j.url); }
+          else { insBtn.disabled = false; insBtn.innerHTML = '<i class="fas fa-check"></i> Insert image'; DS.toast((j && j.message) || "Upload failed"); }
+        }).catch(function (e) {
+          insBtn.disabled = false; insBtn.innerHTML = '<i class="fas fa-check"></i> Insert image'; DS.toast(e.message || "Upload failed");
+        });
+        return;
+      }
+      if (url) { placeImg(url); return; }
+      DS.toast("Choose an image to upload, or paste a URL");
+    });
+  }
+  function isContainerEl(el) {
+    return el && el.tagName && ["DIV", "SECTION", "ARTICLE", "ASIDE", "HEADER", "FOOTER", "LI", "NAV", "MAIN"].indexOf(el.tagName) !== -1;
+  }
+  function makeFlexRow(n) {
+    var d = w.doc.createElement("div"); d.style.display = "flex"; d.style.gap = "16px";
+    for (var i = 0; i < n; i++) { var c = w.doc.createElement("div"); c.style.flex = "1"; c.style.minWidth = "0"; c.style.padding = "12px"; c.style.border = "1px dashed #e2e8f0"; c.textContent = "Column " + (i + 1); d.appendChild(c); }
+    return d;
+  }
+  function makeGridCols(n) {
+    var d = w.doc.createElement("div"); d.style.display = "grid"; d.style.gap = "16px";
+    var tracks = []; for (var k = 0; k < n; k++) { tracks.push("1fr"); }
+    d.style.gridTemplateColumns = tracks.join(" ");
+    for (var i = 0; i < n; i++) { var c = w.doc.createElement("div"); c.style.padding = "12px"; c.style.border = "1px dashed #e2e8f0"; c.textContent = "Cell " + (i + 1); d.appendChild(c); }
+    return d;
   }
   function listSel(ordered) {
     if (w.srcMode || !w.doc) { return; }
@@ -496,6 +630,90 @@
       }
       function up() { w.doc.removeEventListener("mousemove", move); w.doc.removeEventListener("mouseup", up); mountGridHandles(grid); changed(); }
       w.doc.addEventListener("mousemove", move); w.doc.addEventListener("mouseup", up);
+    });
+  }
+
+  // ---- on-canvas spacing handles (Figma-style padding + margin) -------
+  // Overlay draggable bars at the selected element's PADDING edges (inner, red)
+  // and MARGIN edges (outer, blue). Drag one to change that side live, with a
+  // value tooltip. Works on any element (not placeholder chips). Decoration only
+  // (data-ds-decor) so the bars never serialize into the saved template.
+  function clearSpacingHandles() {
+    w._spaceEl = null;
+    if (w.doc) { w.doc.querySelectorAll(".ds-padbar,.ds-marbar,.ds-padband,.ds-marband,.ds-padlabel").forEach(function (n) { n.remove(); }); }
+  }
+  function mountSpacingHandles(el) {
+    clearSpacingHandles();
+    if (!el || !w.doc || el === w.root) { return; }
+    if (el.classList && el.classList.contains("dl-tok")) { return; } // not on placeholder chips
+    w._spaceEl = el;
+    renderSpacingHandles();
+  }
+  function renderSpacingHandles() {
+    var el = w._spaceEl; if (!el || !w.doc || !w.win) { return; }
+    w.doc.querySelectorAll(".ds-padbar,.ds-marbar,.ds-padband,.ds-marband").forEach(function (n) { n.remove(); });
+    var r = el.getBoundingClientRect();
+    var cs = w.win.getComputedStyle(el);
+    var num = function (v) { return parseFloat(v) || 0; };
+    var pt = num(cs.paddingTop), pr = num(cs.paddingRight), pb = num(cs.paddingBottom), pl = num(cs.paddingLeft);
+    var mt = num(cs.marginTop), mr = num(cs.marginRight), mb = num(cs.marginBottom), ml = num(cs.marginLeft);
+    function band(cls, st) { var b = w.doc.createElement("div"); b.className = cls; b.setAttribute("data-ds-decor", "1"); Object.assign(b.style, st); w.doc.body.appendChild(b); }
+    function bar(cls, side, type, st) {
+      var b = w.doc.createElement("div"); b.className = cls; b.setAttribute("data-ds-decor", "1"); b.setAttribute("contenteditable", "false");
+      Object.assign(b.style, st); bindSpaceDrag(b, side, type); w.doc.body.appendChild(b);
+    }
+    // Show ONE set at a time — the mode chosen by the Padding/Margin toggle in
+    // the inspector — so it is unambiguous which you are dragging.
+    var mode = w.spaceMode || "padding";
+    if (mode === "padding") {
+      // PADDING — bands + bars at the inner edges (red).
+      if (pt > 0) band("ds-padband", { left: r.left + "px", top: r.top + "px", width: r.width + "px", height: pt + "px" });
+      if (pb > 0) band("ds-padband", { left: r.left + "px", top: (r.bottom - pb) + "px", width: r.width + "px", height: pb + "px" });
+      if (pl > 0) band("ds-padband", { left: r.left + "px", top: (r.top + pt) + "px", width: pl + "px", height: (r.height - pt - pb) + "px" });
+      if (pr > 0) band("ds-padband", { left: (r.right - pr) + "px", top: (r.top + pt) + "px", width: pr + "px", height: (r.height - pt - pb) + "px" });
+      bar("ds-padbar h", "Top", "padding", { left: r.left + "px", top: (r.top + pt - 3) + "px", width: r.width + "px" });
+      bar("ds-padbar h", "Bottom", "padding", { left: r.left + "px", top: (r.bottom - pb - 4) + "px", width: r.width + "px" });
+      bar("ds-padbar v", "Left", "padding", { top: r.top + "px", left: (r.left + pl - 3) + "px", height: r.height + "px" });
+      bar("ds-padbar v", "Right", "padding", { top: r.top + "px", left: (r.right - pr - 4) + "px", height: r.height + "px" });
+    } else {
+      // MARGIN — bands + bars at the outer edges (blue).
+      if (mt > 0) band("ds-marband", { left: r.left + "px", top: (r.top - mt) + "px", width: r.width + "px", height: mt + "px" });
+      if (mb > 0) band("ds-marband", { left: r.left + "px", top: r.bottom + "px", width: r.width + "px", height: mb + "px" });
+      if (ml > 0) band("ds-marband", { left: (r.left - ml) + "px", top: r.top + "px", width: ml + "px", height: r.height + "px" });
+      if (mr > 0) band("ds-marband", { left: r.right + "px", top: r.top + "px", width: mr + "px", height: r.height + "px" });
+      bar("ds-marbar h", "Top", "margin", { left: r.left + "px", top: (r.top - mt - 3) + "px", width: r.width + "px" });
+      bar("ds-marbar h", "Bottom", "margin", { left: r.left + "px", top: (r.bottom + mb - 4) + "px", width: r.width + "px" });
+      bar("ds-marbar v", "Left", "margin", { top: r.top + "px", left: (r.left - ml - 3) + "px", height: r.height + "px" });
+      bar("ds-marbar v", "Right", "margin", { top: r.top + "px", left: (r.right + mr - 4) + "px", height: r.height + "px" });
+    }
+  }
+  function bindSpaceDrag(bar, side, type) {
+    bar.addEventListener("mousedown", function (e) {
+      e.preventDefault(); e.stopPropagation();
+      var el = w._spaceEl; if (!el) { return; }
+      var prop = type + side;                         // e.g. paddingTop / marginTop
+      var start = parseFloat(w.win.getComputedStyle(el)[prop]) || 0;
+      var sx = e.clientX, sy = e.clientY, inner = (type === "padding");
+      var label = w.doc.createElement("div"); label.className = "ds-padlabel"; label.setAttribute("data-ds-decor", "1");
+      label.style.background = inner ? "#ef4444" : "#f59e0b"; w.doc.body.appendChild(label);
+      function mv(ev) {
+        var dx = ev.clientX - sx, dy = ev.clientY - sy, d;
+        if (side === "Top") { d = inner ? dy : -dy; }
+        else if (side === "Bottom") { d = inner ? -dy : dy; }
+        else if (side === "Left") { d = inner ? dx : -dx; }
+        else { d = inner ? -dx : dx; }               // Right
+        var nv = Math.max(0, Math.round(start + d));
+        el.style[prop] = nv + "px";
+        label.textContent = (inner ? "padding " : "margin ") + side.toLowerCase() + ": " + nv;
+        label.style.left = (ev.clientX + 12) + "px"; label.style.top = (ev.clientY + 12) + "px";
+        renderSpacingHandles();
+      }
+      function up() {
+        w.doc.removeEventListener("mousemove", mv); w.doc.removeEventListener("mouseup", up);
+        label.remove(); changed();
+        setTimeout(function () { if (w.selEl === el) { renderInspector(); } }, 0);
+      }
+      w.doc.addEventListener("mousemove", mv); w.doc.addEventListener("mouseup", up);
     });
   }
 
@@ -618,7 +836,19 @@
       p.removeChild(region);
     });
     clone.querySelectorAll(".dl-tok").forEach(function (t) {
-      t.parentNode.replaceChild(w.doc.createTextNode(t.getAttribute("data-tok") || ""), t);
+      var raw = t.getAttribute("data-tok") || "";
+      // A styled placeholder (the user coloured/resized a {{token}}) must keep its
+      // styling: emit a plain <span style="…">{{token}}</span> so the engine still
+      // fills the token AND the style survives. Unstyled tokens → bare text, as before.
+      var style = t.getAttribute("style");
+      if (style && style.trim() && t.classList.contains("dl-tok-field")) {
+        var sp = w.doc.createElement("span");
+        sp.setAttribute("style", style);
+        sp.appendChild(w.doc.createTextNode(raw));
+        t.parentNode.replaceChild(sp, t);
+      } else {
+        t.parentNode.replaceChild(w.doc.createTextNode(raw), t);
+      }
     });
     clone.querySelectorAll(".ds-colsplit").forEach(function (s) { s.remove(); });
     clone.querySelectorAll(".ds-he-sel, .ds-he-hl").forEach(function (e) {
@@ -638,7 +868,7 @@
   function changed() {
     rememberRange();
     clearTimeout(changeTimer);
-    changeTimer = setTimeout(function () { if (w.onChange) { w.onChange(getTemplate()); } }, 350);
+    changeTimer = setTimeout(function () { renderLayers(); if (w.onChange) { w.onChange(getTemplate()); } }, 350);
   }
 
   // ---- load ------------------------------------------------------------
@@ -667,6 +897,17 @@
         '.ds-col-cell{min-height:24px;outline:1px dashed #e2e8f0;outline-offset:2px}' +
         '.ds-colsplit{background:rgba(37,99,235,.45);border-radius:3px;cursor:col-resize}' +
         '.ds-colsplit:hover{background:#2563eb}' +
+        '.ds-padbar,.ds-marbar{position:fixed;z-index:40}' +
+        '.ds-padbar.h,.ds-marbar.h{height:3px;cursor:ns-resize}.ds-padbar.v,.ds-marbar.v{width:3px;cursor:ew-resize}' +
+        '.ds-padbar{background:rgba(239,68,68,.65)}.ds-padbar:hover{background:#ef4444}' +
+        '.ds-marbar{background:rgba(245,158,11,.7)}.ds-marbar:hover{background:#f59e0b}' +
+        // a clearly visible, grabbable grip knob in the middle of each side
+        '.ds-padbar::after,.ds-marbar::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);border:1.5px solid #fff;border-radius:3px;box-shadow:0 1px 3px rgba(0,0,0,.35)}' +
+        '.ds-padbar.h::after,.ds-marbar.h::after{width:28px;height:9px}.ds-padbar.v::after,.ds-marbar.v::after{width:9px;height:28px}' +
+        '.ds-padbar::after{background:#ef4444}.ds-marbar::after{background:#f59e0b}' +
+        '.ds-padband{position:fixed;z-index:39;background:rgba(239,68,68,.14);pointer-events:none}' +
+        '.ds-marband{position:fixed;z-index:38;background:rgba(245,158,11,.16);pointer-events:none}' +
+        '.ds-padlabel{position:fixed;z-index:41;background:#ef4444;color:#fff;font:600 11px/1 Inter,system-ui,sans-serif;padding:2px 6px;border-radius:4px;pointer-events:none;white-space:nowrap}' +
         '.ds-he-hl{outline:2px solid #2563eb !important;outline-offset:2px}' +
         '.ds-he-sel{outline:2px solid #2563eb !important;outline-offset:1px}' +
         '::selection{background:#bfdbfe}' +
@@ -677,12 +918,14 @@
       w.root.innerHTML = parts.html || "";
       w.selEl = null; w.gridEl = null;
       tokenizeDom(w.root, w.doc);
+      hoistTokenStyles(w.root);
       softenTemplateImages(w.root);
       decorateLoops(w.root, w.doc);
       try { w.doc.execCommand("defaultParagraphSeparator", false, "p"); } catch (e) {}
       w.root.addEventListener("input", changed);
       w.root.addEventListener("keyup", rememberRange);
       w.root.addEventListener("mouseup", rememberRange);
+      w.win.addEventListener("scroll", function () { if (w._spaceEl) { renderSpacingHandles(); } }, true);
       // Click an element to SELECT it for the style inspector; clicking a
       // placeholder also range-selects it so the toolbar can style it.
       w.root.addEventListener("click", function (e) {
@@ -709,7 +952,8 @@
           rememberRange(); changed();
         }
       });
-      syncToolbar();
+      selectElement(null);
+      renderLayers();
       // Native drag of content reflows the editor into a mess; allow only the
       // column resize handles to be dragged.
       w.root.addEventListener("dragstart", function (e) {
@@ -826,16 +1070,177 @@
       styleEl("width", v === "" ? "" : (v + u));
     }
   }
+  // Populate the placeholder picker with EVERY placeholder the engine knows,
+  // grouped: this block first, then the shared page contexts (article / author /
+  // site), then every other block. The local sets render immediately so it is
+  // never empty; the full catalogue (from the `placeholders` AJAX) replaces it.
   function fillInsertMenu(type) {
     if (!w.insSel) { return; }
-    w.insSel.innerHTML = "";
-    var first = document.createElement("option"); first.value = ""; first.textContent = "Placeholder…"; w.insSel.appendChild(first);
-    var og1 = document.createElement("optgroup"); og1.label = isCustomBlock(type) ? "Latest stories" : "This block";
-    fieldsFor(type).forEach(function (f) { var o = document.createElement("option"); o.value = f; o.textContent = tokInfo(f).text; og1.appendChild(o); });
-    if (og1.children.length) { w.insSel.appendChild(og1); }
-    var og2 = document.createElement("optgroup"); og2.label = "General";
-    GLOBAL_FIELDS.forEach(function (p) { var o = document.createElement("option"); o.value = p[0]; o.textContent = p[1]; og2.appendChild(o); });
-    w.insSel.appendChild(og2);
+    function opt(val, label) { var o = document.createElement("option"); o.value = val; o.textContent = label; return o; }
+    function optgrp(label, pairs) {
+      if (!pairs || !pairs.length) { return null; }
+      var g = document.createElement("optgroup"); g.label = label;
+      pairs.forEach(function (p) { g.appendChild(opt(p[0], p[1])); });
+      return g;
+    }
+    function render(groups) {
+      w.insSel.innerHTML = "";
+      w.insSel.appendChild(opt("", "Insert placeholder…"));
+      groups.forEach(function (g) { if (g) { w.insSel.appendChild(g); } });
+    }
+    function itemsOf(grp) {
+      return (grp.items || []).map(function (it) {
+        var val = (it.token === "body") ? "{{{body}}}" : ("{{" + it.token + "}}");
+        return [val, it.label + (it.loop ? " (in list)" : "")];
+      });
+    }
+    // Immediate local set so the picker is never empty.
+    var localThis = fieldsFor(type).map(function (f) { return [f, tokInfo(f).text]; });
+    render([optgrp(isCustomBlock(type) ? "This block (latest stories)" : "This block", localThis), optgrp("General", GLOBAL_FIELDS)]);
+    // Full catalogue — every placeholder, grouped.
+    if (DS.loadPlaceholders) {
+      DS.loadPlaceholders().then(function (defs) {
+        if (w.type !== type) { return; }
+        var blocks = defs.blocks || {}, shared = defs.shared || {}, groups = [];
+        if (blocks[type]) { groups.push(optgrp("This block — " + (blocks[type].label || type), itemsOf(blocks[type]))); }
+        else if (localThis.length) { groups.push(optgrp(isCustomBlock(type) ? "This block (latest stories)" : "This block", localThis)); }
+        Object.keys(shared).forEach(function (k) { groups.push(optgrp(shared[k].label || k, itemsOf(shared[k]))); });
+        Object.keys(blocks).forEach(function (t) { if (t !== type) { groups.push(optgrp(blocks[t].label || t, itemsOf(blocks[t]))); } });
+        render(groups);
+      }).catch(function () { /* keep the local set */ });
+    }
+  }
+
+  // ---- left rail: Insert (elements), Placeholder (scoped tokens), HTML ----
+  function buildRail(container) {
+    var insBtn = container.querySelector("#dsHeIns");
+    var insMenu = w.insMenu;
+    var items = [["p", "Text paragraph"], ["h2", "Heading"], ["a", "Link"], ["button", "Button"],
+      ["subscribe", "Subscribe button"], ["imgurl", "Image (from a URL)"], ["img", "Image placeholder"], ["hr", "Divider line"],
+      ["div", "Box / container"], ["row", "Row (side by side)"], ["columns", "Columns (grid)"], ["br", "Line break"]];
+    insMenu.innerHTML = items.map(function (o) { return '<button type="button" data-ins="' + o[0] + '">' + esc(o[1]) + "</button>"; }).join("");
+    insBtn.addEventListener("click", function (e) { e.preventDefault(); insMenu.hidden = !insMenu.hidden; });
+    insMenu.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest("button[data-ins]") : null;
+      if (!b) { return; }
+      insMenu.hidden = true; insertElement(b.getAttribute("data-ins"));
+    });
+    document.addEventListener("click", function (e) {
+      if (!insMenu.hidden && !insMenu.contains(e.target) && e.target !== insBtn && !insBtn.contains(e.target)) { insMenu.hidden = true; }
+    });
+
+    w.insSel = container.querySelector("#dsHeTokSel");
+    w.insSel.addEventListener("mousedown", function () { rememberRange(); });
+    w.insSel.addEventListener("change", function () { if (w.insSel.value !== "") { insertToken(w.insSel.value); } w.insSel.value = ""; });
+
+    // The raw-HTML toggle now lives in the editor's top header (block_editor.js);
+    // keep this wiring only if a rail button is present.
+    w.srcBtn = container.querySelector("#dsHeSrcBtn");
+    if (w.srcBtn) {
+      w.srcBtn.addEventListener("click", function (e) {
+        e.preventDefault();
+        var src = toggleSource();
+        w.srcBtn.classList.toggle("ds-on", src);
+        w.srcBtn.innerHTML = src ? '<i class="fas fa-eye"></i> Visual editor' : '<i class="fas fa-code"></i> Edit HTML';
+      });
+    }
+  }
+
+  // ---- layers tree (click to select; mirrors canvas selection) ----------
+  function layerLabel(el) {
+    if (el.classList && el.classList.contains("dl-tok")) {
+      var raw = el.getAttribute("data-tok") || ""; return tokInfo(raw).text || "token";
+    }
+    var tag = (el.tagName || "").toLowerCase();
+    var map = { h1: "Heading", h2: "Heading", h3: "Subheading", h4: "Subheading", p: "Text",
+      a: "Link", img: "Image", ul: "List", ol: "List", li: "List item", button: "Button",
+      span: "Text", div: "Box", section: "Section", header: "Header", footer: "Footer",
+      nav: "Navigation", article: "Card", aside: "Sidebar", figure: "Figure", time: "Date" };
+    return map[tag] || (tag ? tag.charAt(0).toUpperCase() + tag.slice(1) : "Element");
+  }
+  function layerIcon(el) {
+    var k = resolveKind(el);
+    return { heading: "fa-heading", body: "fa-align-left", meta: "fa-tag", image: "fa-image",
+      link: "fa-link", icon: "fa-icons", list: "fa-table-cells", container: "fa-square",
+      text: "fa-font" }[k] || "fa-square";
+  }
+  function renderLayers() {
+    var host = w.layers; if (!host || !w.root) { return; }
+    host.innerHTML = "";
+    var MAX = 120, n = 0;
+    var dragEl = null;   // shared by every row built in this render (drag-to-reorder)
+    (function walk(node, depth) {
+      var kids = node.children; if (!kids) { return; }
+      for (var i = 0; i < kids.length; i++) {
+        var el = kids[i];
+        if (el.hasAttribute && (el.hasAttribute("data-ds-decor") || el.hasAttribute("data-ds-loopwrap"))) { continue; }
+        if (el.classList && (el.classList.contains("dl-tok-loop") || el.classList.contains("dl-tok-cond") || el.classList.contains("dl-tok-end"))) { continue; }
+        if (n++ > MAX) { return; }
+        var row = document.createElement("button");
+        row.type = "button";
+        row.className = "ds-he-layer" + (el === w.selEl ? " on" : "");
+        row.style.paddingLeft = (6 + depth * 12) + "px";
+        row.setAttribute("draggable", "true");
+        row.innerHTML = '<i class="fas fa-grip-vertical ds-he-grip"></i><i class="fas ' + layerIcon(el) + '"></i><span class="ds-he-layer-t">' + esc(layerLabel(el)) + '</span>';
+        (function (target) {
+          row.addEventListener("click", function () { selectElement(target); });
+          row.addEventListener("dragstart", function (e) {
+            dragEl = target; row.classList.add("ds-he-dragging");
+            try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ""); } catch (_) {}
+          });
+          row.addEventListener("dragend", function () { row.classList.remove("ds-he-dragging"); clearDropCues(host); });
+          row.addEventListener("dragover", function (e) {
+            if (!dragEl || dragEl === target) { return; }
+            e.preventDefault();
+            var rect = row.getBoundingClientRect();
+            var inside = isContainerEl(target) && !target.classList.contains("dl-tok");
+            var zone = inside && (e.clientY - rect.top) > rect.height * 0.33 && (e.clientY - rect.top) < rect.height * 0.67
+              ? "in" : ((e.clientY - rect.top) > rect.height / 2 ? "after" : "before");
+            clearDropCues(host);
+            row.classList.add(zone === "in" ? "ds-drop-in" : (zone === "after" ? "ds-drop-after" : "ds-drop-before"));
+            row._zone = zone;
+          });
+          row.addEventListener("drop", function (e) {
+            e.preventDefault();
+            var moved = dragEl, zone = row._zone || "before"; dragEl = null; clearDropCues(host);
+            if (!moved || moved === target || moved.contains(target)) { return; }
+            try {
+              if (zone === "in") { target.insertBefore(moved, target.firstChild); }
+              else if (zone === "after") { target.parentNode.insertBefore(moved, target.nextSibling); }
+              else { target.parentNode.insertBefore(moved, target); }
+            } catch (_) { return; }
+            changed(); renderLayers(); selectElement(moved);
+          });
+        })(el);
+        host.appendChild(row);
+        if (!(el.classList && el.classList.contains("dl-tok"))) { walk(el, depth + 1); }
+      }
+    })(w.root, 0);
+    if (!host.children.length) { host.innerHTML = '<div class="ds-he-layers-empty">Nothing here yet.</div>'; }
+  }
+  function clearDropCues(host) {
+    host.querySelectorAll(".ds-drop-before,.ds-drop-after,.ds-drop-in").forEach(function (r) {
+      r.classList.remove("ds-drop-before", "ds-drop-after", "ds-drop-in");
+    });
+  }
+
+  // ---- kind resolver: map a selected node to a taxonomy kind ------------
+  function resolveKind(el) {
+    if (!el || el.nodeType !== 1) { return "container"; }
+    var tag = (el.tagName || "").toLowerCase();
+    if (el.classList && el.classList.contains("dl-tok")) {
+      if (el.classList.contains("dl-tok-field")) { return DS.tokenKind(el.getAttribute("data-tok") || ""); }
+      return "list"; // a loop/cond chip selected
+    }
+    if (tag === "img" || (el.classList && el.classList.contains("dl-tplimg"))) { return "image"; }
+    if (tag === "a" || tag === "button") { return "link"; }
+    if (cv("display", el).indexOf("grid") !== -1) { return "list"; }
+    if (el.querySelector && el.querySelector(".dl-tok-loop")) { return "list"; }
+    if (tag === "h1" || tag === "h2" || tag === "h3" || tag === "h4") { return "heading"; }
+    if (tag === "p" || tag === "blockquote") { return "body"; }
+    if (tag === "small" || tag === "time" || tag === "em") { return "meta"; }
+    if (tag === "ul" || tag === "ol" || tag === "li" || tag === "span") { return "text"; }
+    return "container";
   }
 
   // =====================================================================
@@ -891,8 +1296,8 @@
     if (w.selEl && (w.selEl.hasAttribute("data-ds-loopwrap") || (w.selEl.closest && w.selEl.closest("[data-ds-decor]")))) { w.selEl = null; }
     if (w.selEl) { try { w.selEl.classList.add("ds-he-sel"); } catch (e) {} }
     w.gridEl = findGrid(w.selEl);
-    syncToolbar();
-    if (w.gridEl) { mountGridHandles(w.gridEl); renderColumnSliders(w.gridEl); } else { clearGridHandles(); renderColumnSliders(null); }
+    renderInspector();
+    renderLayers();
     if (!silent && w.onSelect) { try { w.onSelect(w.selEl ? elSelector(w.selEl) : ""); } catch (e) {} }
   }
   // A selector for an element, relative to the block, matching the one the
@@ -1014,9 +1419,11 @@
       '</select></span></label>';
   }
   function box4(label, prefix) {
-    var sides = [["T", prefix + "Top"], ["R", prefix + "Right"], ["B", prefix + "Bottom"], ["L", prefix + "Left"]];
-    return '<div class="ds-insp-box4"><span class="ds-insp-b4lab">' + esc(label) + '</span><div class="ds-insp-b4grid">' +
-      sides.map(function (s) { return '<label><input type="number" class="ds-insp-b4" data-prop="' + s[1] + '" value="' + numOf(cv(s[1])) + '" placeholder="0"><em>' + s[0] + '</em></label>'; }).join("") +
+    var sides = [["Top", prefix + "Top"], ["Right", prefix + "Right"], ["Bottom", prefix + "Bottom"], ["Left", prefix + "Left"]];
+    return '<div class="ds-insp-box4"><span class="ds-insp-b4lab">' + esc(label) + '</span>' +
+      '<p class="ds-insp-note">Set each side on its own — e.g. 20 top, 10 bottom, 5 left &amp; right.</p>' +
+      '<div class="ds-insp-b4grid">' +
+      sides.map(function (s) { return '<label title="' + s[0] + '"><input type="number" class="ds-insp-b4" data-prop="' + s[1] + '" value="' + numOf(cv(s[1])) + '" placeholder="0"><em>' + s[0] + '</em></label>'; }).join("") +
       '</div></div>';
   }
   function rangeRow(label, prop, factor) {
@@ -1036,53 +1443,164 @@
       '<button type="button" class="ds-insp-coleq">Make all equal</button>');
   }
 
+  // Full rich-text button row: inline styles, scripts, lists, links.
+  function fmtRow() {
+    return '<div class="ds-insp-fmt">' +
+      '<button type="button" data-fmt="b" title="Bold"><b>B</b></button>' +
+      '<button type="button" data-fmt="i" title="Italic"><i>I</i></button>' +
+      '<button type="button" data-fmt="u" title="Underline"><u>U</u></button>' +
+      '<button type="button" data-fmt="s" title="Strikethrough"><s>S</s></button>' +
+      '<button type="button" data-fmt="sup" title="Superscript">x<sup>2</sup></button>' +
+      '<button type="button" data-fmt="sub" title="Subscript">x<sub>2</sub></button>' +
+      '<button type="button" data-fmt="ul" title="Bulleted list"><i class="fas fa-list-ul"></i></button>' +
+      '<button type="button" data-fmt="ol" title="Numbered list"><i class="fas fa-list-ol"></i></button>' +
+      '<button type="button" data-fmt="link" title="Make a link"><i class="fas fa-link"></i></button>' +
+      '<button type="button" data-fmt="unlink" title="Remove link"><i class="fas fa-unlink"></i></button>' +
+      '<button type="button" data-fmt="clear" title="Clear formatting"><i class="fas fa-eraser"></i></button>' +
+      '</div>';
+  }
+  // Font-family picker (applies to the text selection or the element).
+  function fontRow() {
+    var cur = cv("fontFamily");
+    return '<label class="ds-insp-row"><span>Font</span><select class="ds-insp-sel ds-insp-font">' +
+      FONTS.map(function (o) { return '<option value="' + esc(o[0]) + '"' + (o[0] && cur.indexOf(o[0].split(",")[0].replace(/"/g, "")) !== -1 ? " selected" : "") + '>' + esc(o[1]) + '</option>'; }).join("") +
+      '</select></label>';
+  }
+  // Paragraph / heading block format.
+  function formatBlockRow(el) {
+    var tag = (el && el.tagName) ? el.tagName.toLowerCase() : "";
+    var opts = [["", "—"], ["p", "Paragraph"], ["h1", "Heading 1"], ["h2", "Heading 2"], ["h3", "Heading 3"], ["h4", "Heading 4"], ["blockquote", "Quote"]];
+    return '<label class="ds-insp-row"><span>Format</span><select class="ds-insp-sel ds-insp-fmtblock">' +
+      opts.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === tag ? " selected" : "") + '>' + o[1] + '</option>'; }).join("") +
+      '</select></label>';
+  }
+  // Full typography group — every text control, for any text-bearing element.
+  function gTypography(full, el) {
+    return group("Typography",
+      fmtRow() +
+      fontRow() +
+      formatBlockRow(el) +
+      colRow("Text colour", "color") +
+      colRow("Highlight", "backgroundColor") +
+      lenRow("Size", "fontSize") +
+      selRow("Weight", "fontWeight", WEIGHTS) +
+      selRow("Align", "textAlign", [["", "—"], ["left", "Left"], ["center", "Centre"], ["right", "Right"], ["justify", "Justify"]]) +
+      lenRow("Line height", "lineHeight", ["", "px", "em"]) +
+      lenRow("Letter spacing", "letterSpacing", ["px", "em"]) +
+      selRow("Capitalisation", "textTransform", [["", "—"], ["none", "Normal"], ["uppercase", "UPPERCASE"], ["lowercase", "lowercase"], ["capitalize", "Capitalise"]]) +
+      selRow("Decoration", "textDecorationLine", [["", "—"], ["none", "None"], ["underline", "Underline"], ["line-through", "Strikethrough"]]));
+  }
+  function gSpacing() {
+    var mode = w.spaceMode || "padding";
+    var toggle = '<div class="ds-spacemode-row"><span class="ds-insp-note">Drag on the canvas:</span>' +
+      '<div class="ds-spacemode">' +
+        '<button type="button" data-mode="padding"' + (mode === "padding" ? ' class="on"' : '') + '>Padding</button>' +
+        '<button type="button" data-mode="margin"' + (mode === "margin" ? ' class="on"' : '') + '>Margin</button>' +
+      '</div></div>';
+    return group("Spacing", toggle + box4("Margin (outside)", "margin") + box4("Padding (inside)", "padding"));
+  }
+  function gBorder() {
+    return group("Border",
+      lenRow("Thickness", "borderWidth", ["px"]) +
+      selRow("Style", "borderStyle", [["", "—"], ["none", "None"], ["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["double", "Double"]]) +
+      colRow("Colour", "borderColor") +
+      lenRow("Rounded corners", "borderRadius", ["px", "%"]));
+  }
+  function gBackground() { return group("Background", colRow("Colour", "backgroundColor")); }
+  function gLayout(withCols) {
+    return group("Layout",
+      selRow("Display", "display", [["", "—"], ["block", "Block"], ["inline-block", "Inline block"], ["flex", "Flex (row)"], ["grid", "Grid"], ["none", "Hidden"]]) +
+      lenRow("Gap", "gap", ["px", "rem"]) +
+      selRow("Justify", "justifyContent", [["", "—"], ["flex-start", "Start"], ["center", "Centre"], ["flex-end", "End"], ["space-between", "Space between"], ["space-around", "Space around"]]) +
+      selRow("Align items", "alignItems", [["", "—"], ["stretch", "Stretch"], ["flex-start", "Start"], ["center", "Centre"], ["flex-end", "End"]]) +
+      (withCols ? '<div class="ds-insp-fmt"><button type="button" data-col="add">+ column</button><button type="button" data-col="rm">&minus; column</button></div>' : ""));
+  }
+
+  // Groups shown for each taxonomy kind — only what fits that kind.
+  function groupsForKind(kind, el) {
+    switch (kind) {
+      case "heading":
+        return gTypography(true, el) + gSpacing() + group("Size", lenRow("Width", "width") + lenRow("Max width", "maxWidth"));
+      case "body":
+        return gTypography(true, el) + gSpacing() + group("Size", lenRow("Reading width (max)", "maxWidth"));
+      case "meta":
+        return gTypography(true, el) + gSpacing();
+      case "image":
+        return group("Image",
+          lenRow("Width", "width") + lenRow("Height", "height") + lenRow("Max width", "maxWidth") +
+          selRow("Aspect ratio", "aspectRatio", [["", "—"], ["16 / 9", "16:9"], ["4 / 3", "4:3"], ["3 / 2", "3:2"], ["1 / 1", "Square"], ["21 / 9", "Ultra-wide"]]) +
+          selRow("Fit", "objectFit", [["", "—"], ["cover", "Cover"], ["contain", "Contain"], ["fill", "Fill"]]) +
+          lenRow("Rounded corners", "borderRadius", ["px", "%"])) + gBorder() + gSpacing();
+      case "link":
+        return gTypography(true, el) +
+          group("Button look", colRow("Background", "backgroundColor") + box4("Padding", "padding") + lenRow("Rounded corners", "borderRadius", ["px", "%"])) +
+          gBorder() + gSpacing();
+      case "icon":
+        return group("Icon", lenRow("Size", "width", ["px", "rem", "em"]) + lenRow("Height", "height", ["px", "rem", "em"]) + colRow("Colour", "color")) + gSpacing();
+      case "list":
+        return gLayout(true) + (w.gridEl ? columnsControl(w.gridEl) : "") + gTypography(true, el) + gSpacing() + gBackground();
+      case "text":
+        return gTypography(true, el) + gSpacing();
+      default: // container
+        return gTypography(true, el) + gBackground() +
+          group("Size", lenRow("Width", "width") + lenRow("Max width", "maxWidth") + lenRow("Min height", "minHeight")) +
+          gBorder() + gSpacing() + gLayout(false) + (w.gridEl ? columnsControl(w.gridEl) : "") +
+          group("Effects",
+            rangeRow("Opacity", "opacity", 100) +
+            selRow("Shadow", "boxShadow", [["", "—"], ["none", "None"], ["0 1px 3px rgba(0,0,0,.2)", "Small"], ["0 6px 18px rgba(0,0,0,.15)", "Medium"], ["0 14px 40px rgba(0,0,0,.2)", "Large"]]));
+    }
+  }
+
   function renderInspector() {
     var ins = w.inspector; if (!ins) { return; }
     var el = w.selEl;
+    if (el !== w._lastInsEl) { try { ins.scrollTop = 0; } catch (e) {} w._lastInsEl = el; }
     if (!el) {
-      ins.innerHTML = '<div class="ds-insp-empty"><i class="fas fa-arrow-pointer"></i><p>Click any element in the editor to style it.</p><p class="ds-insp-note">Margins, padding, size, border, background, text and columns all appear here.</p></div>';
-      clearGridHandles();
+      ins.innerHTML = '<div class="ds-insp-empty"><i class="fas fa-arrow-pointer"></i><p>Click anything on the canvas to design it.</p><p class="ds-insp-note">The controls here change to match what you pick — a title, an image, a link, or a repeating list.</p></div>';
+      clearGridHandles(); clearSpacingHandles();
       return;
     }
     w.gridEl = findGrid(el);
+    var kind = resolveKind(el);
     var canParent = el.parentElement && el.parentElement !== w.root;
     ins.innerHTML =
-      '<div class="ds-insp-head"><span>Editing <b>' + esc(friendlyEl(el)) + '</b></span>' +
+      '<div class="ds-insp-head"><span class="ds-insp-kind">' + esc(DS.KIND_LABEL[kind] || "Element") + '</span>' +
+        '<span class="ds-insp-sub">' + esc(friendlyEl(el)) + '</span>' +
         (canParent ? '<button type="button" class="ds-insp-parent" title="Select the element around this one"><i class="fas fa-arrow-up"></i> Parent</button>' : "") + '</div>' +
-      group("Text",
-        colRow("Colour", "color") +
-        lenRow("Size", "fontSize") +
-        selRow("Weight", "fontWeight", WEIGHTS) +
-        selRow("Align", "textAlign", [["", "—"], ["left", "Left"], ["center", "Centre"], ["right", "Right"], ["justify", "Justify"]]) +
-        lenRow("Line height", "lineHeight", ["", "px", "em"]) +
-        lenRow("Letter spacing", "letterSpacing", ["px", "em"]) +
-        selRow("Capitalisation", "textTransform", [["", "—"], ["none", "Normal"], ["uppercase", "UPPERCASE"], ["lowercase", "lowercase"], ["capitalize", "Capitalise"]]) +
-        selRow("Decoration", "textDecorationLine", [["", "—"], ["none", "None"], ["underline", "Underline"], ["line-through", "Strikethrough"]])) +
-      group("Spacing", box4("Margin (outside)", "margin") + box4("Padding (inside)", "padding")) +
-      group("Size", lenRow("Width", "width") + lenRow("Height", "height") + lenRow("Max width", "maxWidth") + lenRow("Min height", "minHeight")) +
-      group("Border",
-        lenRow("Thickness", "borderWidth", ["px"]) +
-        selRow("Style", "borderStyle", [["", "—"], ["none", "None"], ["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["double", "Double"]]) +
-        colRow("Colour", "borderColor") +
-        lenRow("Rounded corners", "borderRadius", ["px", "%"])) +
-      group("Background", colRow("Colour", "backgroundColor")) +
-      (w.gridEl ? columnsControl(w.gridEl) : "") +
-      group("Layout",
-        selRow("Display", "display", [["", "—"], ["block", "Block"], ["inline-block", "Inline block"], ["flex", "Flex (row)"], ["grid", "Grid"], ["none", "Hidden"]]) +
-        lenRow("Gap", "gap", ["px", "rem"]) +
-        selRow("Justify", "justifyContent", [["", "—"], ["flex-start", "Start"], ["center", "Centre"], ["flex-end", "End"], ["space-between", "Space between"], ["space-around", "Space around"]]) +
-        selRow("Align items", "alignItems", [["", "—"], ["stretch", "Stretch"], ["flex-start", "Start"], ["center", "Centre"], ["flex-end", "End"]])) +
-      group("Effects",
-        rangeRow("Opacity", "opacity", 100) +
-        selRow("Shadow", "boxShadow", [["", "—"], ["none", "None"], ["0 1px 3px rgba(0,0,0,.2)", "Small"], ["0 6px 18px rgba(0,0,0,.15)", "Medium"], ["0 14px 40px rgba(0,0,0,.2)", "Large"]]));
+      groupsForKind(kind, el);
     wireInspector();
-    if (w.gridEl) { mountGridHandles(w.gridEl); } else { clearGridHandles(); }
+    if (w.gridEl && (kind === "list" || kind === "container")) { mountGridHandles(w.gridEl); } else { clearGridHandles(); }
+    // Figma-style padding (inner) + margin (outer) drag handles on any element.
+    mountSpacingHandles(el);
   }
 
   function wireInspector() {
     var ins = w.inspector;
     ins.querySelectorAll(".ds-insp-b4").forEach(function (i) {
       i.addEventListener("input", function () { applyEl(i.dataset.prop, i.value === "" ? "" : (i.value + "px")); });
+      // Scrub: drag left/right on the field to change the value (a plain click
+      // still lets you type). Mirrors the on-canvas padding drag.
+      i.addEventListener("mousedown", function (e) {
+        var startX = e.clientX, startVal = parseFloat(i.value) || 0, scrubbing = false;
+        function mv(ev) {
+          if (!scrubbing && Math.abs(ev.clientX - startX) < 3) { return; }
+          scrubbing = true; ev.preventDefault();
+          var nv = Math.max(0, Math.round(startVal + (ev.clientX - startX)));
+          i.value = nv; applyEl(i.dataset.prop, nv + "px");
+          if (w._spaceEl && w.selEl) { renderSpacingHandles(); }
+        }
+        function up() { document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); document.body.classList.remove("ds-scrubbing"); }
+        document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
+        document.body.classList.add("ds-scrubbing");
+      });
+    });
+    // Padding/Margin canvas toggle — chooses which drag handles the canvas shows.
+    ins.querySelectorAll(".ds-spacemode button[data-mode]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        w.spaceMode = b.getAttribute("data-mode");
+        ins.querySelectorAll(".ds-spacemode button").forEach(function (x) { x.classList.toggle("on", x === b); });
+        renderSpacingHandles();
+      });
     });
     ins.querySelectorAll(".ds-insp-num, .ds-insp-unit").forEach(function (i) {
       i.addEventListener("input", function () { applyLen(i.dataset.prop); });
@@ -1111,6 +1629,40 @@
     }); }
     var par = ins.querySelector(".ds-insp-parent");
     if (par) { par.addEventListener("click", function () { if (w.selEl && w.selEl.parentElement && w.selEl.parentElement !== w.root) { selectElement(w.selEl.parentElement); } }); }
+    ins.querySelectorAll(".ds-insp-fmt button[data-fmt]").forEach(function (b) {
+      b.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      b.addEventListener("click", function (e) {
+        e.preventDefault();
+        switch (b.getAttribute("data-fmt")) {
+          case "b": wrapInline("strong", ["STRONG", "B"]); break;
+          case "i": wrapInline("em", ["EM", "I"]); break;
+          case "u": wrapInline("u", ["U"]); break;
+          case "s": wrapInline("s", ["S", "STRIKE", "DEL"]); break;
+          case "sup": wrapInline("sup", ["SUP"]); break;
+          case "sub": wrapInline("sub", ["SUB"]); break;
+          case "ul": listSel(false); break;
+          case "ol": listSel(true); break;
+          case "link": openLinkDialog(); break;
+          case "unlink": if (w.doc && !w.srcMode) { var a = currentAnchor(); if (a) { unwrap(a); changed(); } } break;
+          case "clear": clearFormat(); break;
+        }
+      });
+    });
+    ins.querySelectorAll(".ds-insp-font").forEach(function (s) {
+      s.addEventListener("mousedown", function () { rememberRange(); });
+      s.addEventListener("change", function () { styleTextOrEl("fontFamily", s.value); });
+    });
+    ins.querySelectorAll(".ds-insp-fmtblock").forEach(function (s) {
+      s.addEventListener("mousedown", function () { rememberRange(); });
+      s.addEventListener("change", function () { if (s.value) { formatBlockSel(s.value); setTimeout(renderInspector, 0); } });
+    });
+    ins.querySelectorAll(".ds-insp-fmt button[data-col]").forEach(function (b) {
+      b.addEventListener("click", function (e) {
+        e.preventDefault();
+        if (b.getAttribute("data-col") === "add") { addColumn(); } else { removeColumn(); }
+        setTimeout(renderInspector, 0);
+      });
+    });
   }
 
   function applyLen(prop) {
@@ -1136,25 +1688,44 @@
       w.onChange = null; w.srcMode = false; w.savedRange = null;
       container.innerHTML =
         '<div class="ds-he">' +
-          '<div class="ds-he-tb" id="dsHeTb"></div>' +
-          '<div class="ds-he-hint">Click an element to select it — the toolbar then shows and changes its styles (size, colour, margins, padding, width, columns…). Grey dotted text fills in automatically; style it but don’t retype it. Use <b>+ Insert</b> to add new text, headings or lines.</div>' +
+          '<aside class="ds-he-rail">' +
+            '<div class="ds-he-rail-sec">' +
+              '<button type="button" class="ds-he-ins" id="dsHeIns"><i class="fas fa-plus"></i> Insert element</button>' +
+              '<div class="ds-he-insmenu" id="dsHeInsMenu" hidden></div>' +
+            '</div>' +
+            '<div class="ds-he-rail-sec">' +
+              '<div class="ds-he-rail-h">Placeholder</div>' +
+              '<select class="ds-he-tok" id="dsHeTokSel"><option value="">Insert placeholder…</option></select>' +
+              '<div class="ds-he-rail-note">Every placeholder — this block first, then shared &amp; all blocks.</div>' +
+            '</div>' +
+            '<div class="ds-he-rail-sec ds-he-rail-grow">' +
+              '<div class="ds-he-rail-h">Layers</div>' +
+              '<div class="ds-he-layers" id="dsHeLayers"></div>' +
+            '</div>' +
+          '</aside>' +
           '<div class="ds-he-stage">' +
             '<iframe class="ds-he-frame" id="dsHeFrame" title="Block editor"></iframe>' +
             '<textarea class="ds-he-src" id="dsHeSrc" spellcheck="false" style="display:none"></textarea>' +
           '</div>' +
+          '<aside class="ds-he-inspector" id="dsHeInsp"></aside>' +
         '</div>';
       w.container = container.querySelector(".ds-he");
       w.frame = container.querySelector("#dsHeFrame");
       w.src = container.querySelector("#dsHeSrc");
+      w.inspector = container.querySelector("#dsHeInsp");
+      w.layers = container.querySelector("#dsHeLayers");
+      w.insMenu = container.querySelector("#dsHeInsMenu");
       w.src.addEventListener("input", changed);
-      buildToolbar(container.querySelector("#dsHeTb"));
+      buildRail(container);
       fillInsertMenu(w.type);
+      renderInspector();
       // live section list for the link picker
       DS.api("link_targets", {}).then(function (j) { w.sections = j.sections || []; }).catch(function () { w.sections = []; });
     },
     setHtml: setHtml,
     getHtml: getTemplate,
     toggleSource: toggleSource,
+    cancelPending: function () { clearTimeout(changeTimer); },
     isSourceMode: function () { return !!w.srcMode; },
     onChange: function (fn) { w.onChange = fn; },
     onSelect: function (fn) { w.onSelect = fn; },
