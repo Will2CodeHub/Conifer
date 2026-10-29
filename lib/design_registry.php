@@ -311,6 +311,15 @@ function dl_placeholder_defs(): array {
                     $P('article:politics:1:image', 'The article’s lead image', ''),
                 ],
             ],
+            'section_slots' => [
+                'label' => 'Numbered section slots — the Nth section in the header menu (use “Insert section”; each number is a different section)',
+                'items' => [
+                    $P('section:1:name', 'Section name, text only — change 1 to 2, 3… for the next section', 'News'),
+                    $P('section:1:link', 'Section name that links to its page', 'News'),
+                    $P('section:1:href', 'Just the section page URL (for your own “view section” text)', '/design/news'),
+                    $P('section:1:desc', 'The section’s one-line description', 'The latest news & breaking news'),
+                ],
+            ],
         ],
         'blocks' => [
             'masthead'        => ['label' => 'Masthead', 'items' => [$P('site_name', 'Publication name'), $P('tagline', 'Tagline')]],

@@ -155,6 +155,10 @@ body {
 .ds-f small { display: block; margin-top: 5px; color: var(--ds-muted); font-size: 12px; }
 .ds-f-chk { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ds-ink-2); }
 .ds-f-chk input { width: auto; }
+/* Multi-select field checklist in the "Insert article" dialog. */
+.ds-art-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; margin-top: 2px; }
+.ds-art-fld { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 400; color: var(--ds-ink-2); cursor: pointer; }
+.ds-art-fld input { width: auto; margin: 0; accent-color: var(--ds-accent); cursor: pointer; }
 
 /* template picker + history rows */
 .ds-pick { display: flex; flex-direction: column; gap: 8px; }

@@ -144,6 +144,10 @@
       if (af === "snippet" || af === "standfirst" || af === "summary") { atext += " (" + (m[4] || "40") + "w)"; }
       return { cls: "field", text: atext };
     }
+    if ((m = inner.match(SEC_TOK_RE))) {
+      var sfld = { name: "name", link: "link", href: "link URL", desc: "description" }[m[2].toLowerCase()] || m[2];
+      return { cls: "field", text: "Section " + m[1] + " · " + sfld };
+    }
     return { cls: "field", text: tokHumanize(inner) };
   }
   // Numbered article-slot token, e.g. article:politics:2:titlelink (:40 for a
@@ -153,6 +157,9 @@
   var ART_TOK_FIELDS = "titlelink|title|snippet|standfirst|summary|author|byline|datepublished|dateupdated|date|readtime|section|image";
   var ART_TOK_RE = new RegExp("^article:([a-z0-9-]*):(\\d+):(" + ART_TOK_FIELDS + ")(?::(\\d+))?$", "i");
   var ART_TOK_FULL_RE = new RegExp("^\\{\\{\\s*article:([a-z0-9-]*):(\\d+):(" + ART_TOK_FIELDS + ")(?::(\\d+))?\\s*\\}\\}$", "i");
+  // Numbered section-slot token, e.g. section:2:link — kept in sync with the
+  // engine resolver in design/lib/section_slots.php.
+  var SEC_TOK_RE = /^section:(\d+):(name|link|href|desc)$/i;
   function titleCaseSlug(slug) {
     return String(slug).replace(/-/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
   }
@@ -892,66 +899,125 @@
       return t.getAttribute("data-tok") || "";
     }).join(" ");
   }
-  // Next free number for this section + field (each field numbers from 1).
-  function nextArtIndex(slug, field) {
-    var esc = slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    var re = new RegExp("article:" + esc + ":(\\d+):" + field + "(?::\\d+)?", "gi");
+  // Next free STORY number for a section (max across any field + 1). The number
+  // means "the Nth latest article in that section", so one number = one article.
+  function nextArtStory(slug) {
+    var e = slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    var re = new RegExp("article:" + e + ":(\\d+):", "gi");
     var hay = collectArtTokens(), max = 0, m;
     while ((m = re.exec(hay))) { var k = parseInt(m[1], 10); if (k > max) { max = k; } }
     return max + 1;
   }
+  // Insert several tokens in order, separated by a space, as their own chips.
+  function insertArtTokens(tokens) {
+    if (!tokens.length) { return; }
+    if (w.srcMode) { insertRawAtSrcCaret(tokens.join(" ")); return; }
+    if (!w.doc) { return; }
+    w.root.focus();
+    var sel = w.win.getSelection();
+    if (w.savedRange) { sel.removeAllRanges(); sel.addRange(w.savedRange); }
+    if (!sel.rangeCount) {
+      tokens.forEach(function (t) { w.root.appendChild(makeTok(t, w.doc)); w.root.appendChild(w.doc.createTextNode(" ")); });
+      rememberRange(); changed(); return;
+    }
+    var r = sel.getRangeAt(0); r.deleteContents();
+    tokens.forEach(function (t, i) {
+      if (i > 0) { var sp = w.doc.createTextNode(" "); r.insertNode(sp); r.setStartAfter(sp); r.collapse(true); }
+      var tok = makeTok(t, w.doc); r.insertNode(tok); r.setStartAfter(tok); r.collapse(true);
+    });
+    sel.removeAllRanges(); sel.addRange(r);
+    rememberRange(); changed();
+  }
+  // The pickable article fields, in insert order.
+  var ART_FIELD_DEFS = [
+    ["titlelink", "Headline — links to the article"],
+    ["title", "Headline — text only"],
+    ["image", "Article image"],
+    ["standfirst", "Summary / standfirst"],
+    ["snippet", "Snippet — short teaser"],
+    ["author", "Author (byline)"],
+    ["date", "Date published"],
+    ["readtime", "Read time"],
+    ["section", "Section name"]
+  ];
   function openArtInsert() {
     var secOpts = '<option value="latest">Latest (any section)</option>' +
       (w.sections || []).map(function (s) {
         return '<option value="' + esc(slugOf(s)) + '">' + esc(s.name) + '</option>';
       }).join("");
+    var fieldRows = ART_FIELD_DEFS.map(function (f) {
+      return '<label class="ds-art-fld"><input type="checkbox" value="' + f[0] + '"' + (f[0] === "titlelink" ? " checked" : "") + '> ' + esc(f[1]) + '</label>';
+    }).join("");
     var body =
-      '<p class="ds-dlg-say">Drop in a live article. It fills with the chosen section’s latest stories on the site. Insert more than one and they number automatically (1, 2, 3…) as different stories — a headline and a snippet with the same number are the same article.</p>' +
+      '<p class="ds-dlg-say">Drop in a live article. Pick a section and tick everything you want to show from its latest story — headline, image, author… — and they all come from the <b>same</b> article. Insert again for the next story (they auto-number 1, 2, 3…).</p>' +
       '<label class="ds-f"><span>Section</span><select id="dsArtSec">' + secOpts + '</select></label>' +
-      '<label class="ds-f"><span>Show</span><select id="dsArtField">' +
-        '<optgroup label="Headline">' +
-          '<option value="titlelink">Headline — links to the article</option>' +
-          '<option value="title">Headline — text only</option>' +
-        '</optgroup>' +
-        '<optgroup label="Text">' +
-          '<option value="snippet">Snippet — short teaser</option>' +
-          '<option value="standfirst">Summary / standfirst — full</option>' +
-        '</optgroup>' +
-        '<optgroup label="Details">' +
-          '<option value="author">Author (byline)</option>' +
-          '<option value="date">Date published</option>' +
-          '<option value="readtime">Read time</option>' +
-          '<option value="section">Section name</option>' +
-        '</optgroup>' +
-        '<optgroup label="Media">' +
-          '<option value="image">Article image</option>' +
-        '</optgroup>' +
-      '</select></label>' +
+      '<div class="ds-f ds-f-col"><span>Show ' + helpIcon("Tick one or more. Everything you tick is pulled from the same story, so a headline, its image and its author all match.") + '</span>' +
+        '<div class="ds-art-fields" id="dsArtFields">' + fieldRows + '</div></div>' +
       '<label class="ds-f" id="dsArtWordsWrap"><span>Length (words)</span>' +
         '<input type="number" id="dsArtWords" min="1" step="1" value="40"></label>' +
+      '<label class="ds-f"><span>Which story ' + helpIcon("1 = the latest story, 2 = the next, and so on. Leave blank to add the next new story.") + '</span>' +
+        '<input type="number" id="dsArtN" min="1" step="1" placeholder="next"></label>' +
       '<div class="ds-dlg-actions">' +
         '<button type="button" class="ds-btn" id="dsArtCancel">Cancel</button>' +
         '<button type="button" class="ds-btn ds-btn-primary" id="dsArtDo"><i class="fas fa-plus"></i> Insert</button>' +
       '</div>';
     var dlg = DS.dialog({ title: "Insert an article", body: body });
     var root = dlg.el;
-    var fieldSel = root.querySelector("#dsArtField");
+    var fieldsBox = root.querySelector("#dsArtFields");
     var wordsWrap = root.querySelector("#dsArtWordsWrap");
-    function syncWords() { wordsWrap.style.display = (fieldSel.value === "snippet" || fieldSel.value === "standfirst") ? "" : "none"; }
-    fieldSel.addEventListener("change", syncWords); syncWords();
+    function checkedFields() { return [].slice.call(fieldsBox.querySelectorAll("input:checked")).map(function (i) { return i.value; }); }
+    function syncWords() {
+      var c = checkedFields();
+      wordsWrap.style.display = (c.indexOf("snippet") !== -1 || c.indexOf("standfirst") !== -1) ? "" : "none";
+    }
+    fieldsBox.addEventListener("change", syncWords); syncWords();
     root.querySelector("#dsArtCancel").addEventListener("click", function () { dlg.close(); });
     root.querySelector("#dsArtDo").addEventListener("click", function () {
       var slug = root.querySelector("#dsArtSec").value || "latest";
-      var field = fieldSel.value;
-      var n = nextArtIndex(slug, field);
-      var tok = "{{article:" + slug + ":" + n + ":" + field;
-      if (field === "snippet" || field === "standfirst") {
-        var wds = Math.max(1, parseInt(root.querySelector("#dsArtWords").value, 10) || 40);
-        if (wds !== 40) { tok += ":" + wds; }
-      }
-      tok += "}}";
+      var picked = checkedFields();
+      if (!picked.length) { DS.toast("Tick at least one thing to show"); return; }
+      var nRaw = parseInt(root.querySelector("#dsArtN").value, 10);
+      var n = (nRaw > 0) ? nRaw : nextArtStory(slug);
+      var wds = Math.max(1, parseInt(root.querySelector("#dsArtWords").value, 10) || 40);
+      // Keep the canonical insert order, not the click order.
+      var toks = ART_FIELD_DEFS.filter(function (f) { return picked.indexOf(f[0]) !== -1; }).map(function (f) {
+        var field = f[0], tok = "{{article:" + slug + ":" + n + ":" + field;
+        if ((field === "snippet" || field === "standfirst") && wds !== 40) { tok += ":" + wds; }
+        return tok + "}}";
+      });
       dlg.close();
-      insertToken(tok);
+      insertArtTokens(toks);
+    });
+  }
+  // Next free number for a section-slot field. Each number = the Nth header-menu
+  // section, so inserting more than one gives different sections.
+  function nextSecIndex(field) {
+    var re = new RegExp("section:(\\d+):" + field, "gi");
+    var hay = collectArtTokens(), max = 0, m;
+    while ((m = re.exec(hay))) { var k = parseInt(m[1], 10); if (k > max) { max = k; } }
+    return max + 1;
+  }
+  function openSecInsert() {
+    var body =
+      '<p class="ds-dlg-say">Drop in a live section from this publication’s menu. Insert more than one and they number automatically (1, 2, 3…) as different sections — a name and a link with the same number are the same section.</p>' +
+      '<label class="ds-f"><span>Show</span><select id="dsSecField">' +
+        '<option value="name">Section name — text only</option>' +
+        '<option value="link">Section name — links to the section</option>' +
+        '<option value="href">Section link (URL only, for your own “view” text)</option>' +
+        '<option value="desc">Section description</option>' +
+      '</select></label>' +
+      '<div class="ds-dlg-actions">' +
+        '<button type="button" class="ds-btn" id="dsSecCancel">Cancel</button>' +
+        '<button type="button" class="ds-btn ds-btn-primary" id="dsSecDo"><i class="fas fa-plus"></i> Insert</button>' +
+      '</div>';
+    var dlg = DS.dialog({ title: "Insert a section", body: body });
+    var root = dlg.el;
+    root.querySelector("#dsSecCancel").addEventListener("click", function () { dlg.close(); });
+    root.querySelector("#dsSecDo").addEventListener("click", function () {
+      var field = root.querySelector("#dsSecField").value;
+      var n = nextSecIndex(field);
+      dlg.close();
+      insertToken("{{section:" + n + ":" + field + "}}");
     });
   }
 
@@ -1290,6 +1356,11 @@
     if (artBtn) {
       artBtn.addEventListener("mousedown", function () { rememberRange(); });
       artBtn.addEventListener("click", function (e) { e.preventDefault(); rememberRange(); openArtInsert(); });
+    }
+    var secBtn = container.querySelector("#dsHeSec");
+    if (secBtn) {
+      secBtn.addEventListener("mousedown", function () { rememberRange(); });
+      secBtn.addEventListener("click", function (e) { e.preventDefault(); rememberRange(); openSecInsert(); });
     }
 
     // The raw-HTML toggle now lives in the editor's top header (block_editor.js);
@@ -1946,6 +2017,8 @@
               '<div class="ds-he-rail-note">Every placeholder — this block first, then shared &amp; all blocks.</div>' +
               '<button type="button" class="ds-he-ins ds-he-artbtn" id="dsHeArt"><i class="fas fa-newspaper"></i> Insert article</button>' +
               '<div class="ds-he-rail-note">A live article headline, link or snippet. Insert several and they number automatically as different stories.</div>' +
+              '<button type="button" class="ds-he-ins ds-he-artbtn" id="dsHeSec"><i class="fas fa-list"></i> Insert section</button>' +
+              '<div class="ds-he-rail-note">A section name or “view section” link. Insert several and each one is a different section.</div>' +
             '</div>' +
             '<div class="ds-he-rail-sec ds-he-rail-grow">' +
               '<div class="ds-he-rail-h">Layers</div>' +
