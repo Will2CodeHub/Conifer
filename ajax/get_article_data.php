@@ -125,6 +125,8 @@ try {
         $meta_title = '';
         $meta_description = '';
         $meta_keywords = '';
+        $sources = '[]';
+        $carousel_picks = '[]';
         $publish_from = '';
         $publish_to = '';
         $time_from = '';
@@ -151,7 +153,9 @@ try {
         $meta_title = $row['meta_title'] ?? '';
         $meta_description = $row['meta_description'] ?? '';
         $meta_keywords = $row['meta_keywords'] ?? '';
-        
+        $sources = (isset($row['sources']) && $row['sources'] !== '') ? $row['sources'] : '[]';
+        $carousel_picks = (isset($row['carousel_picks']) && $row['carousel_picks'] !== '') ? $row['carousel_picks'] : '[]';
+
         // Handle dates
         $publish_from = $row['publish_from'];
         $publish_to = $row['publish_to'];
@@ -322,11 +326,16 @@ try {
         // Venues/CRM) and legacy Broker/Viewer aren't article authors, so excluded.
         $authorRoles = "'Journalist','Section Editor','Editor','Managing Editor','General Editor',"
                      . "'Editor-in-Chief','Edition Editor-in-Chief','Administrator','Super User','Manager'";
+        // Include every author-eligible user who isn't deactivated — crucially this
+        // now covers NEW journalists, who are created with status 'pending' until they
+        // activate and were previously missing from the list. Only genuinely disabled
+        // accounts (suspended/blocked/inactive/deleted) are left out (still findable
+        // via the "search any author" box, which spans all statuses).
         $query = "SELECT DISTINCT u.id, u.full_name, u.username, u.publication, u.section
                   FROM ten_users u
                   JOIN ten_user_roles ur ON u.id = ur.user_id
                   JOIN ten_roles r ON ur.role_id = r.id
-                  WHERE u.status = 'active'
+                  WHERE (u.status IS NULL OR u.status NOT IN ('suspended','blocked','inactive','deleted'))
                   AND r.role_name IN ($authorRoles)
                   ORDER BY u.full_name ASC";
 
@@ -429,6 +438,8 @@ try {
         'meta_title' => $meta_title,
         'meta_description' => $meta_description,
         'meta_keywords' => $meta_keywords,
+        'sources' => $sources,
+        'carousel_picks' => (json_decode($carousel_picks, true) ?: []),
         'evergreen' => $evergreen,
         'featured' => $featured,
         'sponsored' => $sponsored,

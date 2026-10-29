@@ -139,6 +139,7 @@
         '<button class="dl-b save" id="dlSave">Save draft</button>' +
         '<button class="dl-b publish" id="dlPublish">Publish</button>' +
         '<button class="dl-b history" id="dlHistory">History</button>' +
+        '<button class="dl-b" id="dlResetDesign" title="Reset the whole design back to the original defaults">↺ Reset design</button>' +
         '<button class="dl-b" id="dlPvMax" title="Make the preview bigger — selecting and editing still work">⛶ Fullscreen</button>' +
         '<button class="dl-b close" id="dlClose">Close</button>' +
       '</div>' +
@@ -198,6 +199,7 @@
     m.querySelector("#dlSave").addEventListener("click", saveDraft);
     m.querySelector("#dlPublish").addEventListener("click", doPublish);
     m.querySelector("#dlHistory").addEventListener("click", showHistory);
+    m.querySelector("#dlResetDesign").addEventListener("click", resetDesign);
     m.querySelector("#dlPvMax").addEventListener("click", togglePvMax);
     m.querySelector("#dlClose").addEventListener("click", close);
     ov.addEventListener("click", close);
@@ -227,11 +229,34 @@
     bm.querySelector("#dlBmUndo").addEventListener("click", blockModalUndo);
     bm.querySelector("#dlBmDefault").addEventListener("click", blockModalDefault);
 
+    // ---- unsaved-changes confirm (shown when closing with pending edits) ----
+    var cfOv = document.createElement("div"); cfOv.className = "dl-ov dl-cfov"; cfOv.id = "dlCfOv";
+    var cf = document.createElement("div"); cf.className = "dl-linkdlg dl-cfdlg"; cf.id = "dlCfDlg";
+    cf.innerHTML =
+      '<h3>Unsaved changes</h3>' +
+      '<p style="margin:0 0 16px;color:#334155;font-size:14px;line-height:1.5;">You’ve made changes to this design. What would you like to do?</p>' +
+      '<div class="dl-lk-actions">' +
+        '<button class="dl-b" id="dlCfCancel">Cancel</button>' +
+        '<button class="dl-b" id="dlCfDiscard">Close without saving</button>' +
+        '<button class="dl-b publish" id="dlCfSave">Save &amp; close</button>' +
+      '</div>';
+    root.appendChild(cfOv); root.appendChild(cf);
+    el.cfOv = cfOv; el.cfDlg = cf;
+    cfOv.addEventListener("click", hideConfirmClose);
+    cf.querySelector("#dlCfCancel").addEventListener("click", hideConfirmClose);
+    cf.querySelector("#dlCfDiscard").addEventListener("click", function () { if (st) { st.dirty = false; } hideConfirmClose(); doClose(); });
+    cf.querySelector("#dlCfSave").addEventListener("click", function () {
+      Promise.all([saveDraftSilent(), saveGlobalsSilent()]).then(function () {
+        if (st) { st.dirty = false; } hideConfirmClose(); doClose(); toast("Saved");
+      }).catch(function (e) { toast(e.message); });
+    });
+
     // Preview → editor messages: select a block/element, or apply an inline edit.
     window.addEventListener("message", function (e) {
       var d = e.data;
       if (!d || d.source !== "ten-design" || !st) { return; }
       if (d.action === "scroll") { st.scrollY = d.y || 0; return; }
+      if (d.action === "dirty") { st.dirty = true; return; } // typing in the preview = unsaved changes
       if (st.mode !== "page") { return; }
       if (d.action === "select") {
         if (st.device !== "desktop") { setDevice("desktop"); }
@@ -239,6 +264,10 @@
         if (isNaN(idx) || !st.desktop.blocks[idx]) { return; }
         st.sel = idx; st.selEl = d.selector || "";
         st.selElLabel = d.elLabel || ""; st.selEditKey = d.editKey || "";
+        // Clicking into an editable text means the user is about to type; mark the
+        // session dirty now so the close confirm fires even if the blur/"edit"
+        // message (which carries the new value) races the Close button.
+        if (st.selEditKey) { st.dirty = true; }
         // Unified model: a click ALWAYS just selects the element and opens its
         // inspector on the right — it never jumps into a separate editing mode.
         st.selAnchorHref = (typeof d.anchorHref === "string") ? d.anchorHref : null;
@@ -261,7 +290,7 @@
     st = { pub: p.publication, host: hostFrom(p.url), page: "front", device: "desktop",
            desktop: { theme: {}, blocks: [] }, mobile: {}, sel: -1, selEl: "",
            selAnchorHref: null, selAnchorSel: "",
-           mode: "page", blockType: null, blockTemplates: {}, globalBlocks: {}, blockSel: null, pvMax: false };
+           mode: "page", blockType: null, blockTemplates: {}, globalBlocks: {}, globalsLoaded: false, blockSel: null, pvMax: false, dirty: false };
     el.modal.classList.remove("dl-pvmax", "dl-max");
     if (el.bmodal) { el.bmodal.classList.remove("dl-show"); el.bmOv.classList.remove("dl-show"); }
     if (el._rightMainPanel) { el.right = el._rightMainPanel; }  // undo any left-over modal swap
@@ -276,9 +305,16 @@
     loadPage();
   }
   function close() {
+    if (st && st.dirty) { showConfirmClose(); return; }
+    doClose();
+  }
+  function doClose() {
     if (el.ov) { el.ov.classList.remove("dl-show"); el.modal.classList.remove("dl-show"); }
+    if (el.cfOv) { el.cfOv.classList.remove("dl-show"); el.cfDlg.classList.remove("dl-show"); }
     document.body.style.overflow = "";
   }
+  function showConfirmClose() { if (el.cfOv) { el.cfOv.classList.add("dl-show"); el.cfDlg.classList.add("dl-show"); } }
+  function hideConfirmClose() { if (el.cfOv) { el.cfOv.classList.remove("dl-show"); el.cfDlg.classList.remove("dl-show"); } }
 
   // Fullscreen: make the preview bigger by hiding the left blocks rail. The
   // right-hand inspector stays, so selecting and editing still work — this is a
@@ -388,10 +424,25 @@
 
   function loadBlockTemplates(cb) {
     api("load", { page: "_blocks", device: "desktop" }).then(function (j) {
-      st.blockTemplates = (j.layout && j.layout.templates) ? j.layout.templates : {};
-      st.globalBlocks = (j.layout && j.layout.settings) ? j.layout.settings : {};
+      var srvT = (j.layout && j.layout.templates) ? j.layout.templates : {};
+      var srvS = (j.layout && j.layout.settings) ? j.layout.settings : {};
+      if (!st.globalsLoaded) {
+        // First load of this session: adopt the server's stores wholesale.
+        st.blockTemplates = srvT; st.globalBlocks = srvS; st.globalsLoaded = true;
+      } else {
+        // Already loaded — a later/duplicate fetch must NOT clobber in-memory
+        // edits (that was wiping block styling before it could be saved). Only
+        // fill in keys we don't already have.
+        if (!st.blockTemplates) { st.blockTemplates = {}; }
+        if (!st.globalBlocks) { st.globalBlocks = {}; }
+        Object.keys(srvT).forEach(function (k) { if (st.blockTemplates[k] == null) { st.blockTemplates[k] = srvT[k]; } });
+        Object.keys(srvS).forEach(function (k) { if (st.globalBlocks[k] == null) { st.globalBlocks[k] = srvS[k]; } });
+      }
       if (cb) { cb(); }
-    }).catch(function (e) { st.blockTemplates = {}; st.globalBlocks = {}; toast(e.message); if (cb) { cb(); } });
+    }).catch(function (e) {
+      if (!st.globalsLoaded) { st.blockTemplates = {}; st.globalBlocks = {}; st.globalsLoaded = true; }
+      toast(e.message); if (cb) { cb(); }
+    });
   }
 
   // The settings object the editor should read/write for a block. By default a
@@ -1390,12 +1441,16 @@
   }
   var styleSaveTimer = null;
   function setStyle(styles, prop, val) {
+    if (st) { st.dirty = true; }
     if (val === "" || val == null) { delete styles[prop]; } else { styles[prop] = val; }
     // Instant preview on the selected element — no iframe reload, so selection
     // and scroll position are kept.
     pv({ action: "live_prop", blockIdx: st.sel, selector: st.selEl || "", prop: prop, value: (val == null ? "" : val) });
     clearTimeout(styleSaveTimer);
-    styleSaveTimer = setTimeout(function () { saveDraftSilent(); }, 600);
+    // Persist BOTH the page layout and the shared global block settings — a style
+    // edit on a (default) global block lives in st.globalBlocks, which only the
+    // globals save writes. Without this, the change reverts on the next reload.
+    styleSaveTimer = setTimeout(function () { saveDraftSilent(); saveGlobalsSilent(); }, 600);
   }
 
   function miniBtn(txt) { var b = document.createElement("button"); b.type = "button"; b.className = "dl-mini"; b.textContent = txt; return b; }
@@ -1429,6 +1484,87 @@
     inp.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); add(); } });
     addWrap.appendChild(inp); addWrap.appendChild(btn);
     el.right.appendChild(addWrap);
+  }
+
+  // Per-block-type column layout: which inner element holds the columns, and how
+  // its width is controlled (CSS grid vs. flex items like the carousel).
+  var COLS = {
+    front_feature:      { sel: ".dl-ff", mode: "grid", def: 3 },
+    front_sections:     { sel: ".dl-news-grid", mode: "grid", def: 3 },
+    section_lead:       { sel: ".dl-section-two", mode: "grid", def: 2 },
+    article_grid:       { sel: ".dl-grid", mode: "grid", def: 3 },
+    article_related:    { sel: ".dl-grid", mode: "grid", def: 3 },
+    article_quickreads: { sel: ".dl-quickreads-grid", mode: "grid", def: 3 },
+    footer:             { sel: ".dl-footer-cols", mode: "grid", def: 3 },
+    section_carousel:   { sel: ".dl-carousel-item", mode: "flexitem", def: 3 }
+  };
+
+  // Columns editor for a block: equal-columns slider + per-column width boxes
+  // (grid blocks), or a "cards visible" slider (the flex carousel).
+  function renderColumns(block, S) {
+    var cfg = COLS[block.type];
+    if (!cfg) { return; }
+    var target = cfg.sel;
+    S.styles[target] = toObj(S.styles[target]);
+
+    var sub = document.createElement("div"); sub.className = "dl-sub"; sub.textContent = "Columns"; el.right.appendChild(sub);
+
+    if (cfg.mode === "flexitem") {
+      var note = document.createElement("p"); note.className = "dl-hint";
+      note.textContent = "How many cards show at once in the carousel strip. Fewer cards = wider cards.";
+      el.right.appendChild(note);
+      var curBasis = String(S.styles[target]["flex-basis"] || "");
+      var mm = curBasis.match(/\/\s*(\d+(?:\.\d+)?)\s*\)/);
+      var nItems = mm ? Math.round(parseFloat(mm[1])) : cfg.def;
+      sliderRow("Cards visible at once", 1, 5, 1, nItems, function (v) { return v + ""; }, function (v) {
+        var basis = "calc((100% - " + ((v - 1) * 20) + "px) / " + v + ")";
+        S.styles[target]["flex-basis"] = basis; S.styles[target]["flex-grow"] = "0"; S.styles[target]["flex-shrink"] = "0";
+        pv({ action: "live_prop", blockIdx: st.sel, selector: target, prop: "flex-basis", value: basis });
+        pv({ action: "live_prop", blockIdx: st.sel, selector: target, prop: "flex-grow", value: "0" });
+        pv({ action: "live_prop", blockIdx: st.sel, selector: target, prop: "flex-shrink", value: "0" });
+        st.dirty = true; applyChangeDebounced();
+      });
+      return;
+    }
+
+    // Grid mode.
+    var cur = String(S.styles[target]["grid-template-columns"] || "");
+    var tokens = cur ? cur.split(/\s+/) : [];
+    var n = tokens.length || cfg.def;
+
+    function writeCols(arr) {
+      var val = arr.map(function (x) { var k = parseFloat(x); return (isFinite(k) && k > 0 ? k : 1) + "fr"; }).join(" ");
+      S.styles[target]["grid-template-columns"] = val;
+      pv({ action: "live_prop", blockIdx: st.sel, selector: target, prop: "grid-template-columns", value: val });
+      st.dirty = true; applyChangeDebounced();
+    }
+
+    var colNote = document.createElement("p"); colNote.className = "dl-hint";
+    colNote.textContent = "Drag for that many equal columns, or type each column’s share below for different widths (2 = twice as wide as 1), just like the padding boxes.";
+    el.right.appendChild(colNote);
+
+    var cr = sliderRow("Number of columns (equal)", 1, 6, 1, n, function (v) { return v + ""; }, function (v) {
+      var arr = []; for (var k = 0; k < v; k++) { arr.push(1); } writeCols(arr);
+    });
+    cr.addEventListener("change", function () { renderRight(); }); // rebuild the per-column boxes on release
+
+    var boxTitle = document.createElement("div"); boxTitle.className = "dl-b4-title"; boxTitle.textContent = "Each column’s width"; el.right.appendChild(boxTitle);
+    var shares = tokens.length ? tokens.map(function (t) { return t.replace(/fr$/i, "") || "1"; }) : [];
+    for (var z = shares.length; z < n; z++) { shares.push(""); }
+    shares = shares.slice(0, n);
+    var crow = document.createElement("div"); crow.className = "dl-box4"; crow.style.gridTemplateColumns = "repeat(" + n + ",1fr)";
+    shares.forEach(function (val, idx) {
+      var cell = document.createElement("div"); cell.className = "dl-b4-cell";
+      var lab = document.createElement("span"); lab.className = "dl-b4-lab"; lab.textContent = (idx + 1);
+      var inp = document.createElement("input"); inp.type = "number"; inp.min = "0"; inp.step = "0.1"; inp.placeholder = "1"; inp.value = val;
+      inp.addEventListener("input", function () { shares[idx] = inp.value || "1"; writeCols(shares); });
+      cell.appendChild(lab); cell.appendChild(inp); crow.appendChild(cell);
+    });
+    el.right.appendChild(crow);
+
+    var eqBtn = document.createElement("button"); eqBtn.type = "button"; eqBtn.className = "dl-mini"; eqBtn.textContent = "Make all equal";
+    eqBtn.addEventListener("click", function () { var arr = []; for (var k = 0; k < n; k++) { arr.push(1); } writeCols(arr); renderRight(); });
+    el.right.appendChild(eqBtn);
   }
 
   function renderBlockSettings(block) {
@@ -1601,6 +1737,9 @@
     });
     el.right.appendChild(rstW);
 
+    // Columns editor (block-type aware: grid columns or carousel card width).
+    renderColumns(block, S);
+
     // Content / behaviour settings for the whole block only.
     if (!selEl) {
       var cfgSub = document.createElement("div"); cfgSub.className = "dl-sub"; cfgSub.textContent = "Content & options"; el.right.appendChild(cfgSub);
@@ -1708,8 +1847,10 @@
   }
   function saveDraft() {
     var d = currentDraftPayload();
-    api("save_draft", { page: st.page, device: d.device, layout_json: JSON.stringify(d.payload) })
-      .then(function () { toast("Draft saved"); refreshPreview(); })
+    Promise.all([
+      api("save_draft", { page: st.page, device: d.device, layout_json: JSON.stringify(d.payload) }),
+      saveGlobalsSilent()
+    ]).then(function () { st.dirty = false; toast("Draft saved"); refreshPreview(); })
       .catch(function (e) { toast(e.message); });
   }
   function saveDraftSilent() {
@@ -1721,6 +1862,7 @@
   // Every editor change persists the draft then refreshes the preview, so the
   // preview always reflects the current settings (e.g. hiding search/subscribe).
   function applyChangeDebounced() {
+    if (st) { st.dirty = true; }
     clearTimeout(applyTimer);
     applyTimer = setTimeout(function () {
       // Persist the page layout AND the shared global block settings, then refresh.
@@ -1728,12 +1870,29 @@
     }, 500);
   }
 
+  function resetDesign() {
+    if (!st) { return; }
+    if (!window.confirm(
+      "Reset the design back to the original defaults?\n\n" +
+      "This clears your colours, fonts, spacing, widths, links, column layouts and block styling — the shared design used across pages, plus this page. " +
+      "Your blocks and article content are NOT removed. You can restyle again afterwards. (Goes live when you next Publish.)"
+    )) { return; }
+    st.desktop.theme = {};
+    st.globalBlocks = {};
+    st.blockTemplates = {};
+    (st.desktop.blocks || []).forEach(function (b) { b.settings = {}; b.page_specific = false; });
+    st.sel = -1; st.selEl = ""; st.selAnchorSel = ""; st.selAnchorHref = null; st.selEditKey = "";
+    st.dirty = true;
+    render();
+    Promise.all([saveDraftSilent(), saveGlobalsSilent()]).then(function () { st.dirty = false; refreshPreview(); toast("Design reset to defaults"); });
+  }
+
   function doPublish() {
     if (!window.confirm("Publish this design to the live site now? The current draft becomes the live version for this publication.")) { return; }
     var label = window.prompt("Optional label for this published version:", "");
     if (label === null) { return; }
     api("publish", { label: label })
-      .then(function (j) { toast("Published v" + j.version_no); })
+      .then(function (j) { st.dirty = false; toast("Published v" + j.version_no); })
       .catch(function (e) { toast(e.message); });
   }
 

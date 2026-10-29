@@ -133,7 +133,23 @@
     if ((m = inner.match(/^#if\s+(.+)$/))) { return { cls: "cond", text: "only if " + tokHumanize(m[1]) }; }
     if (/^\/each$/.test(inner)) { return { cls: "end", text: "end" }; }
     if (/^\/if$/.test(inner)) { return { cls: "end", text: "end" }; }
+    if ((m = inner.match(ART_TOK_RE))) {
+      var asec = (!m[1] || m[1].toLowerCase() === "latest") ? "Latest" : titleCaseSlug(m[1]);
+      var afld = { title: "headline", titlelink: "headline link", snippet: "snippet" }[m[3].toLowerCase()];
+      var atext = asec + " · " + afld + " " + m[2];
+      if (m[3].toLowerCase() === "snippet") { atext += " (" + (m[4] || "40") + "w)"; }
+      return { cls: "field", text: atext };
+    }
     return { cls: "field", text: tokHumanize(inner) };
+  }
+  // Numbered article-slot token, e.g. article:politics:2:titlelink (:40 for a
+  // snippet word-count). Kept identical to the engine resolver in
+  // design/lib/article_slots.php so both sides agree. Matches the INNER token
+  // (no braces); ART_TOK_FULL_RE matches a whole {{…}} string.
+  var ART_TOK_RE = /^article:([a-z0-9-]*):(\d+):(title|titlelink|snippet)(?::(\d+))?$/i;
+  var ART_TOK_FULL_RE = /^\{\{\s*article:([a-z0-9-]*):(\d+):(title|titlelink|snippet)(?::(\d+))?\s*\}\}$/i;
+  function titleCaseSlug(slug) {
+    return String(slug).replace(/-/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
   }
   function makeTok(raw, doc) {
     var span = doc.createElement("span");
@@ -808,6 +824,72 @@
     r.setStartAfter(tok); r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
     rememberRange(); changed();
   }
+  // ---- numbered article slots ------------------------------------------
+  // The section slug the engine expects: the tail of the section's /design/<slug>
+  // href (authoritative), else the name slugified the same way the server does.
+  function slugOf(s) {
+    var h = (s && s.href) || "";
+    var i = h.lastIndexOf("/");
+    if (i !== -1 && i + 1 < h.length) { return h.slice(i + 1); }
+    return String((s && s.name) || "").toLowerCase().replace(/\s+/g, "-");
+  }
+  // All current article-slot tokens as one string (unsaved chips included).
+  function collectArtTokens() {
+    if (w.srcMode) { return w.src ? (w.src.value || "") : ""; }
+    if (!w.root) { return ""; }
+    return [].slice.call(w.root.querySelectorAll(".dl-tok")).map(function (t) {
+      return t.getAttribute("data-tok") || "";
+    }).join(" ");
+  }
+  // Next free number for this section + field (each field numbers from 1).
+  function nextArtIndex(slug, field) {
+    var esc = slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    var re = new RegExp("article:" + esc + ":(\\d+):" + field + "(?::\\d+)?", "gi");
+    var hay = collectArtTokens(), max = 0, m;
+    while ((m = re.exec(hay))) { var k = parseInt(m[1], 10); if (k > max) { max = k; } }
+    return max + 1;
+  }
+  function openArtInsert() {
+    var secOpts = '<option value="latest">Latest (any section)</option>' +
+      (w.sections || []).map(function (s) {
+        return '<option value="' + esc(slugOf(s)) + '">' + esc(s.name) + '</option>';
+      }).join("");
+    var body =
+      '<p class="ds-dlg-say">Drop in a live article. It fills with the chosen section’s latest stories on the site. Insert more than one and they number automatically (1, 2, 3…) as different stories — a headline and a snippet with the same number are the same article.</p>' +
+      '<label class="ds-f"><span>Section</span><select id="dsArtSec">' + secOpts + '</select></label>' +
+      '<label class="ds-f"><span>Show</span><select id="dsArtField">' +
+        '<option value="titlelink">Headline — links to the article</option>' +
+        '<option value="title">Headline — text only</option>' +
+        '<option value="snippet">Snippet — teaser text</option>' +
+      '</select></label>' +
+      '<label class="ds-f" id="dsArtWordsWrap"><span>Snippet length (words)</span>' +
+        '<input type="number" id="dsArtWords" min="1" step="1" value="40"></label>' +
+      '<div class="ds-dlg-actions">' +
+        '<button type="button" class="ds-btn" id="dsArtCancel">Cancel</button>' +
+        '<button type="button" class="ds-btn ds-btn-primary" id="dsArtDo"><i class="fas fa-plus"></i> Insert</button>' +
+      '</div>';
+    var dlg = DS.dialog({ title: "Insert an article", body: body });
+    var root = dlg.el;
+    var fieldSel = root.querySelector("#dsArtField");
+    var wordsWrap = root.querySelector("#dsArtWordsWrap");
+    function syncWords() { wordsWrap.style.display = (fieldSel.value === "snippet") ? "" : "none"; }
+    fieldSel.addEventListener("change", syncWords); syncWords();
+    root.querySelector("#dsArtCancel").addEventListener("click", function () { dlg.close(); });
+    root.querySelector("#dsArtDo").addEventListener("click", function () {
+      var slug = root.querySelector("#dsArtSec").value || "latest";
+      var field = fieldSel.value;
+      var n = nextArtIndex(slug, field);
+      var tok = "{{article:" + slug + ":" + n + ":" + field;
+      if (field === "snippet") {
+        var wds = Math.max(1, parseInt(root.querySelector("#dsArtWords").value, 10) || 40);
+        if (wds !== 40) { tok += ":" + wds; }
+      }
+      tok += "}}";
+      dlg.close();
+      insertToken(tok);
+    });
+  }
+
   function toggleSource() {
     if (!w.srcMode) {
       w.src.value = templateHtml();
@@ -1132,6 +1214,12 @@
     w.insSel = container.querySelector("#dsHeTokSel");
     w.insSel.addEventListener("mousedown", function () { rememberRange(); });
     w.insSel.addEventListener("change", function () { if (w.insSel.value !== "") { insertToken(w.insSel.value); } w.insSel.value = ""; });
+
+    var artBtn = container.querySelector("#dsHeArt");
+    if (artBtn) {
+      artBtn.addEventListener("mousedown", function () { rememberRange(); });
+      artBtn.addEventListener("click", function (e) { e.preventDefault(); rememberRange(); openArtInsert(); });
+    }
 
     // The raw-HTML toggle now lives in the editor's top header (block_editor.js);
     // keep this wiring only if a rail button is present.
@@ -1516,6 +1604,20 @@
       (withCols ? '<div class="ds-insp-fmt"><button type="button" data-col="add">+ column</button><button type="button" data-col="rm">&minus; column</button></div>' : ""));
   }
 
+  // If the selected element is a numbered-article SNIPPET chip, return its parts
+  // so the inspector can offer a word-length control; otherwise null.
+  function selectedArtSnippet(el) {
+    if (!el || !el.classList || !el.classList.contains("dl-tok")) { return null; }
+    var m = ART_TOK_FULL_RE.exec(el.getAttribute("data-tok") || "");
+    if (!m || m[3].toLowerCase() !== "snippet") { return null; }
+    return { slug: m[1], n: m[2], words: (m[4] ? parseInt(m[4], 10) : 40) };
+  }
+  function gArtSnippet(info) {
+    return group("Article snippet",
+      '<label class="ds-insp-row"><span>Length (words)</span><span class="ds-insp-len">' +
+        '<input type="number" min="1" step="1" class="ds-insp-num ds-art-words" value="' + info.words + '"></span></label>');
+  }
+
   // Groups shown for each taxonomy kind — only what fits that kind.
   function groupsForKind(kind, el) {
     switch (kind) {
@@ -1567,6 +1669,7 @@
       '<div class="ds-insp-head"><span class="ds-insp-kind">' + esc(DS.KIND_LABEL[kind] || "Element") + '</span>' +
         '<span class="ds-insp-sub">' + esc(friendlyEl(el)) + '</span>' +
         (canParent ? '<button type="button" class="ds-insp-parent" title="Select the element around this one"><i class="fas fa-arrow-up"></i> Parent</button>' : "") + '</div>' +
+      (function () { var a = selectedArtSnippet(el); return a ? gArtSnippet(a) : ""; })() +
       groupsForKind(kind, el);
     wireInspector();
     if (w.gridEl && (kind === "list" || kind === "container")) { mountGridHandles(w.gridEl); } else { clearGridHandles(); }
@@ -1602,6 +1705,20 @@
         renderSpacingHandles();
       });
     });
+    // Article snippet word-length — rewrites the selected snippet chip's token.
+    var artWords = ins.querySelector(".ds-art-words");
+    if (artWords) {
+      artWords.addEventListener("change", function () {
+        var el = w.selEl; if (!el) { return; }
+        var m = ART_TOK_FULL_RE.exec(el.getAttribute("data-tok") || "");
+        if (!m || m[3].toLowerCase() !== "snippet") { return; }
+        var n = Math.max(1, parseInt(artWords.value, 10) || 40);
+        var tok = "{{article:" + m[1] + ":" + m[2] + ":snippet" + (n !== 40 ? ":" + n : "") + "}}";
+        el.setAttribute("data-tok", tok);
+        el.textContent = tokInfo(tok).text;
+        rememberRange(); changed();
+      });
+    }
     ins.querySelectorAll(".ds-insp-num, .ds-insp-unit").forEach(function (i) {
       i.addEventListener("input", function () { applyLen(i.dataset.prop); });
       i.addEventListener("change", function () { applyLen(i.dataset.prop); });
@@ -1697,6 +1814,8 @@
               '<div class="ds-he-rail-h">Placeholder</div>' +
               '<select class="ds-he-tok" id="dsHeTokSel"><option value="">Insert placeholder…</option></select>' +
               '<div class="ds-he-rail-note">Every placeholder — this block first, then shared &amp; all blocks.</div>' +
+              '<button type="button" class="ds-he-ins ds-he-artbtn" id="dsHeArt"><i class="fas fa-newspaper"></i> Insert article</button>' +
+              '<div class="ds-he-rail-note">A live article headline, link or snippet. Insert several and they number automatically as different stories.</div>' +
             '</div>' +
             '<div class="ds-he-rail-sec ds-he-rail-grow">' +
               '<div class="ds-he-rail-h">Layers</div>' +

@@ -43,6 +43,68 @@ function ten_normalize_datetime($v): ?string {
     return $ts ? date('Y-m-d H:i:s', $ts) : null;
 }
 
+/**
+ * Validate the sources payload (a JSON array of {title,url,link}) sent by the
+ * editor and return a clean JSON string; anything malformed becomes '[]'. Each
+ * kept entry has a trimmed title, a trimmed url, and a boolean `link` flag (does
+ * the live site render it as a clickable link, or as plain text).
+ */
+function ten_sanitize_sources_json($raw): string {
+    $raw = trim((string)$raw);
+    if ($raw === '') { return '[]'; }
+    $arr = json_decode($raw, true);
+    if (!is_array($arr)) { return '[]'; }
+    $out = [];
+    foreach ($arr as $row) {
+        if (!is_array($row)) { continue; }
+        $title = isset($row['title']) ? trim((string)$row['title']) : '';
+        $url   = isset($row['url'])   ? trim((string)$row['url'])   : '';
+        $link  = !empty($row['link']);
+        if ($title === '' && $url === '') { continue; }
+        $title = function_exists('mb_substr') ? mb_substr($title, 0, 300) : substr($title, 0, 300);
+        $url   = function_exists('mb_substr') ? mb_substr($url, 0, 1000) : substr($url, 0, 1000);
+        $out[] = ['title' => $title, 'url' => $url, 'link' => $link];
+    }
+    return json_encode($out, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+}
+
+/** Add the articles.sources column on first use (idempotent). */
+function ten_ensure_article_sources_column($conn) {
+    $res = $conn->query("SHOW COLUMNS FROM articles LIKE 'sources'");
+    if ($res && $res->num_rows === 0) {
+        $conn->query("ALTER TABLE articles ADD COLUMN sources TEXT NULL");
+    }
+    if ($res) { $res->free(); }
+}
+
+/**
+ * Validate the carousel-picks payload: a JSON array of article IDs the editor has
+ * hand-picked to lead this article's "More stories" carousel, in display order.
+ * Returns a clean JSON string of unique positive ints (capped), or '[]'.
+ */
+function ten_sanitize_carousel_picks_json($raw): string {
+    $raw = trim((string)$raw);
+    if ($raw === '') { return '[]'; }
+    $arr = json_decode($raw, true);
+    if (!is_array($arr)) { return '[]'; }
+    $out = [];
+    foreach ($arr as $v) {
+        $id = (int)$v;
+        if ($id > 0 && !in_array($id, $out, true)) { $out[] = $id; }
+        if (count($out) >= 50) { break; }   // sane upper bound
+    }
+    return json_encode(array_values($out));
+}
+
+/** Add the articles.carousel_picks column on first use (idempotent). */
+function ten_ensure_article_carousel_picks_column($conn) {
+    $res = $conn->query("SHOW COLUMNS FROM articles LIKE 'carousel_picks'");
+    if ($res && $res->num_rows === 0) {
+        $conn->query("ALTER TABLE articles ADD COLUMN carousel_picks TEXT NULL");
+    }
+    if ($res) { $res->free(); }
+}
+
 /** Create the per-publication flags table on first use (idempotent). */
 function ten_ensure_pub_flags_table($conn) {
     $conn->query("CREATE TABLE IF NOT EXISTS article_pub_flags (
@@ -141,6 +203,8 @@ $canonical = isset($_POST['canonical']) ? trim($_POST['canonical']) : '';
 $metaTitle = isset($_POST['meta_title']) ? trim($_POST['meta_title']) : '';
 $metaDescription = isset($_POST['meta_description']) ? trim($_POST['meta_description']) : '';
 $metaKeywords = isset($_POST['meta_keywords']) ? trim($_POST['meta_keywords']) : '';
+$sources = ten_sanitize_sources_json(isset($_POST['sources']) ? $_POST['sources'] : '[]');
+$carouselPicks = ten_sanitize_carousel_picks_json(isset($_POST['carousel_picks']) ? $_POST['carousel_picks'] : '[]');
 $evergreen = isset($_POST['evergreen']) ? intval($_POST['evergreen']) : 0;
 $featured = isset($_POST['featured']) ? intval($_POST['featured']) : 0;
 $sponsored = isset($_POST['sponsored']) ? intval($_POST['sponsored']) : 0;
@@ -226,7 +290,9 @@ try {
     
     // Connect to admin_ten database
     $conn = getDBConnection_TENAdmin();
-    
+    ten_ensure_article_sources_column($conn);
+    ten_ensure_article_carousel_picks_column($conn);
+
     // Check if article exists and user has permission
     if ($articleId > 0) {
         $checkStmt = $conn->prepare("SELECT journalist_id, state, section, publications FROM articles WHERE id = ?");
@@ -340,6 +406,8 @@ try {
         'section' => $section, 'section_subcat' => $sectionSubcat, 'journalist_id' => $author,
         'publications' => $publications, 'canonical' => $canonical, 'meta_title' => $metaTitle,
         'meta_description' => $metaDescription, 'meta_keywords' => $metaKeywords,
+        'sources' => $sources,
+        'carousel_picks' => $carouselPicks,
         'evergreen' => $evergreen, 'featured' => $featured, 'sponsored' => $sponsored,
         'frontpage_temp' => $headline, 'note' => $note, 'created_by' => $createdBy,
         'publish_now' => $publishNow, 'publish_from' => $publishFrom, 'publish_to' => $publishTo,
@@ -364,6 +432,7 @@ try {
             meta_title = ?,
             meta_description = ?,
             meta_keywords = ?,
+            sources = ?,
             evergreen = ?,
             featured = ?,
             sponsored = ?,
@@ -378,7 +447,7 @@ try {
             WHERE id = ?";
 
         $stmt = $conn->prepare($query);
-        $stmt->bind_param('ssssssisssssiiiississsi',
+        $stmt->bind_param('ssssssissssssiiiississsi',
             $title,
             $articleText,
             $alias,
@@ -391,6 +460,7 @@ try {
             $metaTitle,
             $metaDescription,
             $metaKeywords,
+            $sources,
             $evergreen,
             $featured,
             $sponsored,
@@ -414,6 +484,12 @@ try {
             $slug = substr(ten_article_slug($title) . '-' . $articleId, 0, 200);
             $su = $conn->prepare("UPDATE articles SET url = ? WHERE id = ?");
             $su->bind_param('si', $slug, $articleId); $su->execute(); $su->close();
+
+            // Editor-chosen carousel picks (ordered JSON of article ids) — stored in
+            // its own column so the article page's "More stories" carousel can lead
+            // with them, then auto-fill the rest.
+            $cp = $conn->prepare("UPDATE articles SET carousel_picks = ? WHERE id = ?");
+            $cp->bind_param('si', $carouselPicks, $articleId); $cp->execute(); $cp->close();
 
             // Auto-populate the featured image (filename only) from the first body
             // image, but only if image_url is not already set.
@@ -466,13 +542,13 @@ try {
         // $createdBy was resolved from the author above (shared with the UPDATE path).
         $insert = "INSERT INTO articles
             (title, article_text, alias, tags, section, section_subcat, journalist_id, publications, canonical,
-             meta_title, meta_description, meta_keywords, evergreen, featured, sponsored, frontpage_temp, note,
+             meta_title, meta_description, meta_keywords, sources, evergreen, featured, sponsored, frontpage_temp, note,
              publish_now, publish_from, publish_to, state, created_by, submission_date, modified_date)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, NOW(), NOW())";
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, NOW(), NOW())";
         $stmt = $conn->prepare($insert);
-        $stmt->bind_param('ssssssisssssiiiisissss',
+        $stmt->bind_param('ssssssissssssiiiisissss',
             $title, $articleText, $alias, $tags, $section, $sectionSubcat, $author, $publications, $canonical,
-            $metaTitle, $metaDescription, $metaKeywords, $evergreen, $featured, $sponsored, $headline, $note,
+            $metaTitle, $metaDescription, $metaKeywords, $sources, $evergreen, $featured, $sponsored, $headline, $note,
             $publishNow, $publishFrom, $publishTo, $state, $createdBy
         );
         if ($stmt->execute()) {
@@ -484,6 +560,10 @@ try {
             $slug = substr(ten_article_slug($title) . '-' . $newId, 0, 200);
             $su = $conn->prepare("UPDATE articles SET url = ? WHERE id = ?");
             $su->bind_param('si', $slug, $newId); $su->execute(); $su->close();
+
+            // Editor-chosen carousel picks (ordered JSON of article ids).
+            $cp = $conn->prepare("UPDATE articles SET carousel_picks = ? WHERE id = ?");
+            $cp->bind_param('si', $carouselPicks, $newId); $cp->execute(); $cp->close();
 
             // Featured image (filename only) from the first body image, if any.
             if (preg_match('#<img[^>]+src=[\'"]([^\'"]+)[\'"]#i', $articleText, $mm)) {

@@ -27,21 +27,25 @@
           '<button data-dev="mobile" class="' + (DS.ds.device === "mobile" ? "on" : "") + '">Mobile</button>' +
         '</div>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeContent"><i class="fas fa-sliders"></i> Content</button>' +
+        '<button class="ds-btn ds-btn-ghost" id="dsBeHtml"><i class="fas fa-code"></i> Edit HTML</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeUndo"><i class="fas fa-rotate-left"></i> Undo</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeRedo"><i class="fas fa-rotate-right"></i> Redo</button>' +
-        '<button class="ds-btn ds-btn-ghost" id="dsBePlaceholders"><i class="fas fa-code"></i> Placeholders</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeHistory"><i class="fas fa-clock-rotate-left"></i> History</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBePreview"><i class="fas fa-up-right-from-square"></i> Preview</button>' +
         '<button class="ds-btn ds-btn-primary" id="dsBeSave"><i class="fas fa-floppy-disk"></i> Save</button>' +
       '</header>' +
       '<div class="ds-be">' +
         '<div class="ds-be-preview"><div class="ds-be-label">Preview</div><iframe id="dsBePv" title="Live preview"></iframe></div>' +
+        '<div class="ds-be-split" id="dsBeSplit" title="Drag to resize the preview"></div>' +
         '<div class="ds-be-editor" id="dsBeEditor"></div>' +
       '</div>';
+    wireBeSplitter(root);
 
     root.querySelector("#dsBeBack").addEventListener("click", function () {
       function go(save) {
         clearTimeout(saveTimer);
+        bs.closing = true;                                  // stop any late autosave from re-writing the draft
+        if (DS.HtmlEditor.cancelPending) { DS.HtmlEditor.cancelPending(); }
         bs.dirty = false; DS.setDirty(false);
         if (save) {
           saveNow().then(function () {
@@ -50,13 +54,22 @@
             if (bs.undo) { bs.undo.clear(); } DS.dsGo("home");
           }).catch(function (e) { DS.toast(e.message); });
         } else {
-          if (bs.undo) { bs.undo.clear(); } DS.dsGo("home");
+          // Discard: the editor autosaves to the draft while you work, so leaving
+          // must put the block back to how it was when this editing session began —
+          // otherwise the unsaved edits would linger (cached) next time it is opened.
+          restoreOriginal().then(function () { if (bs.undo) { bs.undo.clear(); } DS.dsGo("home"); })
+            .catch(function () { if (bs.undo) { bs.undo.clear(); } DS.dsGo("home"); });
         }
       }
       if (bs && bs.dirty) { DS.confirmLeave(function () { go(true); }, function () { go(false); }); }
-      else { clearTimeout(saveTimer); saveNow(); if (bs.undo) { bs.undo.clear(); } DS.dsGo("home"); }
+      else { clearTimeout(saveTimer); if (bs.undo) { bs.undo.clear(); } DS.dsGo("home"); }
     });
-    root.querySelector("#dsBePlaceholders").addEventListener("click", function () { DS.openPlaceholders({ block: type }); });
+    root.querySelector("#dsBeHtml").addEventListener("click", function () {
+      var btn = this;
+      var src = (DS.HtmlEditor.toggleSource) ? DS.HtmlEditor.toggleSource() : false;
+      btn.classList.toggle("ds-on", src);
+      btn.innerHTML = src ? '<i class="fas fa-eye"></i> Visual' : '<i class="fas fa-code"></i> Edit HTML';
+    });
     root.querySelector("#dsBePreview").addEventListener("click", function () { window.open(DS.previewUrl({ block: type }), "_blank"); });
     root.querySelector("#dsBeUndo").addEventListener("click", function () {
       if (bs.undo && bs.undo.canUndo()) { bs.undo.undo(); DS.toast("Reverted"); } else { DS.toast("Nothing to undo"); }
@@ -69,6 +82,7 @@
         var html = ""; try { html = (DS.HtmlEditor.getHtml && DS.HtmlEditor.getHtml()) || ""; } catch (e) {}
         DS.addHistory("block", bs.type, { template: html || bs.html || "", settings: bs.store.settings[bs.type] || {} });
         bs.dirty = false; DS.setDirty(false);
+        captureOriginal();     // this saved state is now the baseline a later Discard reverts to
         DS.toast("Saved"); previewReload();
       }).catch(function (e) { DS.toast(e.message); });
     });
@@ -128,7 +142,8 @@
       var layout = j.layout || {};
       bs.store = { templates: toObj(layout.templates), settings: toObj(layout.settings), names: toObj(layout.names) };
       var saved = bs.store.templates[type];
-      if (saved != null && saved !== "") { startEditor(saved); return; }
+      bs.hadStored = (saved != null && saved !== "");
+      if (bs.hadStored) { startEditor(saved); return; }
       // No stored template: load the built-in default via the same-origin proxy,
       // with a timeout fallback so the editor never stays blank.
       var done = false, fallback = '<div class="dl-block-custom"><p>Start typing here…</p></div>';
@@ -142,11 +157,34 @@
 
   function startEditor(html) {
     bs.html = html; bs.lastHtml = html;
+    captureOriginal(html);     // snapshot the session's starting point for Discard
     DS.HtmlEditor.setHtml(html);
     previewReload();
   }
 
+  // Remember the current saved state so an exit-without-saving can roll back to it.
+  function captureOriginal(html) {
+    if (html == null) { try { html = (DS.HtmlEditor.getHtml && DS.HtmlEditor.getHtml()) || bs.html; } catch (e) { html = bs.html; } }
+    var settings = {};
+    try { settings = JSON.parse(JSON.stringify(bs.store.settings[bs.type] || {})); } catch (e) { settings = bs.store.settings[bs.type] || {}; }
+    bs.original = { template: html, settings: settings };
+  }
+
+  // Put the block back to the captured starting point (used on Discard) and persist
+  // it, so the draft no longer holds the unsaved edits made this session.
+  function restoreOriginal() {
+    clearTimeout(saveTimer);
+    if (!bs || !bs.original) { return Promise.resolve(); }
+    if (bs.hadStored) { bs.store.templates[bs.type] = bs.original.template; }
+    else { delete bs.store.templates[bs.type]; }
+    bs.store.settings[bs.type] = bs.original.settings;
+    bs.dirty = false; DS.setDirty(false);
+    return DS.api("save_draft", { page: "_blocks", device: "desktop",
+      layout_json: JSON.stringify({ templates: bs.store.templates, settings: bs.store.settings, names: bs.store.names }) });
+  }
+
   function onEditorChange(html) {
+    if (!bs || bs.closing) { return; }
     if (html === bs.lastHtml) { return; }
     bs.undo.push();
     bs.lastHtml = html; bs.html = html;
@@ -161,6 +199,35 @@
     var wrap = f.parentNode;
     if (wrap) { wrap.classList.toggle("ds-mobile", DS.ds.device === "mobile"); }
     f.src = DS.previewUrl({ block: bs.type });
+  }
+
+  // Drag the divider to resize the preview pane (the editor below takes the rest).
+  // The chosen height is remembered across sessions.
+  function wireBeSplitter(root) {
+    var split = root.querySelector("#dsBeSplit");
+    var be = root.querySelector(".ds-be");
+    var preview = root.querySelector(".ds-be-preview");
+    if (!split || !be || !preview) { return; }
+    try { var saved = localStorage.getItem("ds_be_preview_h"); if (saved) { preview.style.flex = "0 0 " + saved; } } catch (e) {}
+    split.addEventListener("mousedown", function (e) {
+      e.preventDefault();
+      document.body.classList.add("ds-be-resizing");
+      function mv(ev) {
+        var rect = be.getBoundingClientRect();
+        var h = ev.clientY - rect.top;
+        var min = 120, max = rect.height - 160;
+        h = Math.max(min, Math.min(max, h));
+        preview.style.flex = "0 0 " + h + "px";
+      }
+      function up() {
+        document.removeEventListener("mousemove", mv);
+        document.removeEventListener("mouseup", up);
+        document.body.classList.remove("ds-be-resizing");
+        try { localStorage.setItem("ds_be_preview_h", Math.round(preview.getBoundingClientRect().height) + "px"); } catch (e) {}
+      }
+      document.addEventListener("mousemove", mv);
+      document.addEventListener("mouseup", up);
+    });
   }
 
   function humanizeKey(k) { return k.replace(/_/g, " ").replace(/^\w/, function (c) { return c.toUpperCase(); }); }
@@ -214,7 +281,9 @@
   // edit. Preserves settings + names so nothing is dropped.
   function saveAndRefresh() {
     clearTimeout(saveTimer);
+    if (bs && bs.closing) { return; }                 // don't autosave while leaving
     saveTimer = setTimeout(function () {
+      if (bs && bs.closing) { return; }
       // Read the current editor content directly — robust against any async
       // reset of block state during the no-stored-template (cross-origin) load.
       var cur = "";

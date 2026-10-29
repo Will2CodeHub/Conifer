@@ -84,6 +84,14 @@ function ec_merge_fields(): array {
  * braces never reach a recipient.
  */
 function ec_render(string $body, array $contact, string $unsubUrl): string {
+    // In an HTML body, turn a BARE {{unsubscribe_url}} (one not already used as a link's
+    // href) into a clearly-labelled link, so sent HTML emails ALWAYS show an identifiable
+    // unsubscribe link instead of a raw URL — whatever the template contains. Plain-text
+    // bodies and subject lines (no HTML tags) are left untouched.
+    if (strpos($body, '{{unsubscribe_url}}') !== false && preg_match('/<[a-z][^>]*>/i', $body)) {
+        $body = preg_replace('/(?<!href=")(?<!href=\'){{unsubscribe_url}}/',
+            '<a href="{{unsubscribe_url}}">click here to unsubscribe</a>', $body);
+    }
     $map = ['{{unsubscribe_url}}' => $unsubUrl];
     foreach (ec_merge_fields() as $f) {
         $map[$f['token']] = (string)($contact[$f['col']] ?? '');

@@ -79,7 +79,7 @@ ec_ensure_schema(ec_db()); // idempotent: adds newer contact fields / categories
         .ec-overlay{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:flex-start;justify-content:center;z-index:2000;overflow-y:auto;padding:34px 14px}
         .ec-overlay.open{display:flex}.ec-modal{background:#fff;border-radius:12px;width:100%;max-width:720px;box-shadow:0 20px 50px rgba(0,0,0,.25)}
         .ec-modal h2{font-size:17px;margin:0}.ec-mh{padding:16px 20px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center}
-        .ec-mb{padding:22px 22px 8px;line-height:1.5}
+        .ec-mb{padding:22px 22px 8px;line-height:1.5;overflow-x:auto}
         .ec-mb h4{margin:22px 0 12px;font-size:14px;color:#374151;border-top:1px solid #f1f5f9;padding-top:18px}
         .ec-mb > p{margin:0 0 16px;line-height:1.6}.ec-mf{padding:14px 20px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;gap:8px}
         .closex{background:none;border:none;font-size:22px;color:#9ca3af;cursor:pointer}
@@ -872,6 +872,7 @@ function ecInsertStrip(target,includeMerge,includeSig){
     var mergeOpts='<option value="">Insert field ▾</option>'+EC_MERGE.map(function(f){return '<option value="'+f.token+'">'+esc(f.label)+'</option>';}).join('');
     return '<div class="ecedit-tb">'+
         (includeMerge?'<select class="ecedit-sel ecMergeSel" title="Insert a contact field" onchange="ecInsField(this,\''+target+'\')">'+mergeOpts+'</select>':'')+
+        (includeMerge?'<button type="button" class="ecUnsubBtn" title="Insert a labelled, clickable unsubscribe link" onclick="ecInsUnsub(\''+target+'\')" style="font-size:12px;padding:3px 9px;border:1px solid #d6dae0;border-radius:6px;background:#fff;cursor:pointer"><i class="fas fa-link"></i> Unsubscribe link</button>':'')+
         (includeSig?'<select class="ecedit-sel ecSigSel" title="Insert a signature" onchange="ecInsSig(this,\''+target+'\')"><option value="">Insert signature ▾</option></select>':'')+
     '</div>';
 }
@@ -990,6 +991,18 @@ function ecInsertInto(target,payload,isHtml){
     else { var ta=(target==='text')?document.getElementById('ecText'):document.getElementById('ecSrc'); if(ta) ecInsertAtCaret(ta,payload); }
 }
 function ecInsField(sel,target){ var tok=sel.value; sel.selectedIndex=0; if(tok) ecInsertInto(target,tok,false); }
+/* Insert a proper unsubscribe link. In HTML this is a real, labelled anchor
+ * (<a href="{{unsubscribe_url}}">Unsubscribe</a>) rather than the bare token, which would
+ * render as an unlabelled raw URL. In plain text it's a labelled line. The sanitiser allows
+ * an href beginning with "{{", so the merge token survives; ec_render swaps in the real URL. */
+function ecInsUnsub(target){
+    // Insert a self-describing unsubscribe line — the surrounding words AND the link text
+    // both make clear what the link does, not a bare "Unsubscribe" or raw URL.
+    var htmlSnip='<p>If you no longer wish to receive these emails, <a href="{{unsubscribe_url}}">click here to unsubscribe</a>.</p>';
+    var textSnip='If you no longer wish to receive these emails, you can unsubscribe here: {{unsubscribe_url}}';
+    if(target==='text') ecInsertInto('text','\n'+textSnip+'\n',false);
+    else ecInsertInto('html',htmlSnip,true);
+}
 function ecInsSig(sel,target){ var id=sel.value; sel.selectedIndex=0; if(!id) return;
     var sig=(EC.signaturesCache||[]).find(function(x){return String(x.id)===String(id);}); if(!sig){ toast('Signature not loaded yet — try again','error'); return; }
     if(target==='text'){ // plain destination: always use the plain-text version
@@ -1182,7 +1195,49 @@ function kSentSelLoad(){ var k=_shRows[_shCur]; if(!k)return;
         box.innerHTML=h;
     }).fail(function(){ var box=document.getElementById('ecModalBody'); if(box) box.innerHTML='<p class="ec-hint">Failed to load.</p>'; });
 }
-function kLoad(){ var showArch=document.getElementById('kShowArchived')&&document.getElementById('kShowArchived').checked?1:0; post(EC.campaigns,{action:'list',include_archived:showArch}).done(function(r){ if(!r.success){toast(r.message,'error');return;} let h='<table class="ec-tbl"><thead><tr><th>Name</th><th>Audience</th><th>Status</th><th>Sent/Total</th><th></th></tr></thead><tbody>'; r.rows.forEach(function(c){ var arch=(c.archived==1); h+='<tr'+(arch?' style="opacity:.55"':'')+'><td>'+esc(c.name)+(arch?' <span class="ec-badge b-cancelled">archived</span>':'')+'</td><td>'+esc(c.audience_name||'')+'</td><td><span class="ec-badge b-'+c.status+'">'+c.status+'</span></td><td>'+c.sent+'/'+c.total+'</td><td style="white-space:nowrap"><button class="ec-btn light sm" onclick="kEdit('+c.id+')">Edit</button> <button class="ec-btn light sm" onclick="kReview('+c.id+')">Review &amp; launch</button> <button class="ec-btn light sm" onclick="kRerun('+c.id+')">Add new &amp; re-run</button> '+(c.total>0?'<button class="ec-btn light sm" onclick="kResend('+c.id+')">Send again</button> ':'')+(arch?'<button class="ec-btn light sm" onclick="kArchive('+c.id+',0)">Unarchive</button>':'<button class="ec-btn light sm" onclick="kArchive('+c.id+',1)">Archive</button>')+' <button class="ec-btn danger sm" onclick="kDelete('+c.id+')">Delete</button></td></tr>'; }); h+='</tbody></table>'; document.getElementById('kTable').innerHTML=h; }); }
+function kLoad(){ var showArch=document.getElementById('kShowArchived')&&document.getElementById('kShowArchived').checked?1:0; post(EC.campaigns,{action:'list',include_archived:showArch}).done(function(r){ if(!r.success){toast(r.message,'error');return;} let h='<table class="ec-tbl"><thead><tr><th>Name</th><th>Audience</th><th>Status</th><th>Sent/Total</th><th></th></tr></thead><tbody>'; r.rows.forEach(function(c){ var arch=(c.archived==1); (window._kNames=window._kNames||{})[c.id]=c.name; h+='<tr'+(arch?' style="opacity:.55"':'')+'><td>'+esc(c.name)+(arch?' <span class="ec-badge b-cancelled">archived</span>':'')+'</td><td>'+esc(c.audience_name||'')+'</td><td>'+kStatusBadge(c)+'</td><td>'+c.sent+'/'+c.total+'</td><td style="white-space:nowrap"><button class="ec-btn light sm" onclick="kEdit('+c.id+')">Edit</button> <button class="ec-btn light sm" onclick="kReview('+c.id+')">Review &amp; launch</button> <button class="ec-btn light sm" onclick="kRerun('+c.id+')">Add new &amp; re-run</button> '+(c.total>0?'<button class="ec-btn light sm" onclick="kResend('+c.id+')">Send again</button> ':'')+(arch?'<button class="ec-btn light sm" onclick="kArchive('+c.id+',0)">Unarchive</button>':'<button class="ec-btn light sm" onclick="kArchive('+c.id+',1)">Archive</button>')+' <button class="ec-btn danger sm" onclick="kDelete('+c.id+')">Delete</button></td></tr>'; }); h+='</tbody></table>'; document.getElementById('kTable').innerHTML=h;
+    // Auto-refresh the list while any campaign is live, so the status pill and sent/total
+    // counts update on their own. Stops when nothing is live or the tab isn't visible.
+    kAutoStop();
+    var _kt=document.getElementById('kTable');
+    if(_kt && _kt.offsetParent!==null && (r.rows||[]).some(function(c){return c.status==='sending'||c.status==='scheduled'||c.status==='paused';})) _kAutoT=setTimeout(kLoad,7000);
+    }); }
+var _kAutoT=null;
+function kAutoStop(){ if(_kAutoT){ clearTimeout(_kAutoT); _kAutoT=null; } }
+/* The campaign status pill. While a campaign is live (sending/scheduled/paused) the pill
+ * is a link that opens the send queue so you can see when each email goes out. */
+function kStatusBadge(c){
+    var live={sending:1,scheduled:1,paused:1};
+    if(live[c.status]) return '<span class="ec-badge b-'+c.status+'" role="button" tabindex="0" style="cursor:pointer;text-decoration:underline dotted" title="View the send queue — when each email goes out" onclick="kQueue('+c.id+')">'+c.status+' <i class="fas fa-clock" style="font-size:9px"></i></span>';
+    return '<span class="ec-badge b-'+c.status+'">'+c.status+'</span>';
+}
+function whenLabel(sa,now){ var s=String(sa||'').replace('T',' '), n=String(now||'').replace('T',' ');
+    if(!s) return (n?esc(n):'')+' <span class="ec-hint">(next run, within a minute)</span>'; // no explicit time = sends on the next cron tick
+    return esc(s)+((s<=n)?' <span class="ec-hint">(due now)</span>':''); }
+/* Send queue / schedule for one campaign — opened from the status pill. */
+function kQueue(id){
+    var nm=(window._kNames||{})[id]||'';
+    ecModal('Send queue'+(nm?(' — '+esc(nm)):''), '<p class="ec-hint"><i class="fas fa-spinner fa-spin"></i> Loading…</p>', '<button class="ec-btn light" onclick="ecClose()">Close</button>');
+    post(EC.campaigns,{action:'queue',id:id,limit:2000}).done(function(r){
+        var box=document.getElementById('ecModalBody'); if(!box) return;
+        if(!r.success){ box.innerHTML='<p class="ec-hint">'+esc(r.message||'Failed to load')+'</p>'; return; }
+        var rows=r.rows||[], cnt=r.counts||{}, now=r.now||'';
+        if(!rows.length){ box.innerHTML='<p class="ec-hint">No recipients yet — materialise the campaign first (Review &amp; launch).</p>'; return; }
+        var summ=['queued','sent','failed','skipped'].filter(function(k){return cnt[k];}).map(function(k){return '<b>'+cnt[k]+'</b> '+k;}).join(' &middot; ');
+        var pc=r.pacing||{};
+        var pace=pc.batch?('Estimated from the actual pacing: up to <b>'+pc.batch+'</b> per minute (the cron runs every minute)'+(pc.interval_min>0?(', batches <b>'+pc.interval_min+'</b> min apart'):'')+(pc.daily_cap>0?(', max <b>'+pc.daily_cap+'</b> today'):'')+'.'):'';
+        var h='<p class="ec-hint">Server time now <b>'+esc(String(now).replace('T',' '))+'</b>. '+pace+(summ?(' &nbsp; '+summ):'')+'</p>'+
+            '<div style="max-height:52vh;overflow:auto"><table class="ec-tbl"><thead><tr><th>#</th><th>Email</th><th>Status</th><th>Est. send time</th><th>Sent at</th></tr></thead><tbody>';
+        rows.forEach(function(x,i){
+            var when=(x.status==='queued')?whenLabel(x.est_send||x.send_after,now):'—';
+            var sent=x.sent_at?esc(String(x.sent_at).replace('T',' ')):'—';
+            var st='<span class="ec-badge b-'+x.status+'">'+esc(x.status)+'</span>'+(x.error?(' <span class="ec-hint">('+esc(x.error)+')</span>'):'');
+            h+='<tr><td>'+(i+1)+'</td><td>'+esc(x.email||'')+'</td><td>'+st+'</td><td style="white-space:nowrap">'+when+'</td><td style="white-space:nowrap">'+sent+'</td></tr>';
+        });
+        h+='</tbody></table></div>';
+        box.innerHTML=h;
+    }).fail(function(){ var box=document.getElementById('ecModalBody'); if(box) box.innerHTML='<p class="ec-hint">Failed to load.</p>'; });
+}
 /* Send again: shows everyone already in the campaign and re-queues all or a selection
  * to be emailed AGAIN (overrides the never-email-twice default). */
 function kResend(id){ post(EC.campaigns,{action:'recipients',id:id,limit:1000}).done(function(r){ if(!r.success){toast(r.message,'error');return;}

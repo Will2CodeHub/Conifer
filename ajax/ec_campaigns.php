@@ -3,6 +3,7 @@
 require_once '../config.php';
 requireLogin();
 require_once '../lib/ec_core.php';
+require_once '../lib/ec_mailer.php'; // ec_profile() / ec_settings() for the SMTP preflight
 header('Content-Type: application/json');
 ec_require_manage();
 
@@ -73,6 +74,16 @@ function ec_save_variants(mysqli $c, int $campaignId, array $variants): void {
         $first=$cur[0]; $list=implode(',', $cur);
         $c->query("UPDATE ten_ec_recipients SET variant_id=$first WHERE campaign_id=$campaignId AND variant_id NOT IN ($list)");
     }
+}
+
+/** Effective SMTP host a campaign would send through: its sending profile's host, else
+ *  the global settings host. '' means no usable transport — every send would fail with
+ *  "SMTP host not configured", so launching/sending is blocked up-front with a clear message. */
+function ec_campaign_smtp_host(array $camp): string {
+    $pid = (int)($camp['sending_profile_id'] ?? 0);
+    if ($pid > 0) { $p = ec_profile($pid); if ($p && trim((string)($p['smtp_host'] ?? '')) !== '') return trim((string)$p['smtp_host']); }
+    $s = ec_settings();
+    return trim((string)($s['smtp_host'] ?? ''));
 }
 
 try {
@@ -162,6 +173,8 @@ try {
             $id=(int)($_POST['id']??0);
             $camp=$c->query("SELECT * FROM ten_ec_campaigns WHERE id=$id")->fetch_assoc();
             if(!$camp) throw new Exception('Campaign not found');
+            if (ec_campaign_smtp_host($camp) === '')
+                throw new Exception('No sending profile is selected for this campaign. Choose one under the Sending tab before sending.');
             $aid=(int)$camp['audience_id'];
             $refreshed=0;
             if (!empty($_POST['refresh_from_filter']) && $aid>0) {
@@ -184,14 +197,30 @@ try {
         }
         case 'launch': {
             $id=(int)($_POST['id']??0);
-            $camp=$c->query("SELECT scheduled_at FROM ten_ec_campaigns WHERE id=$id")->fetch_assoc();
+            $camp=$c->query("SELECT * FROM ten_ec_campaigns WHERE id=$id")->fetch_assoc();
             if(!$camp) throw new Exception('Campaign not found');
+            // Preflight: a campaign with no usable SMTP transport fails every recipient
+            // silently ("SMTP host not configured"). Block the launch with a clear message.
+            if (ec_campaign_smtp_host($camp) === '')
+                throw new Exception('No sending profile is selected for this campaign. Choose one under the Sending tab before sending — the global default has no SMTP server configured.');
             // ensure materialised
             $cnt=(int)$c->query("SELECT COUNT(*) n FROM ten_ec_recipients WHERE campaign_id=$id")->fetch_assoc()['n'];
             if($cnt===0) throw new Exception('Nothing to send — materialise the campaign first');
+            // There must be something actually waiting to send. Relaunching a campaign whose
+            // recipients have all already failed or sent does nothing on its own, so say so
+            // and point to "Send again" instead of silently completing with no effect.
+            $queued=(int)$c->query("SELECT COUNT(*) n FROM ten_ec_recipients WHERE campaign_id=$id AND status='queued'")->fetch_assoc()['n'];
+            if($queued===0){
+                $b=$c->query("SELECT SUM(status='failed') f, SUM(status='sent') s FROM ten_ec_recipients WHERE campaign_id=$id")->fetch_assoc();
+                $f=(int)$b['f']; $s=(int)$b['s'];
+                $msg='Nothing is queued to send for this campaign.';
+                if($f>0) $msg.=' '.$f.' recipient'.($f==1?'':'s').' previously failed — use the “Send again” button to retry '.($f==1?'it':'them').'.';
+                elseif($s>0) $msg.=' All '.$s.' recipient'.($s==1?' has':'s have').' already been sent — use “Send again” to send once more.';
+                throw new Exception($msg);
+            }
             $status = (!empty($camp['scheduled_at']) && strtotime($camp['scheduled_at'])>time()) ? 'scheduled' : 'sending';
-            $c->query("UPDATE ten_ec_campaigns SET status='$status', started_at=COALESCE(started_at,NOW()) WHERE id=$id");
-            $resp=['success'=>true,'status'=>$status];
+            $c->query("UPDATE ten_ec_campaigns SET status='$status', started_at=COALESCE(started_at,NOW()), completed_at=NULL WHERE id=$id");
+            $resp=['success'=>true,'status'=>$status,'queued'=>$queued];
             break;
         }
         case 'pause':  { $id=(int)($_POST['id']??0); $c->query("UPDATE ten_ec_campaigns SET status='paused' WHERE id=$id AND status IN('sending','scheduled')"); $resp=['success'=>true]; break; }
@@ -291,11 +320,72 @@ try {
             $resp=['success'=>true,'total'=>$total,'rows'=>$rows];
             break;
         }
+        case 'queue': {
+            // Send schedule in send order: queued recipients first (by their send_after,
+            // which the per-minute worker honours), then the rest. Powers the clickable
+            // status pill's "when does each email go out" modal. Each queued recipient gets
+            // an ESTIMATED send time that simulates the real cron: batch_size per run, one
+            // run per minute (the cron cadence), the batch interval (via send_after) and the
+            // daily cap / warm-up ramp — so it is not just "the first batch's time for all".
+            $id=(int)($_POST['id']??0);
+            $camp=$c->query("SELECT * FROM ten_ec_campaigns WHERE id=$id")->fetch_assoc();
+            if(!$camp) throw new Exception('Campaign not found');
+            $limit=min(2000,max(10,(int)($_POST['limit']??500))); $offset=max(0,(int)($_POST['offset']??0));
+            $total=(int)$c->query("SELECT COUNT(*) n FROM ten_ec_recipients WHERE campaign_id=$id")->fetch_assoc()['n'];
+            $rows=[]; $res=$c->query("SELECT r.id,ct.email,ct.first_name,ct.last_name,r.status,r.send_after,r.send_attempts,r.sent_at,LEFT(COALESCE(r.error,''),160) error
+                FROM ten_ec_recipients r JOIN ten_ec_contacts ct ON ct.id=r.contact_id
+                WHERE r.campaign_id=$id
+                ORDER BY (r.status='queued') DESC, COALESCE(r.send_after,r.sent_at) ASC, r.id ASC
+                LIMIT $limit OFFSET $offset");
+            while($res && $x=$res->fetch_assoc()) $rows[]=$x;
+            $counts=[]; $g=$c->query("SELECT status,COUNT(*) n FROM ten_ec_recipients WHERE campaign_id=$id GROUP BY status");
+            while($g && $x=$g->fetch_assoc()) $counts[$x['status']]=(int)$x['n'];
+
+            // ---- estimate real send times for the queued recipients ----
+            $settings = ec_settings();
+            $batch = max(1,(int)$camp['batch_size']);
+            $globalCap = (int)($settings['daily_cap'] ?? 0);
+            $campCap = (int)$camp['daily_cap'];
+            $warm = json_decode($settings['warmup_json'] ?? '', true);
+            $warmOn = !empty($camp['warmup_enabled']) && is_array($warm) && $warm;
+            $now = time();
+            $startedAt = !empty($camp['started_at']) ? strtotime($camp['started_at']) : $now;
+            $startDay = strtotime('today', $startedAt);
+            $capForDay = function($dayStart) use ($warmOn,$warm,$campCap,$globalCap,$startDay) {
+                $caps=[];
+                if ($warmOn) { $di=max(0,(int)floor(($dayStart-$startDay)/86400)); $caps[]=(int)$warm[min($di,count($warm)-1)]; }
+                if ($campCap>0) $caps[]=$campCap;
+                if ($globalCap>0) $caps[]=$globalCap;
+                return $caps ? max(0,min($caps)) : 0; // 0 = unlimited
+            };
+            // sends already counted against today's cap
+            $sentToday = (int)$c->query("SELECT COUNT(*) n FROM ten_ec_recipients WHERE campaign_id=$id AND status='sent' AND DATE(sent_at)=CURDATE()")->fetch_assoc()['n'];
+            $tick = $now; $inRun = 0; $dayStart = strtotime('today', $tick); $sentThisDay = $sentToday;
+            foreach ($rows as &$r) {
+                if ($r['status'] !== 'queued') continue;
+                $due = !empty($r['send_after']) ? strtotime($r['send_after']) : $now; if ($due < $now) $due = $now;
+                if ($due > $tick) { $tick = $due; $inRun = 0; }
+                if ($tick >= $dayStart + 86400) { $dayStart = strtotime('today', $tick); $sentThisDay = 0; $inRun = 0; }
+                $cap = $capForDay($dayStart);
+                if ($cap > 0 && $sentThisDay >= $cap) { $tick = $dayStart + 86400; $dayStart = $tick; $sentThisDay = 0; $inRun = 0; if ($tick < $due) $tick = $due; }
+                if ($inRun >= $batch) { $tick += 60; $inRun = 0; if ($tick >= $dayStart + 86400) { $dayStart = strtotime('today', $tick); $sentThisDay = 0; } }
+                $r['est_send'] = date('Y-m-d H:i:s', $tick);
+                $inRun++; $sentThisDay++;
+            }
+            unset($r);
+            $resp=['success'=>true,'total'=>$total,'rows'=>$rows,'counts'=>$counts,'now'=>date('Y-m-d H:i:s'),
+                   'pacing'=>['batch'=>$batch,'interval_min'=>(int)$camp['batch_interval_min'],'daily_cap'=>$capForDay(strtotime('today',$now))]];
+            break;
+        }
         case 'resend': {
             // Re-queue recipients of this campaign so they are SENT AGAIN (overrides the
             // never-email-twice default). Empty contact_ids = everyone in the campaign.
             // Suppressed/unsubscribed contacts are still re-checked and skipped at send time.
             $id=(int)($_POST['id']??0); if($id<=0) throw new Exception('id required');
+            $cp=$c->query("SELECT sending_profile_id FROM ten_ec_campaigns WHERE id=$id")->fetch_assoc();
+            if(!$cp) throw new Exception('Campaign not found');
+            if (ec_campaign_smtp_host($cp) === '')
+                throw new Exception('No sending profile is selected for this campaign. Choose one under the Sending tab before sending.');
             $ids=trim((string)($_POST['contact_ids']??''));
             $where="campaign_id=$id";
             if($ids!==''){ $list=array_filter(array_map('intval', explode(',', $ids))); if(!$list) throw new Exception('No valid recipients selected'); $where.=" AND contact_id IN (".implode(',', $list).")"; }

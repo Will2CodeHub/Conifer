@@ -19,6 +19,8 @@ $pub = preg_replace('/[^a-z0-9_-]/i', '', (string)($_GET['pub'] ?? ''));
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800&display=swap">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.js"></script>
   <link rel="stylesheet" href="css/design_studio.css?v=<?php echo @filemtime(__DIR__.'/css/design_studio.css'); ?>">
 </head>
 <body>
@@ -26,12 +28,14 @@ $pub = preg_replace('/[^a-z0-9_-]/i', '', (string)($_GET['pub'] ?? ''));
     <div id="dsHome" class="ds-screen"></div>
     <div id="dsPage" class="ds-screen" hidden></div>
     <div id="dsBlock" class="ds-screen" hidden></div>
+    <div id="dsPlaceholders" class="ds-screen" hidden></div>
   </div>
   <script src="js/design_studio/registry.js?v=<?php echo @filemtime(__DIR__.'/js/design_studio/registry.js'); ?>"></script>
   <script src="js/design_studio/undo.js?v=<?php echo @filemtime(__DIR__.'/js/design_studio/undo.js'); ?>"></script>
   <script src="js/design_studio/html_editor.js?v=<?php echo @filemtime(__DIR__.'/js/design_studio/html_editor.js'); ?>"></script>
   <script src="js/design_studio/page_editor.js?v=<?php echo @filemtime(__DIR__.'/js/design_studio/page_editor.js'); ?>"></script>
   <script src="js/design_studio/block_editor.js?v=<?php echo @filemtime(__DIR__.'/js/design_studio/block_editor.js'); ?>"></script>
+  <script src="js/design_studio/placeholders_page.js?v=<?php echo @filemtime(__DIR__.'/js/design_studio/placeholders_page.js'); ?>"></script>
   <script src="js/design_studio/home.js?v=<?php echo @filemtime(__DIR__.'/js/design_studio/home.js'); ?>"></script>
   <script src="js/design_studio/placeholders.js?v=<?php echo @filemtime(__DIR__.'/js/design_studio/placeholders.js'); ?>"></script>
   <script src="js/design_studio/core.js?v=<?php echo @filemtime(__DIR__.'/js/design_studio/core.js'); ?>"></script>

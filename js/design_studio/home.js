@@ -84,10 +84,12 @@
           '<button data-dev="desktop" class="' + (ds.device === "desktop" ? "on" : "") + '">Desktop</button>' +
           '<button data-dev="mobile" class="' + (ds.device === "mobile" ? "on" : "") + '">Mobile</button>' +
         '</div>' +
-        '<button class="ds-btn ds-btn-ghost" id="dsPlaceholders"><i class="fas fa-code"></i> Placeholders</button>' +
-        '<button class="ds-btn ds-btn-ghost" id="dsHistory"><i class="fas fa-clock-rotate-left"></i> History</button>' +
         '<button class="ds-btn ds-btn-primary" id="dsPublish"><i class="fas fa-rocket"></i> Publish</button>' +
       '</header>' +
+      '<div class="ds-ph-entry">' +
+        '<div class="ds-ph-entry-txt"><h2>Placeholders</h2><p>Set how many articles each content placeholder shows, its columns, and its default look — in one place.</p></div>' +
+        '<button class="ds-btn ds-btn-primary" id="dsOpenPh"><i class="fas fa-sliders"></i> Open placeholders</button>' +
+      '</div>' +
       '<div class="ds-hub">' +
         '<section class="ds-col">' +
           '<div class="ds-col-head"><h2>Pages</h2><p class="ds-col-say">Whole pages built from blocks. Start with a template.</p></div>' +
@@ -103,8 +105,7 @@
       b.addEventListener("click", function () { ds.device = b.dataset.dev; DS.renderHome(); });
     });
     root.querySelector("#dsPublish").addEventListener("click", openPublish);
-    root.querySelector("#dsHistory").addEventListener("click", openHistory);
-    root.querySelector("#dsPlaceholders").addEventListener("click", function () { DS.openPlaceholders({}); });
+    root.querySelector("#dsOpenPh").addEventListener("click", function () { DS.dsGo("placeholders"); });
 
     loadPageTiles();
     loadBlockTiles();

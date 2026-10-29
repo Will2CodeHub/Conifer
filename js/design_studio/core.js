@@ -103,7 +103,7 @@
     if (DS._dirty) { e.preventDefault(); e.returnValue = ""; return ""; }
   });
 
-  var SCREENS = { home: "dsHome", page: "dsPage", block: "dsBlock" };
+  var SCREENS = { home: "dsHome", page: "dsPage", block: "dsBlock", placeholders: "dsPlaceholders" };
   function show(screen) {
     Object.keys(SCREENS).forEach(function (k) {
       document.getElementById(SCREENS[k]).hidden = (k !== screen);
@@ -120,6 +120,7 @@
     if (screen === "home" && DS.renderHome) { DS.renderHome(); }
     else if (screen === "page" && DS.renderPageEditor) { DS.renderPageEditor(ds.params); }
     else if (screen === "block" && DS.renderBlockEditor) { DS.renderBlockEditor(ds.params); }
+    else if (screen === "placeholders" && DS.renderPlaceholders) { DS.renderPlaceholders(ds.params); }
   };
 
   window.addEventListener("popstate", function (e) {

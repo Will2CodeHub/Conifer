@@ -333,7 +333,63 @@ $pageTitle = 'Article Management';
            a global reset elsewhere can otherwise collapse <p> margins. */
         .editor p { margin: 0 0 1em; }
         .editor h2, .editor h3 { margin: 1.3em 0 0.5em; }
-        
+
+        /* ===== Sources tab (Add form + Edit modal) ===== */
+        .src-help { margin: 0 0 12px; font-size: 12.5px; color: #64748b; line-height: 1.5; }
+        .src-rows { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+        .src-row { display: grid; grid-template-columns: 1fr 1.4fr auto auto; gap: 8px; align-items: center; }
+        .src-row .ed-input { margin: 0; }
+        .src-row .src-link-lbl { display: flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 12.5px; color: #475569; cursor: pointer; }
+        .src-row .src-link-lbl input { width: 15px; height: 15px; cursor: pointer; }
+        .src-row .src-del { background: #fff; border: 1px solid #fecaca; color: #dc2626; width: 32px; height: 32px; border-radius: 7px; cursor: pointer; flex-shrink: 0; }
+        .src-row .src-del:hover { background: #fef2f2; }
+        .src-add { background: #fff; border: 1px dashed #cbd5e1; color: #475569; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+        .src-add:hover { background: #f8fafc; border-color: #94a3b8; }
+        /* Carousel picker */
+        .cp-open { background: #fff; border: 1px dashed #cbd5e1; color: #475569; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+        .cp-open:hover { background: #f8fafc; border-color: #94a3b8; }
+        .cp-summary { display: inline-block; margin-left: 10px; font-size: 12.5px; color: #64748b; }
+        .cp-ov { position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 100000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .cp-modal { background: #fff; width: min(820px, 96vw); max-height: 92vh; border-radius: 14px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 24px 70px rgba(0,0,0,.35); }
+        .cp-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+        .cp-head h3 { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+        .cp-x { border: 0; background: none; font-size: 24px; line-height: 1; cursor: pointer; color: #64748b; }
+        .cp-controls { display: flex; gap: 8px; padding: 12px 18px; border-bottom: 1px solid #eef2f7; }
+        .cp-controls .cp-section { flex: 0 0 auto; }
+        .cp-controls select, .cp-controls input { height: 36px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 10px; font: inherit; font-size: 13px; }
+        .cp-controls .cp-search { flex: 1; }
+        .cp-search-btn { height: 36px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 8px; padding: 0 12px; cursor: pointer; font-weight: 600; font-size: 13px; }
+        .cp-results { overflow-y: auto; padding: 14px 18px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; min-height: 180px; }
+        .cp-card { display: flex; gap: 10px; align-items: center; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; }
+        .cp-card.picked { border-color: #86efac; background: #f0fdf4; }
+        .cp-thumb { flex: 0 0 64px; width: 64px; height: 48px; border-radius: 6px; background: #e2e8f0 center/cover no-repeat; }
+        .cp-meta { flex: 1; min-width: 0; }
+        .cp-title { font-size: 13px; font-weight: 600; color: #1e293b; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .cp-sec { font-size: 11.5px; color: #94a3b8; margin-top: 2px; }
+        .cp-add { flex: 0 0 auto; border: 1px solid #cbd5e1; background: #fff; border-radius: 7px; padding: 6px 10px; cursor: pointer; font-size: 12px; font-weight: 600; color: #334155; }
+        .cp-add:disabled { color: #16a34a; border-color: #86efac; background: #f0fdf4; cursor: default; }
+        .cp-pager { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 8px; border-top: 1px solid #eef2f7; }
+        .cp-pager button { border: 1px solid #cbd5e1; background: #fff; border-radius: 7px; width: 34px; height: 30px; cursor: pointer; }
+        .cp-pageinfo { font-size: 12.5px; color: #64748b; }
+        .cp-chosen-wrap { border-top: 1px solid #e2e8f0; padding: 12px 18px; background: #f8fafc; max-height: 26vh; overflow-y: auto; }
+        .cp-chosen-wrap h4 { margin: 0 0 8px; font-size: 13px; color: #334155; }
+        .cp-hint { font-weight: 400; color: #94a3b8; font-size: 11.5px; }
+        .cp-chosen { display: flex; flex-direction: column; gap: 6px; }
+        .cp-chip { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 8px; }
+        .cp-chip.cp-dragging { opacity: .4; }
+        .cp-chip.cp-over { border-color: #2563eb; box-shadow: inset 0 0 0 1px #2563eb; }
+        .cp-chip.cp-ghost { background: #f1f5f9; border-style: dashed; color: #94a3b8; }
+        .cp-grip { cursor: grab; color: #94a3b8; }
+        .cp-chip-thumb { flex: 0 0 34px; width: 34px; height: 26px; border-radius: 5px; background: #e2e8f0 center/cover no-repeat; }
+        .cp-chip-t { flex: 1; min-width: 0; font-size: 12.5px; color: #334155; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .cp-rm { border: 0; background: none; color: #ef4444; font-size: 18px; line-height: 1; cursor: pointer; }
+        .cp-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 12px 18px; border-top: 1px solid #e2e8f0; }
+        .cp-cancel { border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; padding: 9px 16px; cursor: pointer; font-weight: 600; }
+        .cp-done { border: 0; background: #2563eb; color: #fff; border-radius: 8px; padding: 9px 18px; cursor: pointer; font-weight: 600; }
+        .cp-note { color: #94a3b8; font-size: 13px; grid-column: 1 / -1; text-align: center; padding: 20px 0; }
+        @media (max-width: 640px) { .cp-results { grid-template-columns: 1fr; } }
+        @media (max-width: 640px) { .src-row { grid-template-columns: 1fr; } }
+
         .editor mark {
             background-color: #fef3c7;
             padding: 2px 4px;
@@ -962,6 +1018,8 @@ $pageTitle = 'Article Management';
                             <button type="button" class="ed-tab" data-edtab="aauthor"><i class="fas fa-user"></i> Author &amp; Section</button>
                             <button type="button" class="ed-tab" data-edtab="aflags"><i class="fas fa-calendar-alt"></i> Scheduling</button>
                             <button type="button" class="ed-tab" data-edtab="aseo"><i class="fas fa-hashtag"></i> SEO &amp; Metadata</button>
+                            <button type="button" class="ed-tab" data-edtab="asrc"><i class="fas fa-link"></i> Sources</button>
+                            <button type="button" class="ed-tab" data-edtab="acar"><i class="fas fa-images"></i> Carousel</button>
                         </div>
                         <div class="ed-tabwrap">
                             <div class="ed-tabpanel" data-edpanel="apub">
@@ -1009,6 +1067,17 @@ $pageTitle = 'Article Management';
                                 <label class="ed-lbl" style="margin-top:10px;">Tags <span style="font-weight:400;text-transform:none;color:#94a3b8;">(comma separated)</span></label>
                                 <input type="text" id="add_article_tags" class="ed-input">
                             </div>
+                            <div class="ed-tabpanel" data-edpanel="asrc">
+                                <p class="src-help">Add each source used for this article. Tick <strong>Show as link</strong> to publish it as a clickable link; leave it unticked to print the URL as plain text.</p>
+                                <div id="add_article_sources" class="src-rows"></div>
+                                <button type="button" class="src-add" data-target="add_article_sources"><i class="fas fa-plus"></i> Add source</button>
+                            </div>
+                            <div class="ed-tabpanel" data-edpanel="acar">
+                                <p class="src-help">Optionally hand-pick past articles to lead this article's "More stories" carousel. Any slots you leave are filled automatically. Leave empty to keep it fully automatic.</p>
+                                <input type="hidden" id="add_article_carousel" value="[]">
+                                <button type="button" class="cp-open" data-cp-target="add_article_carousel" data-cp-section="add_article_section" data-cp-exclude=""><i class="fas fa-hand-pointer"></i> Choose carousel articles</button>
+                                <span class="cp-summary" data-cp-for="add_article_carousel">No articles chosen — carousel is automatic.</span>
+                            </div>
                         </div>
 
                         <div class="form-group">
@@ -1018,6 +1087,7 @@ $pageTitle = 'Article Management';
                                     <button type="button" id="bold" data-tooltip="Bold"><i class="fas fa-bold"></i></button>
                                     <button type="button" id="italic" data-tooltip="Italic"><i class="fas fa-italic"></i></button>
                                     <button type="button" id="underline" data-tooltip="Underline"><i class="fas fa-underline"></i></button>
+                                    <button type="button" id="subheadline" data-tooltip="Subheadline"><i class="fas fa-heading"></i></button>
                                     <button type="button" id="unordered-list" data-tooltip="Unordered List"><i class="fas fa-list-ul"></i></button>
                                     <button type="button" id="ordered-list" data-tooltip="Ordered List"><i class="fas fa-list-ol"></i></button>
                                     <button type="button" id="add-link" data-tooltip="Add Link"><i class="fas fa-link"></i></button>
@@ -1290,6 +1360,8 @@ $pageTitle = 'Article Management';
                         <button type="button" class="ed-tab" data-edtab="pub"><i class="fas fa-newspaper"></i> Publications</button>
                         <button type="button" class="ed-tab" data-edtab="author"><i class="fas fa-user"></i> Author &amp; Section</button>
                         <button type="button" class="ed-tab" data-edtab="seo"><i class="fas fa-hashtag"></i> SEO &amp; Metadata</button>
+                        <button type="button" class="ed-tab" data-edtab="src"><i class="fas fa-link"></i> Sources</button>
+                        <button type="button" class="ed-tab" data-edtab="car"><i class="fas fa-images"></i> Carousel</button>
                     </div>
                     <div class="ed-tabwrap">
                         <div class="ed-tabpanel" data-edpanel="pub">
@@ -1324,6 +1396,18 @@ $pageTitle = 'Article Management';
                             <input type="text" id="modal_meta_keywords" class="ed-input">
                             <label class="ed-lbl" style="margin-top:10px;">Tags <span style="font-weight:400;text-transform:none;color:#94a3b8;">(comma separated)</span></label>
                             <input type="text" id="modal_tags" class="ed-input">
+                        </div>
+
+                        <div class="ed-tabpanel" data-edpanel="src">
+                            <p class="src-help">Add each source used for this article. Tick <strong>Show as link</strong> to publish it as a clickable link; leave it unticked to print the URL as plain text.</p>
+                            <div id="modal_sources" class="src-rows"></div>
+                            <button type="button" class="src-add" data-target="modal_sources"><i class="fas fa-plus"></i> Add source</button>
+                        </div>
+                        <div class="ed-tabpanel" data-edpanel="car">
+                            <p class="src-help">Optionally hand-pick past articles to lead this article's "More stories" carousel. Any slots you leave are filled automatically. Leave empty to keep it fully automatic.</p>
+                            <input type="hidden" id="modal_carousel" value="[]">
+                            <button type="button" class="cp-open" data-cp-target="modal_carousel" data-cp-section="modal_section" data-cp-exclude="activeArticleId"><i class="fas fa-hand-pointer"></i> Choose carousel articles</button>
+                            <span class="cp-summary" data-cp-for="modal_carousel">No articles chosen — carousel is automatic.</span>
                         </div>
                     </div>
 
@@ -1557,6 +1641,277 @@ document.addEventListener('change', function (e) {
 })();
 </script>
 
+<script>
+/* ===== Article Sources: shared helpers for the Add form and the Edit modal =====
+   Each source row is { title, url, link }. `link:true` publishes a clickable
+   <a>; `link:false` prints the URL as plain text. Stored as a JSON string in the
+   articles.sources column. These are exposed on window so both the Add-form code
+   and the modal IIFE can call them. */
+(function () {
+    function esc(s) { return String(s == null ? '' : s).replace(/"/g, '&quot;'); }
+
+    // Build one source row and append it to the given container.
+    window.TEN_addSourceRow = function (containerId, data) {
+        var box = document.getElementById(containerId);
+        if (!box) return;
+        data = data || {};
+        var row = document.createElement('div');
+        row.className = 'src-row';
+        row.innerHTML =
+            '<input type="text" class="ed-input src-title" placeholder="Source name / title" value="' + esc(data.title) + '">' +
+            '<input type="url" class="ed-input src-url" placeholder="https://… (or plain reference)" value="' + esc(data.url) + '">' +
+            '<label class="src-link-lbl"><input type="checkbox" class="src-link"' + (data.link ? ' checked' : '') + '> Show as link</label>' +
+            '<button type="button" class="src-del" data-tooltip="Remove" title="Remove source"><i class="fas fa-times"></i></button>';
+        box.appendChild(row);
+    };
+
+    // Replace the container's rows with the given array of sources.
+    window.TEN_renderSources = function (containerId, arr) {
+        var box = document.getElementById(containerId);
+        if (!box) return;
+        box.innerHTML = '';
+        (Array.isArray(arr) ? arr : []).forEach(function (s) { window.TEN_addSourceRow(containerId, s); });
+    };
+
+    // Parse whatever the backend returned (JSON string or array) into an array.
+    window.TEN_parseSources = function (raw) {
+        if (Array.isArray(raw)) return raw;
+        if (typeof raw !== 'string' || raw.trim() === '') return [];
+        try { var v = JSON.parse(raw); return Array.isArray(v) ? v : []; }
+        catch (e) { return []; }
+    };
+
+    // Collect the container's rows into a JSON string (skips fully-empty rows).
+    window.TEN_collectSources = function (containerId) {
+        var box = document.getElementById(containerId);
+        if (!box) return '[]';
+        var out = [];
+        box.querySelectorAll('.src-row').forEach(function (row) {
+            var title = (row.querySelector('.src-title') || {}).value || '';
+            var url = (row.querySelector('.src-url') || {}).value || '';
+            var link = !!(row.querySelector('.src-link') || {}).checked;
+            title = title.trim(); url = url.trim();
+            if (title === '' && url === '') return; // ignore blank rows
+            out.push({ title: title, url: url, link: link });
+        });
+        return JSON.stringify(out);
+    };
+
+    // Delegated handlers: "Add source" buttons and per-row remove buttons.
+    document.addEventListener('click', function (e) {
+        var add = e.target.closest ? e.target.closest('.src-add') : null;
+        if (add) { e.preventDefault(); window.TEN_addSourceRow(add.getAttribute('data-target'), {}); return; }
+        var del = e.target.closest ? e.target.closest('.src-del') : null;
+        if (del) { e.preventDefault(); var r = del.closest('.src-row'); if (r) r.remove(); }
+    });
+
+    // =====================================================================
+    //  Per-article carousel picker
+    //  Hand-pick past articles (with images) to lead this article's "More
+    //  stories" carousel; the rest auto-fill. Stored as an ordered JSON array
+    //  of article ids in a hidden field; collected into the save like sources.
+    // =====================================================================
+    var CP_TARGET = 10;   // carousel slots shown as placeholders when under-filled
+
+    window.TEN_cpParse = function (raw) {
+        if (Array.isArray(raw)) return raw.map(function (x) { return parseInt(x, 10); }).filter(Boolean);
+        if (typeof raw !== 'string' || raw.trim() === '') return [];
+        try { var v = JSON.parse(raw); return Array.isArray(v) ? v.map(function (x) { return parseInt(x, 10); }).filter(Boolean) : []; }
+        catch (e) { return []; }
+    };
+    window.TEN_cpSummary = function (hiddenId) {
+        var h = document.getElementById(hiddenId); if (!h) return;
+        var ids = window.TEN_cpParse(h.value);
+        var span = document.querySelector('.cp-summary[data-cp-for="' + hiddenId + '"]');
+        if (span) {
+            span.textContent = ids.length
+                ? (ids.length + ' article' + (ids.length === 1 ? '' : 's') + ' chosen — the rest auto-fill.')
+                : 'No articles chosen — carousel is automatic.';
+        }
+    };
+    window.TEN_cpSet = function (hiddenId, ids) {
+        var h = document.getElementById(hiddenId); if (!h) return;
+        h.value = JSON.stringify((ids || []).map(function (x) { return parseInt(x, 10); }).filter(Boolean));
+        window.TEN_cpSummary(hiddenId);
+    };
+    window.TEN_cpCollect = function (hiddenId) {
+        var h = document.getElementById(hiddenId);
+        return h ? (h.value || '[]') : '[]';
+    };
+
+    // Build the section dropdown options from the form's own (already-populated)
+    // section <select>, so we offer exactly the sections this edition has.
+    function cpSectionOptions(sectionFieldId, current) {
+        var sel = document.getElementById(sectionFieldId);
+        var names = [];
+        if (sel) {
+            Array.prototype.forEach.call(sel.options, function (o) {
+                var v = (o.value || '').trim();
+                if (v && names.indexOf(v) === -1) names.push(v);
+            });
+        }
+        var html = '<option value="">All sections</option>';
+        names.forEach(function (n) {
+            html += '<option value="' + esc(n) + '"' + (n === current ? ' selected' : '') + '>' + esc(n) + '</option>';
+        });
+        return html;
+    }
+
+    window.TEN_openCarouselPicker = function (opts) {
+        opts = opts || {};
+        var hiddenId = opts.hiddenId;
+        var sectionFieldId = opts.sectionFieldId || '';
+        var excludeId = parseInt(opts.excludeId || 0, 10) || 0;
+        var curSectionEl = document.getElementById(sectionFieldId);
+        var defaultSection = curSectionEl ? (curSectionEl.value || '').trim() : '';
+
+        var chosen = [];      // [{id,title,image,section}]
+        var page = 1, pages = 1;
+
+        var ov = document.createElement('div');
+        ov.className = 'cp-ov';
+        ov.innerHTML =
+            '<div class="cp-modal" role="dialog" aria-label="Choose carousel articles">' +
+              '<div class="cp-head"><h3><i class="fas fa-images"></i> Carousel articles</h3>' +
+                '<button type="button" class="cp-x" title="Close">&times;</button></div>' +
+              '<div class="cp-controls">' +
+                '<select class="cp-section">' + cpSectionOptions(sectionFieldId, defaultSection) + '</select>' +
+                '<input type="text" class="cp-search" placeholder="Search article titles…">' +
+                '<button type="button" class="cp-search-btn"><i class="fas fa-search"></i> Search</button>' +
+              '</div>' +
+              '<div class="cp-results"><p class="cp-note">Loading…</p></div>' +
+              '<div class="cp-pager"><button type="button" class="cp-prev"><i class="fas fa-chevron-left"></i></button>' +
+                '<span class="cp-pageinfo"></span>' +
+                '<button type="button" class="cp-next"><i class="fas fa-chevron-right"></i></button></div>' +
+              '<div class="cp-chosen-wrap"><h4>Chosen order <span class="cp-hint">(drag to reorder; grey = auto-filled)</span></h4>' +
+                '<div class="cp-chosen"></div></div>' +
+              '<div class="cp-foot"><button type="button" class="cp-cancel">Cancel</button>' +
+                '<button type="button" class="cp-done"><i class="fas fa-check"></i> Done</button></div>' +
+            '</div>';
+        document.body.appendChild(ov);
+
+        var elResults = ov.querySelector('.cp-results');
+        var elChosen = ov.querySelector('.cp-chosen');
+        var elSection = ov.querySelector('.cp-section');
+        var elSearch = ov.querySelector('.cp-search');
+        var elPageInfo = ov.querySelector('.cp-pageinfo');
+
+        function close() { ov.remove(); }
+        ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+        ov.querySelector('.cp-x').addEventListener('click', close);
+        ov.querySelector('.cp-cancel').addEventListener('click', close);
+        ov.querySelector('.cp-done').addEventListener('click', function () {
+            window.TEN_cpSet(hiddenId, chosen.map(function (c) { return c.id; }));
+            close();
+        });
+
+        function load() {
+            var q = encodeURIComponent(elSearch.value.trim());
+            var sec = encodeURIComponent(elSection.value);
+            elResults.innerHTML = '<p class="cp-note">Loading…</p>';
+            fetch('/management/ajax/carousel_articles.php?section=' + sec + '&q=' + q + '&page=' + page + '&exclude=' + excludeId + '&limit=10')
+                .then(function (r) { return r.json(); })
+                .then(function (j) {
+                    var rows = j.results || [];
+                    pages = Math.max(1, Math.ceil((j.total || 0) / (j.limit || 10)));
+                    elPageInfo.textContent = 'Page ' + page + ' of ' + pages + ' · ' + (j.total || 0) + ' with images';
+                    if (!rows.length) { elResults.innerHTML = '<p class="cp-note">No articles with images found here.</p>'; return; }
+                    elResults.innerHTML = rows.map(function (a) {
+                        var picked = chosen.some(function (c) { return c.id === a.id; });
+                        return '<div class="cp-card' + (picked ? ' picked' : '') + '" data-id="' + a.id + '">' +
+                            '<div class="cp-thumb"' + (a.image ? ' style="background-image:url(\'' + esc(a.image) + '\')"' : '') + '></div>' +
+                            '<div class="cp-meta"><div class="cp-title">' + esc(a.title) + '</div>' +
+                              '<div class="cp-sec">' + esc(a.section || '') + '</div></div>' +
+                            '<button type="button" class="cp-add" ' + (picked ? 'disabled' : '') + '>' +
+                              (picked ? '<i class="fas fa-check"></i> Added' : '<i class="fas fa-plus"></i> Add') + '</button>' +
+                        '</div>';
+                    }).join('');
+                    elResults.querySelectorAll('.cp-card').forEach(function (card) {
+                        var id = parseInt(card.getAttribute('data-id'), 10);
+                        var row = rows.filter(function (x) { return x.id === id; })[0];
+                        card.querySelector('.cp-add').addEventListener('click', function () {
+                            if (chosen.some(function (c) { return c.id === id; })) return;
+                            chosen.push({ id: id, title: row.title, image: row.image, section: row.section });
+                            renderChosen(); load();   // reload to flip the card to "Added"
+                        });
+                    });
+                })
+                .catch(function () { elResults.innerHTML = '<p class="cp-note">Could not load articles.</p>'; });
+        }
+
+        function renderChosen() {
+            var html = chosen.map(function (c, i) {
+                return '<div class="cp-chip" draggable="true" data-i="' + i + '">' +
+                    '<span class="cp-grip"><i class="fas fa-grip-vertical"></i></span>' +
+                    '<span class="cp-chip-thumb"' + (c.image ? ' style="background-image:url(\'' + esc(c.image) + '\')"' : '') + '></span>' +
+                    '<span class="cp-chip-t">' + (i + 1) + '. ' + esc(c.title) + '</span>' +
+                    '<button type="button" class="cp-rm" title="Remove">&times;</button></div>';
+            }).join('');
+            // Placeholder slots for the auto-filled remainder (up to CP_TARGET).
+            for (var k = chosen.length; k < CP_TARGET; k++) {
+                html += '<div class="cp-chip cp-ghost"><span class="cp-chip-t"><i class="fas fa-robot"></i> Auto-filled</span></div>';
+            }
+            elChosen.innerHTML = html || '<p class="cp-note">Nothing chosen yet — the carousel is fully automatic.</p>';
+            // remove buttons
+            elChosen.querySelectorAll('.cp-rm').forEach(function (b, idx) {
+                b.addEventListener('click', function () {
+                    var chip = b.closest('.cp-chip'); var i = parseInt(chip.getAttribute('data-i'), 10);
+                    chosen.splice(i, 1); renderChosen(); load();
+                });
+            });
+            // drag to reorder
+            var dragI = null;
+            elChosen.querySelectorAll('.cp-chip[draggable="true"]').forEach(function (chip) {
+                chip.addEventListener('dragstart', function () { dragI = parseInt(chip.getAttribute('data-i'), 10); chip.classList.add('cp-dragging'); });
+                chip.addEventListener('dragend', function () { chip.classList.remove('cp-dragging'); });
+                chip.addEventListener('dragover', function (e) { e.preventDefault(); chip.classList.add('cp-over'); });
+                chip.addEventListener('dragleave', function () { chip.classList.remove('cp-over'); });
+                chip.addEventListener('drop', function (e) {
+                    e.preventDefault(); chip.classList.remove('cp-over');
+                    var to = parseInt(chip.getAttribute('data-i'), 10);
+                    if (dragI === null || dragI === to) return;
+                    var moved = chosen.splice(dragI, 1)[0];
+                    chosen.splice(to, 0, moved);
+                    dragI = null; renderChosen();
+                });
+            });
+        }
+
+        elSection.addEventListener('change', function () { page = 1; load(); });
+        ov.querySelector('.cp-search-btn').addEventListener('click', function () { page = 1; load(); });
+        elSearch.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); page = 1; load(); } });
+        ov.querySelector('.cp-prev').addEventListener('click', function () { if (page > 1) { page--; load(); } });
+        ov.querySelector('.cp-next').addEventListener('click', function () { if (page < pages) { page++; load(); } });
+
+        // Hydrate any existing picks (title+image) then render.
+        var existing = window.TEN_cpParse((document.getElementById(hiddenId) || {}).value);
+        if (existing.length) {
+            fetch('/management/ajax/carousel_articles.php?ids=' + existing.join(','))
+                .then(function (r) { return r.json(); })
+                .then(function (j) { chosen = (j.results || []).map(function (a) { return { id: a.id, title: a.title, image: a.image, section: a.section }; }); renderChosen(); load(); })
+                .catch(function () { renderChosen(); load(); });
+        } else { renderChosen(); load(); }
+    };
+
+    // Open the picker from either form's "Choose carousel articles" button.
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest ? e.target.closest('.cp-open') : null;
+        if (!btn) return;
+        e.preventDefault();
+        var excludeAttr = btn.getAttribute('data-cp-exclude') || '';
+        // data-cp-exclude may name a JS variable (e.g. activeArticleId) holding the id.
+        var excludeId = 0;
+        if (excludeAttr === 'activeArticleId') { try { excludeId = window.activeArticleId || 0; } catch (x) { excludeId = 0; } }
+        else if (excludeAttr) { excludeId = parseInt(excludeAttr, 10) || 0; }
+        window.TEN_openCarouselPicker({
+            hiddenId: btn.getAttribute('data-cp-target'),
+            sectionFieldId: btn.getAttribute('data-cp-section'),
+            excludeId: excludeId
+        });
+    });
+})();
+</script>
+
 <style>
 /* Edit modal responsive sidebar */
 @media (max-width: 900px) {
@@ -1680,7 +2035,16 @@ document.addEventListener('change', function (e) {
                 $('#article_text').focus();
                 document.execCommand('underline', false, null);
             });
-            
+
+            // Subheadline: toggle the block the caret/selection is in between an
+            // <h2> subheadline and a normal <p> paragraph (same tags the paste
+            // sanitiser and the live article CSS already support).
+            $('#subheadline').click(function() {
+                $('#article_text').focus();
+                var cur = (document.queryCommandValue('formatBlock') || '').toLowerCase();
+                document.execCommand('formatBlock', false, (cur === 'h2') ? 'p' : 'h2');
+            });
+
             $('#unordered-list').click(function() {
                 $('#article_text').focus();
                 document.execCommand('insertUnorderedList', false, null);
@@ -2555,6 +2919,8 @@ document.addEventListener('change', function (e) {
                 fd.append('meta_title', $('#add_article_meta_title').val() || '');
                 fd.append('meta_description', $('#add_article_meta_description').val() || '');
                 fd.append('meta_keywords', $('#add_article_meta_keywords').val() || '');
+                fd.append('sources', window.TEN_collectSources ? TEN_collectSources('add_article_sources') : '[]');
+                fd.append('carousel_picks', window.TEN_cpCollect ? TEN_cpCollect('add_article_carousel') : '[]');
                 // Per-publication flags (frontpage / section headline / sponsored) replace the
                 // old global checkboxes; the backend derives the legacy columns from these.
                 fd.append('pub_flags', JSON.stringify(window.TEN_collectPubFlags ? TEN_collectPubFlags('add_article_publications', 'input.add_pub_cb') : {}));
@@ -2584,6 +2950,8 @@ document.addEventListener('change', function (e) {
                                 $('#article_title').val('');
                                 $('#article_text').html('');
                                 $('#add_article_meta_title,#add_article_meta_description,#add_article_meta_keywords,#add_article_tags').val('');
+                                if (window.TEN_renderSources) TEN_renderSources('add_article_sources', []);
+                                if (window.TEN_cpSet) TEN_cpSet('add_article_carousel', []);
                                 // Reset per-publication flag checkboxes (built into each pub row).
                                 $('#add_article_publications .pubflag').prop('checked', false);
                                 $('#add_publish_now').prop('checked', true);
@@ -3433,6 +3801,11 @@ document.addEventListener('change', function (e) {
     const deleteArticleBtn = document.getElementById('deleteArticleBtn');
     const fullscreenBtn = document.getElementById('modal_fullscreen_toggle');
 
+    // Unsaved-changes tracking for the edit modal: set true by any edit the user
+    // makes, reset false once the form is (re)loaded or a save succeeds. Drives the
+    // "Save / Discard / Keep editing" prompt when the modal is closed.
+    let modalDirty = false;
+
     // Inputs & containers
     const fld_title = document.getElementById('modal_title');
     const fld_alias = document.getElementById('modal_alias');
@@ -3600,7 +3973,43 @@ document.addEventListener('change', function (e) {
         if (etReset) etReset.innerHTML = '';
         activeArticleId = null;
         isCreateMode = false;
+        modalDirty = false;
         releaseFocusTrap();
+    }
+
+    // Any edit inside the modal (form fields or the moved content editor, whose
+    // `input` events bubble to the modal) marks the form dirty. Programmatic
+    // population sets values without firing these events, so loading stays clean.
+    ['input', 'change'].forEach(function (evt) {
+        modal.addEventListener(evt, function () { modalDirty = true; });
+    });
+
+    // Close requested by the user (Cancel / X / backdrop / Esc): if there are
+    // unsaved changes, ask whether to save, discard, or keep editing.
+    function requestCloseModal() {
+        if (!modalDirty) { hideModal(); return; }
+        Swal.fire({
+            icon: 'warning',
+            title: 'Save changes?',
+            text: 'You have unsaved changes to this article.',
+            showDenyButton: true,
+            showCancelButton: true,
+            confirmButtonText: 'Save draft',
+            denyButtonText: 'Discard',
+            cancelButtonText: 'Keep editing',
+            confirmButtonColor: '#3c4f6d',
+            denyButtonColor: '#dc2626',
+            reverseButtons: true,
+            customClass: { container: 'swal-high-z' }
+        }).then(function (res) {
+            if (res.isConfirmed) {
+                saveArticle('save'); // saves, then auto-closes on success
+            } else if (res.isDenied) {
+                modalDirty = false;
+                hideModal();
+            }
+            // Cancel / dismiss => keep editing (do nothing)
+        });
     }
 
     // Focus trap minimal implementation
@@ -3628,7 +4037,7 @@ document.addEventListener('change', function (e) {
                     }
                 }
             } else if (e.key === 'Escape') {
-                hideModal();
+                requestCloseModal();
             }
         }
 
@@ -3697,6 +4106,7 @@ document.addEventListener('change', function (e) {
     window.openEdit = function (id) {
         const creating = !id || parseInt(id, 10) === 0;
         activeArticleId = creating ? null : id;
+        window.activeArticleId = activeArticleId;   // expose for the carousel picker (exclude self)
         isCreateMode = creating;
         modalArticleIdSpan.textContent = creating ? 'New article' : ('#' + id);
         save_status.style.color = '#666';
@@ -4022,8 +4432,22 @@ document.addEventListener('change', function (e) {
             // image on load, which was then saved and shrank the front-page headline.
             // Images are now kept clean; the site's per-placement CSS sizes them.
 
+            // Sources tab
+            if (window.TEN_renderSources) {
+                TEN_renderSources('modal_sources', window.TEN_parseSources(json.sources));
+            }
+            // Carousel picks tab
+            if (window.TEN_cpSet) {
+                TEN_cpSet('modal_carousel', window.TEN_cpParse(json.carousel_picks || []));
+            }
+
             save_status.style.color = '#666';
             save_status.textContent = 'Ready to edit';
+
+            // Baseline the unsaved-changes tracker: everything above was set
+            // programmatically, so the freshly-loaded form is "clean". A short
+            // delay absorbs any late events from the async dropdown builds.
+            setTimeout(function () { modalDirty = false; }, 300);
         })
         .catch(err => {
             save_status.style.color = '#dc3545';
@@ -4240,6 +4664,8 @@ document.addEventListener('change', function (e) {
         fd.append('meta_title', fld_meta_title ? (fld_meta_title.value || '') : '');
         fd.append('meta_description', fld_meta_description ? (fld_meta_description.value || '') : '');
         fd.append('meta_keywords', fld_meta_keywords ? (fld_meta_keywords.value || '') : '');
+        fd.append('sources', window.TEN_collectSources ? TEN_collectSources('modal_sources') : '[]');
+        fd.append('carousel_picks', window.TEN_cpCollect ? TEN_cpCollect('modal_carousel') : '[]');
         fd.append('section', fld_section.value || '');
         fd.append('section_subcat', fld_section_subcat.value || '');
         fd.append('author', fld_author.value || '');
@@ -4283,6 +4709,7 @@ document.addEventListener('change', function (e) {
                 }
                 save_status.style.color = '#28a745';
                 save_status.textContent = 'Saved successfully.';
+                modalDirty = false; // a successful save clears unsaved changes
 
                 // Show SweetAlert with higher z-index
                 Swal.fire({
@@ -4346,10 +4773,10 @@ document.addEventListener('change', function (e) {
     publishBtn.addEventListener('click', function () { saveArticle('publish'); });
     if (deleteArticleBtn) deleteArticleBtn.addEventListener('click', deleteArticle);
 
-    // Close handlers
-    closeBtn.addEventListener('click', hideModal);
-    cancelBtn.addEventListener('click', hideModal);
-    modal.addEventListener('click', function (e) { if (e.target === modal) hideModal(); });
+    // Close handlers — routed through the unsaved-changes guard.
+    closeBtn.addEventListener('click', requestCloseModal);
+    cancelBtn.addEventListener('click', requestCloseModal);
+    modal.addEventListener('click', function (e) { if (e.target === modal) requestCloseModal(); });
 
     // Esc handled by focus trap
 

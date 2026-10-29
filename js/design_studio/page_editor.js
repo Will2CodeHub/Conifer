@@ -109,14 +109,12 @@
         '<button data-dev="desktop" class="' + (ds.device === "desktop" ? "on" : "") + '">Desktop</button>' +
         '<button data-dev="mobile" class="' + (ds.device === "mobile" ? "on" : "") + '">Mobile</button>' +
       '</div>' +
-      '<button class="ds-btn ds-btn-ghost" id="dsPePlaceholders"><i class="fas fa-code"></i> Placeholders</button>' +
       '<button class="ds-btn ds-btn-ghost" id="dsPePreview"><i class="fas fa-up-right-from-square"></i> Preview</button>' +
       '<button class="ds-btn ds-btn-primary" id="dsPeSave"><i class="fas fa-floppy-disk"></i> Save</button>' +
     '</header>';
   }
 
   function wireTopbar(root, name) {
-    root.querySelector("#dsPePlaceholders").addEventListener("click", function () { DS.openPlaceholders({}); });
     root.querySelector("#dsPeBack").addEventListener("click", function () {
       function go(save) {
         clearTimeout(saveTimer);

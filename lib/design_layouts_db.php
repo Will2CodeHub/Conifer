@@ -143,9 +143,26 @@ function dl_list_versions(string $pub): array {
  * Each explicit Save appends one snapshot for that page/block/template, kept in
  * its own table so it persists across sessions and is revertable. Capped per item. */
 
+/** Make sure the history table exists (self-healing, so saving a version never
+ *  silently fails just because the one-off migration was never run). */
+function dl_ensure_history_table($conn): void {
+    if (!$conn) { return; }
+    @$conn->query("CREATE TABLE IF NOT EXISTS ten_design_history (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        publication VARCHAR(32) NOT NULL,
+        item_kind VARCHAR(16) NOT NULL,
+        item_id VARCHAR(64) NOT NULL,
+        snapshot_json MEDIUMTEXT NOT NULL,
+        created_by VARCHAR(128) NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_item (publication, item_kind, item_id, id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
 function dl_add_history(string $pub, string $kind, string $id, string $snapshot, ?string $user): void {
     $conn = getDBConnection_TENAdmin();
     if (!$conn) { return; }
+    dl_ensure_history_table($conn);
     $st = $conn->prepare("INSERT INTO ten_design_history (publication, item_kind, item_id, snapshot_json, created_by) VALUES (?, ?, ?, ?, ?)");
     $st->bind_param('sssss', $pub, $kind, $id, $snapshot, $user);
     $st->execute();
@@ -163,6 +180,7 @@ function dl_add_history(string $pub, string $kind, string $id, string $snapshot,
 function dl_list_history(string $pub, string $kind, string $id): array {
     $conn = getDBConnection_TENAdmin();
     if (!$conn) { return []; }
+    dl_ensure_history_table($conn);
     $st = $conn->prepare("SELECT id, created_at, created_by FROM ten_design_history WHERE publication=? AND item_kind=? AND item_id=? ORDER BY id DESC");
     $st->bind_param('sss', $pub, $kind, $id);
     $st->execute();

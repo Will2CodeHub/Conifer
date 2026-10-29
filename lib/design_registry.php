@@ -135,6 +135,7 @@ function dl_registry(): array {
         'article_header'   => ['label' => 'Article header',    'pages' => ['article'],                         'defaults' => []],
         'article_hero'     => ['label' => 'Article hero image','pages' => ['article'],                         'defaults' => ['ratio' => '16x9']],
         'article_body'     => ['label' => 'Article body',      'pages' => ['article'],                         'defaults' => []],
+        'article_sources'  => ['label' => 'Article sources',   'pages' => ['article'],                         'defaults' => ['heading' => 'Sources']],
         'article_byline'   => ['label' => 'Byline',            'pages' => ['article'],                         'defaults' => []],
         'article_related'  => ['label' => 'Related articles (3-up)', 'pages' => ['article'],                  'defaults' => ['count' => 3, 'heading' => '']],
         'article_quickreads' => ['label' => 'Quick reads (3-up)',  'pages' => ['article'],                       'defaults' => ['count' => 3, 'heading' => 'Quick Reads News']],
@@ -295,6 +296,15 @@ function dl_placeholder_defs(): array {
                     $P('contact_href', 'Contact link', '/design/contact'),
                 ],
             ],
+            'article_slots' => [
+                'label' => 'Numbered article slots — a section’s Nth latest story (use “Insert article”, or copy one and change the slug / number)',
+                'items' => [
+                    $P('article:politics:1:title', 'Headline, text only — swap “politics” for a section slug or “latest”, and 1 for the story number', 'France unveils new budget'),
+                    $P('article:politics:1:titlelink', 'Headline that links to the article', 'France unveils new budget'),
+                    $P('article:politics:1:snippet', 'Teaser (40 words by default)', 'A short summary of the story…'),
+                    $P('article:politics:1:snippet:25', 'Teaser with a custom word count (here, 25 words)', 'A short summary of the story…'),
+                ],
+            ],
         ],
         'blocks' => [
             'masthead'        => ['label' => 'Masthead', 'items' => [$P('site_name', 'Publication name'), $P('tagline', 'Tagline')]],
@@ -314,6 +324,7 @@ function dl_placeholder_defs(): array {
             'article_header'  => ['label' => 'Article header', 'items' => [$P('section', 'Section'), $P('section_href', 'Section link'), $P('title', 'Article title'), $P('standfirst', 'Standfirst'), $P('date', 'Date'), $P('read_time', 'Read time (minutes)'), $P('meta', 'Date · read time (combined)')]],
             'article_hero'    => ['label' => 'Article hero image', 'items' => [$P('image', 'Image URL'), $P('title', 'Alt text / title')]],
             'article_body'    => ['label' => 'Article body', 'items' => [$P('body', 'Article body HTML')]],
+            'article_sources' => ['label' => 'Article sources', 'items' => [$P('heading', 'Heading'), $P('title', 'Source title', '', true), $P('url', 'Source URL', '', true)]],
             'article_byline'  => ['label' => 'Byline', 'items' => [$P('name', 'Author name'), $P('role', 'Author role'), $P('photo', 'Author photo'), $P('href', 'Author link'), $P('email', 'Email'), $P('linkedin_url', 'LinkedIn'), $P('byline', 'Byline text'), $P('read_all_label', '“Read all by…” label')]],
             'article_related' => ['label' => 'Related articles', 'items' => [$P('heading', 'Heading'), $P('title', 'Card title', '', true), $P('href', 'Card link', '', true), $P('image', 'Card image', '', true), $P('section', 'Card section', '', true), $P('meta', 'Card meta', '', true)]],
             'article_quickreads' => ['label' => 'Quick reads', 'items' => [$P('heading', 'Heading'), $P('title', 'Card title', '', true), $P('href', 'Card link', '', true), $P('section', 'Card section', '', true), $P('meta', 'Card meta', '', true)]],

@@ -105,10 +105,30 @@ try {
             
             // Hash password
             $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-            
+
+            // Public bio id: the article byline links to /backend/journalist.php?id=<public_id>.
+            // Generate a unique one now so new journalists' bylines link to their bio page.
+            $publicId = 0;
+            for ($pt = 0; $pt < 12; $pt++) {
+                $cand = rand(10000000, 999999999);
+                $pc = $conn->prepare("SELECT id FROM ten_users WHERE public_id = ? LIMIT 1");
+                $pc->bind_param("i", $cand);
+                $pc->execute();
+                $taken = $pc->get_result()->num_rows > 0;
+                $pc->close();
+                if (!$taken) { $publicId = $cand; break; }
+            }
+            if (!$publicId) { $publicId = rand(10000000, 999999999); }
+
+            // The byline resolver needs firstname (to show a linked author byline).
+            // Derive first/surname from the full name when they aren't supplied.
+            $fnParts = preg_split('/\s+/', trim($fullName), 2);
+            $firstName = isset($fnParts[0]) ? $fnParts[0] : '';
+            $surName   = isset($fnParts[1]) ? $fnParts[1] : '';
+
             // Insert user
-            $stmt = $conn->prepare("INSERT INTO ten_users (username, email, password, full_name, status, section, publication, email_verified, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW())");
-            $stmt->bind_param("sssssss", $username, $email, $hashedPassword, $fullName, $status, $section, $publication);
+            $stmt = $conn->prepare("INSERT INTO ten_users (public_id, username, email, password, full_name, firstname, surname, status, section, publication, email_verified, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())");
+            $stmt->bind_param("isssssssss", $publicId, $username, $email, $hashedPassword, $fullName, $firstName, $surName, $status, $section, $publication);
             
             if (!$stmt->execute()) {
                 throw new Exception('Failed to create user: ' . $stmt->error);

@@ -25,6 +25,7 @@
     article_header:     { label: "Article header",     pages: ["article"],                       defaults: {} },
     article_hero:       { label: "Article hero image", pages: ["article"],                       defaults: { ratio: "16x9" } },
     article_body:       { label: "Article body",       pages: ["article"],                       defaults: {} },
+    article_sources:    { label: "Article sources",    pages: ["article"],                       defaults: { heading: "Sources" } },
     article_byline:     { label: "Byline",             pages: ["article"],                       defaults: {} },
     article_related:    { label: "Related articles",   pages: ["article"],                       defaults: { count: 3, heading: "" } },
     article_quickreads: { label: "Quick reads",        pages: ["article"],                       defaults: { count: 3, heading: "Quick Reads News" } },
@@ -63,4 +64,38 @@
   };
   // True for a user-created block (no built-in PHP renderer).
   DS.isCustomBlock = function (type) { return /^blk_/.test(String(type)); };
+
+  // --------------------------------------------------------------------
+  //  Placeholder-token classification. Every {{token}} falls into one
+  //  "kind"; the editor inspector shows only the controls that make sense
+  //  for that kind (an image doesn't get letter-spacing, a date doesn't get
+  //  object-fit). Element kinds (container/text/etc.) are resolved in the
+  //  editor from the tag; this classifies the DATA tokens.
+  //  Kinds: heading | body | meta | image | link | icon.  (List/repeating
+  //  regions are detected structurally in the editor, not from a token name.)
+  // --------------------------------------------------------------------
+  DS.KIND_LABEL = {
+    heading: "Heading", body: "Body text", meta: "Label / meta",
+    image: "Image", link: "Link / button", icon: "Icon",
+    list: "List / repeating", container: "Container", text: "Text"
+  };
+
+  var BODY_TOKENS = { standfirst: 1, summary: 1, snippet: 1, body: 1, bio: 1, teaser: 1, blurb: 1, value: 1, note: 1, text: 1 };
+  var META_TOKENS = { date: 1, date_published: 1, date_updated: 1, read_time: 1, meta: 1, section: 1, caption: 1, copyright: 1, q: 1, count_label: 1, placeholder: 1 };
+  var HEADING_TOKENS = { title: 1, name: 1, heading: 1, headlines_label: 1, tagline: 1 };
+
+  // tok = the inner token name (no braces, no #each/#if markers).
+  DS.tokenKind = function (tok) {
+    var t = String(tok == null ? "" : tok).replace(/^\{*\s*|\s*\}*$/g, "").trim();
+    t = t.replace(/^(#each|#if)\s+/, "");       // a loop/cond marker → classify its field
+    var last = t.split(".").pop();              // hero.image → image
+    if (/icon/i.test(last)) { return "icon"; }
+    if (last === "image" || last === "logo" || last === "photo" || /_image$|_photo$|^photo_|avatar|thumb|logo/i.test(last)) { return "image"; }
+    if (last === "href" || last === "url" || last === "email" || last === "action" ||
+        /_href$|_url$|^href$|^url$/i.test(last) || /^(x_url|linkedin_url|facebook|twitter|instagram)$/i.test(last)) { return "link"; }
+    if (HEADING_TOKENS[last]) { return "heading"; }
+    if (BODY_TOKENS[last]) { return "body"; }
+    if (META_TOKENS[last] || /_label$|_date$/i.test(last)) { return "meta"; }
+    return "heading"; // default: short display text reads as a heading/title
+  };
 })();
