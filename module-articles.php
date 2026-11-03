@@ -3436,15 +3436,25 @@ document.addEventListener('change', function (e) {
 
                 const statusBadge = '<span style="display:inline-flex;align-items:center;gap:4px;background:' + stateBg + ';color:' + stateColor + ';padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;">' +
                     '<span style="width:6px;height:6px;border-radius:50%;background:' + stateColor + ';display:inline-block;"></span>' +
-                    stateLabel + '</span>';
+                    stateLabel + '</span>' +
+                    // Breaking-news rows come from the parallel table — flag them so
+                    // editors can tell at a glance why they behave a little differently.
+                    ((row.src === 'breaking')
+                        ? ' <span title="Breaking News (data scraper)" style="display:inline-flex;align-items:center;gap:4px;background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;padding:3px 8px;border-radius:999px;font-size:10px;font-weight:700;white-space:nowrap;text-transform:uppercase;letter-spacing:0.3px;"><i class="fas fa-bolt"></i> Breaking</span>'
+                        : '');
 
-                // Edit button
+                // 'main' articles vs 'breaking' (parallel articles_breaking_news table).
+                const rowSrc = (row.src === 'breaking') ? 'breaking' : 'main';
+
+                // Edit button — passes the source table so the editor loads/saves
+                // breaking-news rows against articles_breaking_news.
                 const editBtn = row.editable == 1
-                    ? '<button type="button" onclick="openEdit(' + row.id + ')" style="border:none;background:#3b82f6;color:#fff;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;gap:4px;font-weight:500;" title="Edit article"><i class="fas fa-pencil-alt"></i> Edit</button>'
+                    ? '<button type="button" onclick="openEdit(' + row.id + ', \'' + rowSrc + '\')" style="border:none;background:#3b82f6;color:#fff;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;gap:4px;font-weight:500;" title="Edit article"><i class="fas fa-pencil-alt"></i> Edit</button>'
                     : '';
 
                 // History button (senior roles only): opens the edit-history modal.
-                const historyBtn = window.TEN_canViewHistory
+                // Breaking-news rows keep no revision history, so no button there.
+                const historyBtn = (window.TEN_canViewHistory && rowSrc !== 'breaking')
                     ? '<button type="button" onclick="openHistory(' + row.id + ')" style="border:none;background:#8b5cf6;color:#fff;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;gap:4px;font-weight:500;" title="View edit history"><i class="fas fa-clock-rotate-left"></i> History</button>'
                     : '';
 
@@ -3783,9 +3793,9 @@ document.addEventListener('change', function (e) {
     (function () {
     // Ensure openEdit is available immediately for onclick handlers
     if (typeof window.openEdit === 'undefined') {
-        window.openEdit = function(id) {
+        window.openEdit = function(id, src) {
             console.log('openEdit called before initialization, waiting...');
-            setTimeout(function() { window.openEdit(id); }, 100);
+            setTimeout(function() { window.openEdit(id, src); }, 100);
         };
     }
     
@@ -3829,6 +3839,7 @@ document.addEventListener('change', function (e) {
     const editorSlot = document.getElementById('modal_editor_slot');
 
     let activeArticleId = null;
+    let activeArticleSrc = 'main';   // 'main' | 'breaking' — which table the open article lives in
     let isCreateMode = false;
     let movedEditor = false;
     let originalEditor = null;
@@ -4103,9 +4114,12 @@ document.addEventListener('change', function (e) {
     // Open the modal to CREATE a new article (reuses the same edit modal + save path).
     window.openCreateArticle = function () { window.openEdit(0); };
 
-    window.openEdit = function (id) {
+    window.openEdit = function (id, src) {
         const creating = !id || parseInt(id, 10) === 0;
         activeArticleId = creating ? null : id;
+        // Breaking-news rows (src='breaking') are edited in the parallel table;
+        // new articles are always created in the main table.
+        activeArticleSrc = (src === 'breaking' && !creating) ? 'breaking' : 'main';
         window.activeArticleId = activeArticleId;   // expose for the carousel picker (exclude self)
         isCreateMode = creating;
         modalArticleIdSpan.textContent = creating ? 'New article' : ('#' + id);
@@ -4151,6 +4165,7 @@ document.addEventListener('change', function (e) {
         // POST load article data (id=0 returns blank defaults + the dropdown lists).
         const fd = new FormData();
         fd.append('id', creating ? 0 : id);
+        fd.append('src', activeArticleSrc);   // 'breaking' reads the parallel table
 
         fetch('/management/ajax/get_article_data.php', {
             method: 'POST',
@@ -4532,6 +4547,7 @@ document.addEventListener('change', function (e) {
             save_status.textContent = 'Deleting article...';
             const fd = new FormData();
             fd.append('id', activeArticleId);
+            fd.append('src', activeArticleSrc);   // route to the right table
             fetch('/management/ajax/delete_article.php', { method: 'POST', body: fd, credentials: 'same-origin' })
                 .then(r => r.json())
                 .then(resp => {
@@ -4657,6 +4673,7 @@ document.addEventListener('change', function (e) {
         // Prepare POST
         const fd = new FormData();
         fd.append('id', activeArticleId || '');   // blank => create
+        fd.append('src', activeArticleId ? activeArticleSrc : 'main');   // breaking rows update the parallel table
         fd.append('title', fld_title.value || '');
         fd.append('article_text', articleHtml || '');
         fd.append('alias', fld_alias.value || '');

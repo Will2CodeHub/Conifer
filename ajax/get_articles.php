@@ -153,9 +153,80 @@ if ($filterDateTo !== "") {
 }
 
 // -----------------------------------------------------------------------------
-// Count Query
+// Breaking-news articles live in the parallel admin_ten.articles_breaking_news
+// table (the scraper routes Breaking News there so the site renders them in its
+// Breaking News section). They share the articles column shape, so the list, the
+// count and every editor action UNION both tables and tag each row with a `src`
+// ('main' | 'breaking') that the front-end passes back to the edit/save/delete
+// endpoints. Without this, breaking-news drafts are invisible and uneditable.
 // -----------------------------------------------------------------------------
-$countSql = "SELECT COUNT(*) AS total FROM articles a WHERE $where";
+
+// Collect the WHERE bind values ONCE as plain arrays; the UNION binds the same
+// $where placeholders for BOTH branches, so every value is supplied twice.
+$whereTypes = '';
+$whereVals  = array();
+
+// State placeholder is first in $where, so collect it first.
+if ($hasStateFilter) {
+    $whereTypes .= 's';
+    $whereVals[] = $filterState;
+}
+if ($search !== "") {
+    $likeSearch = '%' . $search . '%';
+    $whereTypes .= 'ss';
+    $whereVals[] = $likeSearch;
+    $whereVals[] = $likeSearch;
+}
+if ($filterUser > 0) {
+    $whereTypes .= 'i';
+    $whereVals[] = $filterUser;
+}
+if ($filterSection !== "" && $position !== 'Section Editor') {
+    $whereTypes .= 's';
+    $whereVals[] = $filterSection;
+}
+if ($filterPublication !== "") {
+    $likePublication = '%' . $filterPublication . '%';
+    $whereTypes .= 's';
+    $whereVals[] = $likePublication;
+}
+if ($filterDateFrom !== "") {
+    // Convert date format from YYYY-MM-DD (HTML5 date input) to database format
+    $dateFrom = date('Y-m-d', strtotime($filterDateFrom));
+    $whereTypes .= 's';
+    $whereVals[] = $dateFrom;
+}
+if ($filterDateTo !== "") {
+    $dateTo = date('Y-m-d 23:59:59', strtotime($filterDateTo));
+    $whereTypes .= 's';
+    $whereVals[] = $dateTo;
+}
+
+// mysqli bind_param needs references; turn a flat value array into refs to its slots.
+$mkRefs = function (array &$arr) {
+    $refs = array();
+    foreach ($arr as $k => $v) { $refs[$k] = &$arr[$k]; }
+    return $refs;
+};
+
+// Only fold in the breaking-news table when it actually exists — this list is
+// used by every editor, so a missing table must degrade to the normal
+// articles-only view rather than hard-error the whole page. Checked once.
+$includeBreaking = false;
+$chk = $conn->query("SHOW TABLES LIKE 'articles_breaking_news'");
+if ($chk) {
+    $includeBreaking = ($chk->num_rows > 0);
+    $chk->free();
+}
+
+// -----------------------------------------------------------------------------
+// Count Query (articles, plus the breaking table when present)
+// -----------------------------------------------------------------------------
+$countInner = "(SELECT a.id FROM articles a WHERE $where)";
+if ($includeBreaking) {
+    $countInner .= " UNION ALL (SELECT a.id FROM articles_breaking_news a WHERE $where)";
+}
+$countSql = "SELECT COUNT(*) AS total FROM ( $countInner ) t";
 $stmt = $conn->prepare($countSql);
 if (!$stmt) {
     error_log("get_articles.php count prepare failed: " . $conn->error);
@@ -163,55 +234,12 @@ if (!$stmt) {
     exit;
 }
 
-// Build parameter binding dynamically
-$bindParams = array();
-$bindTypes = '';
-
-// State placeholder is first in $where, so bind it first.
-if ($hasStateFilter) {
-    $bindParams[] = &$filterState;
-    $bindTypes .= 's';
-}
-
-if ($search !== "") {
-    $likeSearch = '%' . $search . '%';
-    $bindParams[] = &$likeSearch;
-    $bindParams[] = &$likeSearch;
-    $bindTypes .= 'ss';
-}
-
-if ($filterUser > 0) {
-    $bindParams[] = &$filterUser;
-    $bindTypes .= 'i';
-}
-
-if ($filterSection !== "" && $position !== 'Section Editor') {
-    $bindParams[] = &$filterSection;
-    $bindTypes .= 's';
-}
-
-if ($filterPublication !== "") {
-    $likePublication = '%' . $filterPublication . '%';
-    $bindParams[] = &$likePublication;
-    $bindTypes .= 's';
-}
-
-if ($filterDateFrom !== "") {
-    // Convert date format from YYYY-MM-DD (HTML5 date input) to database format
-    $dateFrom = date('Y-m-d', strtotime($filterDateFrom));
-    $bindParams[] = &$dateFrom;
-    $bindTypes .= 's';
-}
-
-if ($filterDateTo !== "") {
-    $dateTo = date('Y-m-d 23:59:59', strtotime($filterDateTo));
-    $bindParams[] = &$dateTo;
-    $bindTypes .= 's';
-}
-
-if ($bindTypes !== '') {
-    array_unshift($bindParams, $bindTypes);
-    call_user_func_array(array($stmt, 'bind_param'), $bindParams);
+// Bind the WHERE values once per branch.
+$countVals  = $includeBreaking ? array_merge($whereVals, $whereVals) : $whereVals;
+$countTypes = $includeBreaking ? $whereTypes . $whereTypes : $whereTypes;
+if ($countTypes !== '') {
+    $args = array_merge(array($countTypes), $mkRefs($countVals));
+    call_user_func_array(array($stmt, 'bind_param'), $args);
 }
 
 $stmt->execute();
@@ -221,17 +249,47 @@ $total = (int) $totalRow['total'];
 $stmt->close();
 
 // -----------------------------------------------------------------------------
-// Main Query
+// Main Query (both tables)
 // -----------------------------------------------------------------------------
-// SELECT a.* keeps every articles column (incl. canonical/url); the LEFT JOIN
-// pulls the author's display name from ten_users (cross-DB; admin_smyth1w has
-// SELECT on TEN_Management) so we can both show it and ORDER BY it across pages.
-$query = "SELECT a.*, u.full_name AS author_full_name, u.username AS author_username
-          FROM articles a
-          LEFT JOIN TEN_Management.ten_users u ON u.id = a.journalist_id
-          WHERE $where
-          ORDER BY $sortExpr $sortDir
-          LIMIT ?, ?";
+// An explicit shared column list (NOT a.*) keeps the two SELECTs union-compatible
+// even though the main articles table has extra columns the breaking table lacks.
+// publish_from exists on articles but not necessarily on breaking, so the breaking
+// branch supplies NULL for it. The LEFT JOIN pulls the author's display name from
+// ten_users (cross-DB) so we can show it and ORDER BY it across pages.
+$cols = "a.id, a.title, a.journalist_id, a.publications, a.canonical, a.url, "
+      . "a.section, a.state, a.submission_date, a.modified_date, a.publish_now, "
+      . "a.imageless, a.news_scrape_url_hash";
+
+// Outer ORDER BY runs on the flattened union, so it uses unqualified column names.
+$outerSortMap = array(
+    'id'              => 'id',
+    'title'           => 'title',
+    'journalist_name' => 'author_full_name',
+    'publications'    => 'publications',
+    'section'         => 'section',
+    'state'           => 'state',
+    'modified_date'   => 'modified_date',
+    'submission_date' => 'submission_date',
+);
+$outerSort = isset($outerSortMap[$sortCol]) ? $outerSortMap[$sortCol] : 'modified_date';
+
+$mainInner = "(SELECT $cols, a.publish_from AS publish_from, 'main' AS src,
+            u.full_name AS author_full_name, u.username AS author_username
+     FROM articles a
+     LEFT JOIN TEN_Management.ten_users u ON u.id = a.journalist_id
+     WHERE $where)";
+if ($includeBreaking) {
+    $mainInner .= "
+    UNION ALL
+    (SELECT $cols, NULL AS publish_from, 'breaking' AS src,
+            u.full_name AS author_full_name, u.username AS author_username
+     FROM articles_breaking_news a
+     LEFT JOIN TEN_Management.ten_users u ON u.id = a.journalist_id
+     WHERE $where)";
+}
+$query = "SELECT * FROM ( $mainInner ) t
+ORDER BY $outerSort $sortDir
+LIMIT ?, ?";
 
 $stmt = $conn->prepare($query);
 if (!$stmt) {
@@ -240,58 +298,13 @@ if (!$stmt) {
     exit;
 }
 
-// Build parameter binding dynamically (same as count query)
-$bindParams2 = array();
-$bindTypes2 = '';
-
-// State placeholder is first in $where, so bind it first.
-if ($hasStateFilter) {
-    $bindParams2[] = &$filterState;
-    $bindTypes2 .= 's';
-}
-
-if ($search !== "") {
-    $likeSearch = '%' . $search . '%';
-    $bindParams2[] = &$likeSearch;
-    $bindParams2[] = &$likeSearch;
-    $bindTypes2 .= 'ss';
-}
-
-if ($filterUser > 0) {
-    $bindParams2[] = &$filterUser;
-    $bindTypes2 .= 'i';
-}
-
-if ($filterSection !== "" && $position !== 'Section Editor') {
-    $bindParams2[] = &$filterSection;
-    $bindTypes2 .= 's';
-}
-
-if ($filterPublication !== "") {
-    $likePublication = '%' . $filterPublication . '%';
-    $bindParams2[] = &$likePublication;
-    $bindTypes2 .= 's';
-}
-
-if ($filterDateFrom !== "") {
-    $dateFrom = date('Y-m-d', strtotime($filterDateFrom));
-    $bindParams2[] = &$dateFrom;
-    $bindTypes2 .= 's';
-}
-
-if ($filterDateTo !== "") {
-    $dateTo = date('Y-m-d 23:59:59', strtotime($filterDateTo));
-    $bindParams2[] = &$dateTo;
-    $bindTypes2 .= 's';
-}
-
-// Add LIMIT parameters
-$bindParams2[] = &$offset;
-$bindParams2[] = &$limit;
-$bindTypes2 .= 'ii';
-
-array_unshift($bindParams2, $bindTypes2);
-call_user_func_array(array($stmt, 'bind_param'), $bindParams2);
+// Bind the WHERE values once per branch, then the LIMIT offset/limit.
+$mainVals  = $includeBreaking
+    ? array_merge($whereVals, $whereVals, array($offset, $limit))
+    : array_merge($whereVals, array($offset, $limit));
+$mainTypes = ($includeBreaking ? $whereTypes . $whereTypes : $whereTypes) . 'ii';
+$args2 = array_merge(array($mainTypes), $mkRefs($mainVals));
+call_user_func_array(array($stmt, 'bind_param'), $args2);
 
 $stmt->execute();
 $result = $stmt->get_result();
@@ -362,6 +375,7 @@ while ($row = $result->fetch_assoc()) {
     // Add row
     $articles[] = array(
         'id'                => $row['id'],
+        'src'               => $row['src'] ?? 'main',   // 'main' | 'breaking' — routes editor actions
         'title'             => $row['title'],
         'journalist_id'     => $row['journalist_id'],
         'journalist_name'   => $journalistName,

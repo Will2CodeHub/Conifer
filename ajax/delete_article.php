@@ -22,6 +22,11 @@ if ($articleId <= 0) {
     exit;
 }
 
+// Breaking-news rows live in the parallel articles_breaking_news table; the
+// client tells us which one via `src`. Whitelisted to a fixed table name.
+$srcParam    = (isset($_POST['src']) && $_POST['src'] === 'breaking') ? 'breaking' : 'main';
+$sourceTable = ($srcParam === 'breaking') ? 'articles_breaking_news' : 'articles';
+
 try {
     $userId = $_SESSION['ten_user_id'] ?? 0;
     $position = $_SESSION['ten_position'] ?? '';
@@ -31,7 +36,7 @@ try {
 
     // Load the article and check edit permission — keep role list in sync with
     // save_article.php / get_article_data.php.
-    $checkStmt = $conn->prepare("SELECT journalist_id, section FROM articles WHERE id = ?");
+    $checkStmt = $conn->prepare("SELECT journalist_id, section FROM $sourceTable WHERE id = ?");
     $checkStmt->bind_param('i', $articleId);
     $checkStmt->execute();
     $existing = $checkStmt->get_result()->fetch_assoc();
@@ -54,7 +59,7 @@ try {
         exit;
     }
 
-    $stmt = $conn->prepare("UPDATE articles SET state = 'deleted' WHERE id = ?");
+    $stmt = $conn->prepare("UPDATE $sourceTable SET state = 'deleted' WHERE id = ?");
     $stmt->bind_param('i', $articleId);
     if ($stmt->execute()) {
         $stmt->close();

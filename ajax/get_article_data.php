@@ -14,6 +14,12 @@ header('Content-Type: application/json');
 // Get article ID
 $id = isset($_POST['id']) ? intval($_POST['id']) : 0;
 
+// Which table the row lives in: 'main' => articles, 'breaking' => the parallel
+// articles_breaking_news table the scraper writes Breaking News drafts into.
+// Whitelisted to a fixed table name so it can be interpolated safely.
+$srcParam   = (isset($_POST['src']) && $_POST['src'] === 'breaking') ? 'breaking' : 'main';
+$sourceTable = ($srcParam === 'breaking') ? 'articles_breaking_news' : 'articles';
+
 // Special case: id=0 means we only want dropdown data for filters, not article data
 $dropdownDataOnly = ($id === 0);
 
@@ -85,7 +91,7 @@ try {
             $scope = " AND journalist_id = " . intval($journalist_id);
         }
 
-        $query = "SELECT * FROM articles WHERE id = ?" . $scope;
+        $query = "SELECT * FROM $sourceTable WHERE id = ?" . $scope;
         $stmt = $connArticles->prepare($query);
         if (!$stmt) throw new Exception("Prepare failed (articles): " . $connArticles->error);
         $stmt->bind_param('i', $id);
@@ -138,15 +144,17 @@ try {
         $article_text = $row['article_text'];
         $article_publications = $row['publications'];
         $article_tags = $row['article_tags'] ?? $row['tags'] ?? '';
-        $evergreen = $row['evergreen'];
-        $sponsored = $row['sponsored'];
-        $featured = $row['featured'];
-        $headline = $row['frontpage_temp'];
-        $note = $row['note'];
-        $section_val = $row['section'];
-        $section_subcat = $row['section_subcat'];
+        // The breaking-news table is a leaner clone of articles, so these
+        // extra columns may be absent — default rather than warn.
+        $evergreen = $row['evergreen'] ?? 0;
+        $sponsored = $row['sponsored'] ?? 0;
+        $featured = $row['featured'] ?? 0;
+        $headline = $row['frontpage_temp'] ?? 0;
+        $note = $row['note'] ?? '';
+        $section_val = $row['section'] ?? '';
+        $section_subcat = $row['section_subcat'] ?? '';
         $author = $row['journalist_id'];
-        $publish_now = $row['publish_now'];
+        $publish_now = $row['publish_now'] ?? 1;
         $article_alias = $row['article_alias'] ?? $row['alias'] ?? '';
         $canonical_pub = $row['canonical'];
         $state = $row['state'] ?? 'draft';
@@ -157,8 +165,8 @@ try {
         $carousel_picks = (isset($row['carousel_picks']) && $row['carousel_picks'] !== '') ? $row['carousel_picks'] : '[]';
 
         // Handle dates
-        $publish_from = $row['publish_from'];
-        $publish_to = $row['publish_to'];
+        $publish_from = $row['publish_from'] ?? '';
+        $publish_to = $row['publish_to'] ?? '';
         $time_from = $row['time_from'] ?? '';
         $time_to = $row['time_to'] ?? '';
         
@@ -426,6 +434,7 @@ try {
     $response = [
         'status' => 'success',
         'id' => $id,
+        'src' => $srcParam,
         'title' => $title,
         'article' => $article_text,
         'article_alias' => $article_alias,

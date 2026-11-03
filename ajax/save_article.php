@@ -215,6 +215,16 @@ $publishFrom = isset($_POST['publish_from']) ? trim($_POST['publish_from']) : nu
 $publishTo = isset($_POST['publish_to']) ? trim($_POST['publish_to']) : null;
 $action = isset($_POST['action']) ? $_POST['action'] : 'save'; // 'save', 'submit', 'publish'
 
+// Breaking-news articles are edited in place in the parallel admin_ten.
+// articles_breaking_news table (the scraper writes Breaking News drafts there).
+// `src` tells us which table to UPDATE; it is whitelisted to a fixed name and
+// only ever applies to an existing row (new articles are always created in the
+// main articles table). The breaking table is a leaner clone, so its save path
+// below touches only the columns it is known to have.
+$srcParam    = (isset($_POST['src']) && $_POST['src'] === 'breaking') ? 'breaking' : 'main';
+$isBreaking  = ($srcParam === 'breaking' && $articleId > 0);
+$sourceTable = $isBreaking ? 'articles_breaking_news' : 'articles';
+
 // Per-publication flags: {pub: {frontpage, section_head, sponsored}}. When present they are
 // authoritative — the legacy single columns (frontpage_temp/featured/sponsored) are derived
 // as the OR across the article's publications so sites still reading the old columns keep
@@ -295,7 +305,7 @@ try {
 
     // Check if article exists and user has permission
     if ($articleId > 0) {
-        $checkStmt = $conn->prepare("SELECT journalist_id, state, section, publications FROM articles WHERE id = ?");
+        $checkStmt = $conn->prepare("SELECT journalist_id, state, section, publications FROM $sourceTable WHERE id = ?");
         $checkStmt->bind_param('i', $articleId);
         $checkStmt->execute();
         $result = $checkStmt->get_result();
@@ -417,7 +427,85 @@ try {
     $editorName = $_SESSION['ten_full_name'] ?? ($_SESSION['ten_username'] ?? '');
 
     // Update or insert
-    if ($articleId > 0) {
+    if ($isBreaking) {
+        // ---- BREAKING NEWS save path -------------------------------------
+        // articles_breaking_news is a leaner clone of articles, so we update
+        // ONLY the columns it is known to carry (those the scraper inserts).
+        // The articles-only extras (sources / carousel picks / per-pub flags /
+        // edit-history revisions) are skipped — they don't exist for breaking.
+
+        // The editor's section dropdown is built from the publication's menu
+        // sections, which usually don't include 'breaking-news'; an empty posted
+        // section would otherwise wipe it, so fall back to the stored section.
+        if ($section === '' && !empty($existingArticle['section'])) {
+            $section = $existingArticle['section'];
+        }
+
+        $query = "UPDATE articles_breaking_news SET
+            title = ?,
+            article_text = ?,
+            section = ?,
+            journalist_id = ?,
+            publications = ?,
+            canonical = ?,
+            meta_title = ?,
+            meta_description = ?,
+            meta_keywords = ?,
+            created_by = ?,
+            publish_now = ?,
+            state = ?,
+            modified_date = NOW()
+            WHERE id = ?";
+        $stmt = $conn->prepare($query);
+        $stmt->bind_param('sssissssssisi',
+            $title,
+            $articleText,
+            $section,
+            $author,
+            $publications,
+            $canonical,
+            $metaTitle,
+            $metaDescription,
+            $metaKeywords,
+            $createdBy,
+            $publishNow,
+            $state,
+            $articleId
+        );
+
+        if ($stmt->execute()) {
+            $stmt->close();
+
+            // Rebuild the site URL (<slug>-<id>) from the current title.
+            $slug = substr(ten_article_slug($title) . '-' . $articleId, 0, 200);
+            $su = $conn->prepare("UPDATE articles_breaking_news SET url = ? WHERE id = ?");
+            $su->bind_param('si', $slug, $articleId); $su->execute(); $su->close();
+
+            // Keep the imageless flag in step with the body (drives the site's
+            // imageless sections); the breaking table has this column.
+            $imageless = preg_match('#<img[^>]+src=#i', $articleText) ? 0 : 1;
+            $iu = $conn->prepare("UPDATE articles_breaking_news SET imageless = ? WHERE id = ?");
+            $iu->bind_param('ii', $imageless, $articleId); $iu->execute(); $iu->close();
+
+            $conn->close();
+
+            echo json_encode([
+                'status' => 'success',
+                'message' => 'Breaking-news article saved successfully',
+                'article_id' => $articleId,
+                'src' => 'breaking',
+                'state' => $state
+            ]);
+
+            // On publish, rebuild each publication's cached front page after responding.
+            if ($state === 'published') {
+                if (function_exists('fastcgi_finish_request')) { @fastcgi_finish_request(); }
+                ten_regenerate_publication_caches($publications);
+            }
+        } else {
+            throw new Exception('Failed to update breaking-news article: ' . $stmt->error);
+        }
+    } else if ($articleId > 0) {
         // UPDATE
         $query = "UPDATE articles SET
             title = ?,
