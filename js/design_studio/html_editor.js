@@ -12,7 +12,8 @@
   var w = { frame: null, src: null, doc: null, win: null, root: null, type: null,
             host: "", srcMode: false, styleTag: "", savedRange: null, sections: [],
             insSel: null, srcBtn: null, onChange: null, container: null,
-            inspector: null, selEl: null };
+            inspector: null, selEl: null,
+            device: "desktop", mobileRules: {}, banner: null, _mobileSeq: 0 };
   var changeTimer = null;
 
   // ---- field labels / destinations (ported) ----------------------------
@@ -83,7 +84,12 @@
   };
   var GENERIC_HREF = ["{{href}}", "Current item's link (inside a list)"];
 
-  var FONTS = [["", "Font"], ['"Playfair Display", Georgia, serif', "Playfair Display"], ['"Lora", Georgia, serif', "Lora (headlines)"], ['"Merriweather", Georgia, serif', "Merriweather (body)"],
+  // One named font per option, with only a GENERIC fallback (serif / sans-serif).
+  // Bundling a second named face (e.g. "Lora", Georgia, serif) made the saved HTML
+  // read as two fonts and, if the chosen face was missing, silently fell back to
+  // the other named one — confusing to read and to debug. The live /design/ pages
+  // load Playfair/Lora/Merriweather/Inter, so the first name resolves there.
+  var FONTS = [["", "Font"], ['"Playfair Display", serif', "Playfair Display"], ['"Lora", serif', "Lora (headlines)"], ['"Merriweather", serif', "Merriweather (body)"],
     ['"Inter", system-ui, sans-serif', "Inter (UI)"], ['"Public Sans", sans-serif', "Public Sans"], ["Georgia, serif", "Georgia"],
     ['"Times New Roman", serif', "Times"], ["Arial, sans-serif", "Arial"], ['"Helvetica Neue", Helvetica, sans-serif', "Helvetica"],
     ["Verdana, sans-serif", "Verdana"], ['"Courier New", monospace', "Courier"]];
@@ -196,12 +202,16 @@
   function hoistTokenStyles(root) {
     [].slice.call(root.querySelectorAll("span.dl-tok-field")).forEach(function (chip) {
       var p = chip.parentNode;
-      if (p && p.tagName === "SPAN" && !p.classList.contains("dl-tok") &&
-          p.getAttribute("style") && p.childNodes.length === 1) {
-        var ps = p.getAttribute("style") || "", cs = chip.getAttribute("style") || "";
-        chip.setAttribute("style", ps + (ps && cs ? ";" : "") + cs);
-        p.parentNode.replaceChild(chip, p);
+      if (!(p && p.tagName === "SPAN" && !p.classList.contains("dl-tok") && p.childNodes.length === 1)) { return; }
+      var pStyle = p.getAttribute("style");
+      var pMob = [].slice.call(p.classList).filter(function (c) { return c.indexOf("dlm-") === 0; });
+      if (!(pStyle && pStyle.trim()) && !pMob.length) { return; }   // nothing to hoist
+      if (pStyle && pStyle.trim()) {
+        var cs = chip.getAttribute("style") || "";
+        chip.setAttribute("style", pStyle + (pStyle && cs ? ";" : "") + cs);
       }
+      pMob.forEach(function (c) { chip.classList.add(c); });   // keep the mobile-override hook on the chip
+      p.parentNode.replaceChild(chip, p);
     });
   }
   function tokenizeDom(root, doc) {
@@ -296,6 +306,65 @@
     while (el && el !== w.root) { if (BLOCK_TAGS.indexOf(el.tagName) !== -1) { return el; } el = el.parentElement; }
     return null;
   }
+  // The box a scoped Ctrl+A should select: the nearest text block (paragraph /
+  // heading / list item / quote). Falls back to null so the caller can leave the
+  // browser's default (whole-document) select-all when there is no such box.
+  function scopeForSelectAll(node) { return blockAncestor(node); }
+
+  // ---- placeholder copy / paste (inline) -------------------------------
+  // Replace token chips inside a cloned fragment with their raw {{token}} text, so
+  // what lands on the clipboard is the placeholder itself, not its display label.
+  function fragTokenText(frag) {
+    var div = w.doc.createElement("div"); div.appendChild(frag);
+    [].slice.call(div.querySelectorAll(".dl-tok")).forEach(function (t) {
+      t.parentNode.replaceChild(w.doc.createTextNode(t.getAttribute("data-tok") || ""), t);
+    });
+    return div.textContent || "";
+  }
+  function handleTokenCopy(e, isCut) {
+    if (w.srcMode) { return; }
+    var sel = w.win.getSelection();
+    if (!sel.rangeCount || sel.isCollapsed) { return; }
+    var range = sel.getRangeAt(0);
+    // Only take over when the selection actually holds a placeholder chip — plain
+    // text copy/cut keeps the browser's native behaviour.
+    if (!range.cloneContents().querySelector(".dl-tok")) { return; }
+    var text = fragTokenText(range.cloneContents());
+    try { (e.clipboardData || w.win.clipboardData).setData("text/plain", text); } catch (_) { return; }
+    e.preventDefault();
+    if (isCut) { range.deleteContents(); rememberRange(); changed(); }
+  }
+  function handleTokenPaste(e) {
+    if (w.srcMode) { return; }
+    var cd = e.clipboardData || w.win.clipboardData;
+    var text = cd ? (cd.getData("text/plain") || "") : "";
+    if (!/\{\{[\s\S]*?\}\}/.test(text)) { return; }   // no placeholder → let the browser paste normally
+    e.preventDefault();
+    insertMixedInline(text);
+  }
+  // Insert a run of text that may contain {{…}} placeholders, INLINE at the caret:
+  // plain parts become text nodes, placeholders become chips, all on the same line.
+  function insertMixedInline(text) {
+    if (!w.doc) { return; }
+    w.root.focus();
+    var frag = w.doc.createDocumentFragment();
+    var re = /\{\{\{[\s\S]*?\}\}\}|\{\{[\s\S]*?\}\}/g, last = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > last) { frag.appendChild(w.doc.createTextNode(text.slice(last, m.index))); }
+      frag.appendChild(makeTok(m[0], w.doc));
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) { frag.appendChild(w.doc.createTextNode(text.slice(last))); }
+    var lastNode = frag.lastChild;
+    var sel = w.win.getSelection();
+    var r = (sel && sel.rangeCount) ? sel.getRangeAt(0) : null;
+    if (!r) { w.root.appendChild(frag); }
+    else {
+      r.deleteContents(); r.insertNode(frag);
+      if (lastNode) { r.setStartAfter(lastNode); r.collapse(true); sel.removeAllRanges(); sel.addRange(r); }
+    }
+    rememberRange(); changed();
+  }
 
   // ---- inline formatting -----------------------------------------------
   function wrapInline(tag, tags) {
@@ -326,6 +395,16 @@
     var span = w.doc.createElement("span");
     span.style[prop] = val;
     span.appendChild(range.extractContents());
+    // Replace, don't layer: re-applying a font/size/colour wraps a NEW span around
+    // the content, so any descendant that still sets the same property (an earlier
+    // choice) would be innermost and keep winning — the old value would "stick".
+    // Clear that property from every descendant so this new value is the only one.
+    [].slice.call(span.querySelectorAll("*")).forEach(function (d) {
+      if (d.style && d.style[prop]) {
+        d.style[prop] = "";
+        if (!d.getAttribute("style")) { d.removeAttribute("style"); }
+      }
+    });
     range.insertNode(span);
     var nr = w.doc.createRange(); nr.selectNodeContents(span); sel.removeAllRanges(); sel.addRange(nr);
     rememberRange(); changed();
@@ -738,6 +817,7 @@
     function band(cls, st) { var b = w.doc.createElement("div"); b.className = cls; b.setAttribute("data-ds-decor", "1"); Object.assign(b.style, st); w.doc.body.appendChild(b); }
     function bar(cls, side, type, st) {
       var b = w.doc.createElement("div"); b.className = cls; b.setAttribute("data-ds-decor", "1"); b.setAttribute("contenteditable", "false");
+      b.title = (type === "padding" ? "Padding " : "Margin ") + side.toLowerCase() + " — drag, or double-click to type an exact value";
       Object.assign(b.style, st); bindSpaceDrag(b, side, type); w.doc.body.appendChild(b);
     }
     // Show ONE set at a time — the mode chosen by the Padding/Margin toggle in
@@ -793,6 +873,39 @@
       }
       w.doc.addEventListener("mousemove", mv); w.doc.addEventListener("mouseup", up);
     });
+    // Double-click a bar to type an exact value for that one side — the precise,
+    // numeric control the drag can't give (asked for especially for bottom margin).
+    bar.addEventListener("dblclick", function (e) {
+      e.preventDefault(); e.stopPropagation();
+      promptSpaceValue(side, type, e.clientX, e.clientY);
+    });
+  }
+  function promptSpaceValue(side, type, x, y) {
+    var el = w._spaceEl; if (!el || !w.doc || !w.win) { return; }
+    var prop = type + side;
+    var cur = Math.round(parseFloat(w.win.getComputedStyle(el)[prop]) || 0);
+    var inp = w.doc.createElement("input");
+    inp.type = "number"; inp.min = "0"; inp.value = cur;
+    inp.setAttribute("data-ds-decor", "1");
+    inp.style.cssText = "position:fixed;z-index:60;width:66px;padding:3px 5px;border:1px solid " +
+      (type === "padding" ? "#ef4444" : "#f59e0b") + ";border-radius:5px;font:600 12px/1 Inter,system-ui,sans-serif;" +
+      "left:" + Math.min(x, (w.win.innerWidth || 800) - 80) + "px;top:" + Math.min(y, (w.win.innerHeight || 600) - 40) + "px;";
+    w.doc.body.appendChild(inp);
+    inp.focus(); inp.select();
+    var done = false;
+    function cleanup() { if (inp.parentNode) { inp.parentNode.removeChild(inp); } }
+    function commit() {
+      if (done) { return; } done = true;
+      var v = Math.max(0, Math.round(parseFloat(inp.value) || 0));
+      el.style[prop] = v + "px";
+      cleanup(); changed(); renderSpacingHandles();
+      setTimeout(function () { if (w.selEl === el) { renderInspector(); } }, 0);
+    }
+    inp.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") { ev.preventDefault(); commit(); }
+      else if (ev.key === "Escape") { ev.preventDefault(); done = true; cleanup(); }
+    });
+    inp.addEventListener("blur", commit);
   }
 
   // ---- link dialog -----------------------------------------------------
@@ -1021,10 +1134,39 @@
     });
   }
 
+  // ---- source-view placeholder highlighting ----------------------------
+  // The raw-HTML view is a transparent <textarea> laid over a <pre> backdrop that
+  // re-renders the same text with {{…}} placeholders coloured, so they stand out.
+  function highlightSrc(text) {
+    function escq(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+    var out = "", re = /\{\{\{[\s\S]*?\}\}\}|\{\{[\s\S]*?\}\}/g, last = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > last) { out += escq(text.slice(last, m.index)); }
+      var raw = m[0], inner = raw.replace(/^\{+\s*|\s*\}+$/g, "");
+      var cls = (/^[#\/^]/.test(inner)) ? "ds-hl-blk" : "ds-hl-tok";   // #each/#if/ends vs a field
+      out += '<span class="' + cls + '">' + escq(raw) + "</span>";
+      last = m.index + raw.length;
+    }
+    out += escq(text.slice(last));
+    if (/\n$/.test(text)) { out += "\n"; }   // keep a trailing newline visible so scroll heights match
+    return out;
+  }
+  function renderSrcHighlight() {
+    if (!w.srcHl || !w.src) { return; }
+    w.srcHl.innerHTML = highlightSrc(w.src.value || "");
+    syncSrcScroll();
+  }
+  function syncSrcScroll() {
+    if (!w.srcHl || !w.src) { return; }
+    w.srcHl.scrollTop = w.src.scrollTop; w.srcHl.scrollLeft = w.src.scrollLeft;
+  }
+
   function toggleSource() {
     if (!w.srcMode) {
       w.src.value = templateHtml();
-      w.src.style.display = ""; w.frame.style.display = "none"; w.srcMode = true;
+      renderSrcHighlight();
+      if (w.srcBox) { w.srcBox.style.display = ""; }
+      w.frame.style.display = "none"; w.srcMode = true;
       if (w.container) { w.container.classList.add("ds-he-src-mode"); }
       w.src.focus();
       try { w.src.selectionStart = w.src.selectionEnd = w.src.value.length; } catch (e) {}
@@ -1032,8 +1174,9 @@
     } else {
       var raw = w.src.value;
       w.srcMode = false;
+      if (w.srcBox) { w.srcBox.style.display = "none"; }
       if (w.container) { w.container.classList.remove("ds-he-src-mode"); }
-      setHtml(raw + (w.styleTag ? "\n" + w.styleTag : "")); changed();
+      setHtml(raw + (w.styleTag ? "\n" + w.styleTag : "") + mobileStyleTag()); changed();
     }
     return w.srcMode;
   }
@@ -1054,11 +1197,16 @@
       var raw = t.getAttribute("data-tok") || "";
       // A styled placeholder (the user coloured/resized a {{token}}) must keep its
       // styling: emit a plain <span style="…">{{token}}</span> so the engine still
-      // fills the token AND the style survives. Unstyled tokens → bare text, as before.
+      // fills the token AND the style survives. A placeholder given a mobile
+      // override carries a dlm-* class that the @media rule targets — that class
+      // must survive too, or the override would point at nothing after reload.
+      // Unstyled, un-overridden tokens → bare text, as before.
       var style = t.getAttribute("style");
-      if (style && style.trim() && t.classList.contains("dl-tok-field")) {
+      var mobCls = [].slice.call(t.classList).filter(function (c) { return c.indexOf("dlm-") === 0; });
+      if (((style && style.trim()) || mobCls.length) && t.classList.contains("dl-tok-field")) {
         var sp = w.doc.createElement("span");
-        sp.setAttribute("style", style);
+        if (style && style.trim()) { sp.setAttribute("style", style); }
+        if (mobCls.length) { sp.setAttribute("class", mobCls.join(" ")); }
         sp.appendChild(w.doc.createTextNode(raw));
         t.parentNode.replaceChild(sp, t);
       } else {
@@ -1079,7 +1227,99 @@
     clone.querySelectorAll("[contenteditable]").forEach(function (e) { e.removeAttribute("contenteditable"); });
     return clone.innerHTML.trim();
   }
-  function getTemplate() { var html = w.srcMode ? w.src.value.trim() : templateHtml(); return html + (w.styleTag ? "\n" + w.styleTag : ""); }
+  // ---- mobile overrides ------------------------------------------------
+  // Edits made in Mobile mode are stored as a phone-only @media rule inside the
+  // block template's own <style data-ds-mobile>, keyed by an auto-assigned,
+  // block-type-scoped class (dlm-<type>-N) on each adjusted element. The engine
+  // emits the template <style> verbatim, so these apply on the live phone view
+  // with no engine/DB change. !important beats the element's desktop inline style.
+  function mobileClassPrefix() { return "dlm-" + String(w.type || "b").replace(/[^a-z0-9_]/gi, "").toLowerCase() + "-"; }
+  function mobileStyleCss() {
+    var pre = mobileClassPrefix(), out = [];
+    Object.keys(w.mobileRules || {}).forEach(function (cls) {
+      var props = w.mobileRules[cls] || {};
+      var decls = Object.keys(props).filter(function (p) { return props[p] !== "" && props[p] != null; })
+        .map(function (p) { return p + ":" + props[p] + " !important"; });
+      if (decls.length) { out.push("." + cls + "{" + decls.join(";") + "}"); }
+    });
+    return out.length ? "@media (max-width:767px){" + out.join("") + "}" : "";
+  }
+  function mobileStyleTag() { var css = mobileStyleCss(); return css ? "\n<style data-ds-mobile>" + css + "</style>" : ""; }
+  function parseMobileCss(css) {
+    var out = {}, mm = String(css || "").match(/@media[^{]*\{([\s\S]*)\}\s*$/), inner = mm ? mm[1] : (css || "");
+    var re = /\.([a-z0-9_-]+)\s*\{([^}]*)\}/gi, m;
+    while ((m = re.exec(inner))) {
+      var cls = m[1], obj = {};
+      m[2].split(";").forEach(function (d) {
+        var i = d.indexOf(":"); if (i <= 0) { return; }
+        var p = d.slice(0, i).trim(), v = d.slice(i + 1).replace(/!important/i, "").trim();
+        if (p && v) { obj[p] = v; }
+      });
+      if (Object.keys(obj).length) { out[cls] = obj; }
+    }
+    return out;
+  }
+  // Highest N already used (in the rules + the DOM) so new classes never clash.
+  function initMobileSeq() {
+    var pre = mobileClassPrefix(), max = 0;
+    function scan(cls) { if (cls && cls.indexOf(pre) === 0) { var n = parseInt(cls.slice(pre.length), 10); if (n > max) { max = n; } } }
+    Object.keys(w.mobileRules || {}).forEach(scan);
+    if (w.root) { [].slice.call(w.root.querySelectorAll('[class*="' + pre + '"]')).forEach(function (el) { [].slice.call(el.classList).forEach(scan); }); }
+    w._mobileSeq = max;
+  }
+  function elMobileClass(el, create) {
+    var pre = mobileClassPrefix();
+    var cls = [].slice.call(el.classList).find(function (c) { return c.indexOf(pre) === 0; });
+    if (cls) { return cls; }
+    if (!create) { return null; }
+    w._mobileSeq = (w._mobileSeq || 0) + 1;
+    cls = pre + w._mobileSeq; el.classList.add(cls);
+    return cls;
+  }
+  function getMobileProp(prop) {
+    if (!w.selEl) { return ""; }
+    var cls = elMobileClass(w.selEl, false);
+    return (cls && w.mobileRules[cls] && w.mobileRules[cls][prop]) || "";
+  }
+  function setMobileProp(prop, val) {
+    if (!w.selEl) { return; }
+    var cls = elMobileClass(w.selEl, val !== "" && val != null);
+    if (!cls) { return; }
+    w.mobileRules[cls] = w.mobileRules[cls] || {};
+    if (val === "" || val == null) {
+      delete w.mobileRules[cls][prop];
+      if (!Object.keys(w.mobileRules[cls]).length) { delete w.mobileRules[cls]; w.selEl.classList.remove(cls); }
+    } else { w.mobileRules[cls][prop] = val; }
+    updateMobilePreview(); changed();
+  }
+  // Keep a live <style id="dsMobilePreview"> in the iframe head so the overrides
+  // show in the canvas when it is narrowed to phone width (Mobile mode).
+  function updateMobilePreview() {
+    if (!w.doc) { return; }
+    var tag = w.doc.getElementById("dsMobilePreview");
+    if (!tag) { tag = w.doc.createElement("style"); tag.id = "dsMobilePreview"; (w.doc.head || w.doc.documentElement).appendChild(tag); }
+    tag.textContent = mobileStyleCss();
+  }
+  // Switch the editor between designing the Desktop and the Mobile view.
+  function setDevice(dev) {
+    w.device = (dev === "mobile") ? "mobile" : "desktop";
+    applyDeviceChrome();
+    renderInspector();
+  }
+  function applyDeviceChrome() {
+    if (!w.container) { return; }
+    var mobile = (w.device === "mobile");
+    w.container.classList.toggle("ds-he-dev-mobile", mobile);
+    if (w.frame) { w.frame.style.width = mobile ? "390px" : ""; }
+    if (w.banner) { w.banner.style.display = mobile ? "" : "none"; }
+    updateMobilePreview();
+    if (w._spaceEl) { renderSpacingHandles(); }
+  }
+
+  function getTemplate() {
+    var html = w.srcMode ? w.src.value.trim() : templateHtml();
+    return html + (w.styleTag ? "\n" + w.styleTag : "") + mobileStyleTag();
+  }
   function changed() {
     rememberRange();
     clearTimeout(changeTimer);
@@ -1091,7 +1331,13 @@
     w.srcMode = false;
     if (w.container) { w.container.classList.remove("ds-he-src-mode"); }
     if (w.srcBtn) { w.srcBtn.classList.remove("ds-on"); w.srcBtn.innerHTML = "&lt;/&gt; HTML"; }
-    var parts = splitStyle(tpl); w.styleTag = parts.style;
+    var parts = splitStyle(tpl);
+    // Separate our phone-only override <style data-ds-mobile> from any other block
+    // CSS, so mobile rules round-trip through the mobile editor rather than the raw
+    // style tag. Everything else stays in w.styleTag unchanged.
+    var mobMatch = parts.style.match(/<style[^>]*data-ds-mobile[^>]*>([\s\S]*?)<\/style>/i);
+    w.mobileRules = mobMatch ? parseMobileCss(mobMatch[1]) : {};
+    w.styleTag = parts.style.replace(/<style[^>]*data-ds-mobile[^>]*>[\s\S]*?<\/style>/i, "").trim();
     var skeleton =
       '<!doctype html><html><head><meta charset="utf-8">' +
       '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,400;1,600&family=Lora:wght@400;700&family=Merriweather&family=Inter:wght@400;600;700&display=swap">' +
@@ -1169,8 +1415,30 @@
           if (node.tagName === "P") { nr.setStart(node, 0); } else { nr.setStartAfter(node); }
           nr.collapse(true); sel.removeAllRanges(); sel.addRange(nr);
           rememberRange(); changed();
+          return;
+        }
+        // Scoped Select-all: Ctrl/Cmd+A selects only the text in the box the caret
+        // is in (the nearest paragraph/heading/cell), not the whole template.
+        if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")) {
+          var s = w.win.getSelection();
+          if (!s.rangeCount) { return; }
+          var scope = scopeForSelectAll(s.getRangeAt(0).commonAncestorContainer);
+          if (scope && scope !== w.root) {
+            e.preventDefault();
+            var rr = w.doc.createRange(); rr.selectNodeContents(scope);
+            s.removeAllRanges(); s.addRange(rr); rememberRange();
+          }
         }
       });
+      // Copy/cut of a placeholder keeps its {{token}} text (not the display label),
+      // and paste drops any {{…}} placeholders back in INLINE at the caret (as chips)
+      // instead of the browser making them their own block/line.
+      w.root.addEventListener("copy", function (e) { handleTokenCopy(e, false); });
+      w.root.addEventListener("cut", function (e) { handleTokenCopy(e, true); });
+      w.root.addEventListener("paste", handleTokenPaste);
+      initMobileSeq();
+      updateMobilePreview();
+      applyDeviceChrome();
       selectElement(null);
       renderLayers();
       // Native drag of content reflows the editor into a mess; allow only the
@@ -1178,7 +1446,7 @@
       w.root.addEventListener("dragstart", function (e) {
         if (!(e.target && e.target.classList && e.target.classList.contains("ds-colsplit"))) { e.preventDefault(); }
       });
-      w.src.style.display = "none"; w.frame.style.display = "";
+      if (w.srcBox) { w.srcBox.style.display = "none"; } w.frame.style.display = "";
     };
     w.frame.srcdoc = skeleton;
   }
@@ -1775,11 +2043,61 @@
       '</div></div>';
     return group("Spacing", toggle + box4("Margin (outside)", "margin") + box4("Padding (inside)", "padding"));
   }
+  // ---- per-side border --------------------------------------------------
+  // Which sides the Border controls target. Derived from the element's actual
+  // per-side borders so reopening reflects reality; defaults to all four so a
+  // fresh border draws right round (as it did before per-side control existed).
+  function initBorderSides(el) {
+    var on = [];
+    ["Top", "Right", "Bottom", "Left"].forEach(function (s) {
+      var st = cv("border" + s + "Style", el), wd = parseFloat(cv("border" + s + "Width", el)) || 0;
+      if (st && st !== "none" && wd > 0) { on.push(s); }
+    });
+    w.borderSides = on.length ? on : ["Top", "Right", "Bottom", "Left"];
+  }
+  function activeBorderSides() { return (w.borderSides && w.borderSides.length) ? w.borderSides : ["Top", "Right", "Bottom", "Left"]; }
+  function borderFieldVal(field) {   // field: "Width" | "Style" | "Color" — read from the first active side
+    var el = w.selEl; if (!el) { return ""; }
+    return cv("border" + (activeBorderSides()[0] || "Top") + field, el);
+  }
+  function applyBorderField(field, val) {
+    var el = w.selEl; if (!el) { return; }
+    activeBorderSides().forEach(function (s) {
+      el.style["border" + s + field] = val;
+      // A visible style with no width wouldn't show — give that side a default 1px.
+      if (field === "Style" && val && val !== "none" && !(parseFloat(el.style["border" + s + "Width"]) > 0)) {
+        el.style["border" + s + "Width"] = "1px";
+      }
+    });
+    changed();
+  }
+  function clearBorderSide(s) {
+    if (!w.selEl) { return; }
+    w.selEl.style["border" + s + "Width"] = "0";
+    w.selEl.style["border" + s + "Style"] = "none";
+    w.selEl.style["border" + s + "Color"] = "";
+  }
   function gBorder() {
+    var el = w.selEl;
+    if (el !== w._borderEl) { initBorderSides(el); w._borderEl = el; }
+    var sides = activeBorderSides();
+    var sideBtns = ["Top", "Right", "Bottom", "Left"].map(function (s) {
+      return '<button type="button" class="ds-bd-side' + (sides.indexOf(s) !== -1 ? " on" : "") + '" data-side="' + s + '">' + s + "</button>";
+    }).join("");
+    var wv = numOf(borderFieldVal("Width"));
+    var svRaw = borderFieldVal("Style"); var sv = (svRaw && svRaw !== "none") ? svRaw.split(" ")[0] : "";
+    var cvl = rgbToHex(borderFieldVal("Color"));
+    var styleOpts = [["", "—"], ["none", "None"], ["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["double", "Double"]];
     return group("Border",
-      lenRow("Thickness", "borderWidth", ["px"]) +
-      selRow("Style", "borderStyle", [["", "—"], ["none", "None"], ["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["double", "Double"]]) +
-      colRow("Colour", "borderColor") +
+      '<div class="ds-bd-sides"><p class="ds-insp-note">Pick which sides get the border, then set the look below.</p>' +
+        '<div class="ds-bd-sidebtns">' + sideBtns + '</div></div>' +
+      '<label class="ds-insp-row"><span>Thickness</span><span class="ds-insp-len">' +
+        '<input type="number" min="0" step="1" class="ds-insp-num ds-bd-w" value="' + esc(wv) + '" placeholder="0"><em class="ds-insp-unit-static">px</em></span></label>' +
+      '<label class="ds-insp-row"><span>Style</span><select class="ds-insp-sel ds-bd-style">' +
+        styleOpts.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === sv ? " selected" : "") + '>' + o[1] + "</option>"; }).join("") + '</select></label>' +
+      '<label class="ds-insp-row"><span>Colour</span><span class="ds-insp-col">' +
+        '<input type="color" class="ds-insp-color ds-bd-color" value="' + cvl + '">' +
+        '<button type="button" class="ds-insp-clear ds-bd-clear" title="Remove the border from the chosen sides">&#10005;</button></span></label>' +
       lenRow("Rounded corners", "borderRadius", ["px", "%"]));
   }
   function gBackground() { return group("Background", colRow("Colour", "backgroundColor")); }
@@ -1843,28 +2161,94 @@
     }
   }
 
+  // The "On mobile" inspector panel — phone-only overrides for the picked element.
+  function gMobile(el) {
+    var disp = cv("display", el), isGrid = disp.indexOf("grid") !== -1, isFlex = disp.indexOf("flex") !== -1;
+    var childCount = el.children ? [].slice.call(el.children).filter(function (c) {
+      return c.nodeType === 1 && !(c.classList && c.classList.contains("ds-colsplit")) && !(c.hasAttribute && c.hasAttribute("data-ds-decor"));
+    }).length : 0;
+    var canStack = (isGrid || isFlex) && childCount > 1;
+    var hidden = getMobileProp("display") === "none";
+    var stacked = isGrid ? (getMobileProp("grid-template-columns") === "1fr") : (getMobileProp("flex-direction") === "column");
+    var fs = numOf(getMobileProp("font-size"));
+    var ta = getMobileProp("text-align");
+    var wv = getMobileProp("width"), wNum = (wv === "auto" || wv === "") ? "" : numOf(wv), wUnit = (wv === "auto") ? "auto" : (unitOf(wv) || "%");
+    var pad = ["Top", "Right", "Bottom", "Left"].map(function (s) { return numOf(getMobileProp("padding-" + s.toLowerCase())); });
+    return group("On mobile",
+      '<p class="ds-insp-note">These change only the phone view. Switch to <b>Desktop</b> in the top bar to change the shared design.</p>' +
+      '<label class="ds-insp-row ds-mob-chk"><span>Hide on mobile</span><input type="checkbox" class="ds-mob-hide"' + (hidden ? " checked" : "") + "></label>" +
+      (canStack ? '<label class="ds-insp-row ds-mob-chk"><span>Stack into one column' + helpIcon("Puts the columns one above another on phones so they don’t get squashed.") + '</span><input type="checkbox" class="ds-mob-stack"' + (stacked ? " checked" : "") + "></label>" : "") +
+      '<label class="ds-insp-row"><span>Font size</span><span class="ds-insp-len"><input type="number" min="0" class="ds-mob-fs" value="' + esc(fs) + '" placeholder="–"><em class="ds-insp-unit-static">px</em></span></label>' +
+      '<label class="ds-insp-row"><span>Align</span><select class="ds-insp-sel ds-mob-align">' +
+        [["", "—"], ["left", "Left"], ["center", "Centre"], ["right", "Right"], ["justify", "Justify"]].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === ta ? " selected" : "") + ">" + o[1] + "</option>"; }).join("") +
+      "</select></label>" +
+      '<label class="ds-insp-row"><span>Width</span><span class="ds-insp-len"><input type="number" min="0" class="ds-mob-w" value="' + esc(wNum) + '" placeholder="auto">' +
+        '<select class="ds-insp-unit ds-mob-wunit">' + ["%", "px", "auto"].map(function (u) { return '<option value="' + u + '"' + (u === wUnit ? " selected" : "") + ">" + u + "</option>"; }).join("") + "</select></span></label>" +
+      '<div class="ds-insp-box4"><span class="ds-insp-b4lab">Padding (mobile)</span><div class="ds-insp-b4grid">' +
+        [["Top", "padding-top"], ["Right", "padding-right"], ["Bottom", "padding-bottom"], ["Left", "padding-left"]].map(function (s, i) {
+          return '<label title="' + s[0] + '"><input type="number" class="ds-mob-pad" data-prop="' + s[1] + '" value="' + esc(pad[i]) + '" placeholder="0"><em>' + s[0] + "</em></label>";
+        }).join("") +
+      "</div></div>");
+  }
+  function wireMobile() {
+    var ins = w.inspector;
+    var hide = ins.querySelector(".ds-mob-hide");
+    if (hide) { hide.addEventListener("change", function () { setMobileProp("display", hide.checked ? "none" : ""); }); }
+    var stack = ins.querySelector(".ds-mob-stack");
+    if (stack) { stack.addEventListener("change", function () {
+      if (!w.selEl) { return; }
+      if (cv("display", w.selEl).indexOf("grid") !== -1) { setMobileProp("grid-template-columns", stack.checked ? "1fr" : ""); }
+      else { setMobileProp("flex-direction", stack.checked ? "column" : ""); }
+    }); }
+    var fs = ins.querySelector(".ds-mob-fs");
+    if (fs) { fs.addEventListener("input", function () { setMobileProp("font-size", fs.value === "" ? "" : (fs.value + "px")); }); }
+    var al = ins.querySelector(".ds-mob-align");
+    if (al) { al.addEventListener("change", function () { setMobileProp("text-align", al.value); }); }
+    var mw = ins.querySelector(".ds-mob-w"), mu = ins.querySelector(".ds-mob-wunit");
+    function applyMobW() { var u = mu.value; if (u === "auto") { setMobileProp("width", "auto"); } else { setMobileProp("width", mw.value === "" ? "" : (mw.value + u)); } }
+    if (mw) { mw.addEventListener("input", applyMobW); }
+    if (mu) { mu.addEventListener("change", applyMobW); }
+    ins.querySelectorAll(".ds-mob-pad").forEach(function (i) { i.addEventListener("input", function () { setMobileProp(i.dataset.prop, i.value === "" ? "" : (i.value + "px")); }); });
+  }
+
   function renderInspector() {
     var ins = w.inspector; if (!ins) { return; }
     var el = w.selEl;
     if (el !== w._lastInsEl) { try { ins.scrollTop = 0; } catch (e) {} w._lastInsEl = el; }
     if (!el) {
-      ins.innerHTML = '<div class="ds-insp-empty"><i class="fas fa-arrow-pointer"></i><p>Click anything on the canvas to design it.</p><p class="ds-insp-note">The controls here change to match what you pick — a title, an image, a link, or a repeating list.</p></div>';
+      ins.innerHTML = '<div class="ds-insp-empty"><i class="fas fa-arrow-pointer"></i><p>Click anything on the canvas to ' + (w.device === "mobile" ? "adjust it for phones." : "design it.") + '</p><p class="ds-insp-note">' + (w.device === "mobile" ? "You’re editing the mobile view — changes here apply on phones only." : "The controls here change to match what you pick — a title, an image, a link, or a repeating list.") + "</p></div>";
       clearGridHandles(); clearSpacingHandles();
       return;
     }
     w.gridEl = findGrid(el);
     var kind = resolveKind(el);
     var canParent = el.parentElement && el.parentElement !== w.root;
-    ins.innerHTML =
-      '<div class="ds-insp-head"><span class="ds-insp-kind">' + esc(DS.KIND_LABEL[kind] || "Element") + '</span>' +
+    var head = '<div class="ds-insp-head"><span class="ds-insp-kind">' + esc(DS.KIND_LABEL[kind] || "Element") + '</span>' +
         '<span class="ds-insp-sub">' + esc(friendlyEl(el)) + '</span>' +
-        (canParent ? '<button type="button" class="ds-insp-parent" title="Select the element around this one"><i class="fas fa-arrow-up"></i> Parent</button>' : "") + '</div>' +
+        (canParent ? '<button type="button" class="ds-insp-parent" title="Select the element around this one"><i class="fas fa-arrow-up"></i> Parent</button>' : "") +
+        '<button type="button" class="ds-insp-del" title="Delete this element"><i class="fas fa-trash-can"></i></button></div>';
+    if (w.device === "mobile") {
+      ins.innerHTML = head + gMobile(el);
+      wireMobileHead(); wireMobile();
+      clearGridHandles(); clearSpacingHandles();
+      return;
+    }
+    ins.innerHTML = head +
       (function () { var a = selectedArtSnippet(el); return a ? gArtSnippet(a) : ""; })() +
       groupsForKind(kind, el);
     wireInspector();
     if (w.gridEl && (kind === "list" || kind === "container")) { mountGridHandles(w.gridEl); } else { clearGridHandles(); }
     // Figma-style padding (inner) + margin (outer) drag handles on any element.
     mountSpacingHandles(el);
+  }
+  // The head's Parent/Delete buttons also need wiring in mobile mode (wireInspector
+  // isn't called there).
+  function wireMobileHead() {
+    var ins = w.inspector;
+    var par = ins.querySelector(".ds-insp-parent");
+    if (par) { par.addEventListener("click", function () { if (w.selEl && w.selEl.parentElement && w.selEl.parentElement !== w.root) { selectElement(w.selEl.parentElement); } }); }
+    var del = ins.querySelector(".ds-insp-del");
+    if (del) { del.addEventListener("click", function () { deleteSelected(); }); }
   }
 
   function wireInspector() {
@@ -1947,6 +2331,32 @@
     }); }
     var par = ins.querySelector(".ds-insp-parent");
     if (par) { par.addEventListener("click", function () { if (w.selEl && w.selEl.parentElement && w.selEl.parentElement !== w.root) { selectElement(w.selEl.parentElement); } }); }
+    var del = ins.querySelector(".ds-insp-del");
+    if (del) { del.addEventListener("click", function () { deleteSelected(); }); }
+    // Per-side border: side toggles + thickness / style / colour on the chosen sides.
+    ins.querySelectorAll(".ds-bd-side").forEach(function (b) {
+      b.addEventListener("click", function () {
+        if (!w.selEl) { return; }
+        var s = b.getAttribute("data-side"), arr = activeBorderSides().slice(), i = arr.indexOf(s);
+        if (i !== -1) { arr.splice(i, 1); clearBorderSide(s); }    // turning a side off removes its border
+        else {
+          arr.push(s);
+          var wEl = ins.querySelector(".ds-bd-w"), stEl = ins.querySelector(".ds-bd-style"), coEl = ins.querySelector(".ds-bd-color");
+          w.selEl.style["border" + s + "Width"] = (wEl && wEl.value !== "") ? (wEl.value + "px") : "1px";
+          w.selEl.style["border" + s + "Style"] = (stEl && stEl.value) ? stEl.value : "solid";
+          if (coEl && coEl.value) { w.selEl.style["border" + s + "Color"] = coEl.value; }
+        }
+        w.borderSides = arr; changed(); setTimeout(renderInspector, 0);
+      });
+    });
+    var bdW = ins.querySelector(".ds-bd-w");
+    if (bdW) { bdW.addEventListener("input", function () { applyBorderField("Width", bdW.value === "" ? "" : (bdW.value + "px")); }); }
+    var bdStyle = ins.querySelector(".ds-bd-style");
+    if (bdStyle) { bdStyle.addEventListener("change", function () { applyBorderField("Style", bdStyle.value); setTimeout(renderInspector, 0); }); }
+    var bdColor = ins.querySelector(".ds-bd-color");
+    if (bdColor) { bdColor.addEventListener("input", function () { applyBorderField("Color", bdColor.value); }); }
+    var bdClear = ins.querySelector(".ds-bd-clear");
+    if (bdClear) { bdClear.addEventListener("click", function () { activeBorderSides().forEach(clearBorderSide); changed(); setTimeout(renderInspector, 0); }); }
     ins.querySelectorAll(".ds-insp-fmt button[data-fmt]").forEach(function (b) {
       b.addEventListener("mousedown", function (e) { e.preventDefault(); });
       b.addEventListener("click", function (e) {
@@ -2003,6 +2413,8 @@
       opts = opts || {};
       w.host = opts.host || (DS.ds && DS.ds.host) || "";
       w.type = opts.type || "";
+      w.device = (opts.device === "mobile") ? "mobile" : "desktop";
+      w.mobileRules = {}; w._mobileSeq = 0;
       w.onChange = null; w.srcMode = false; w.savedRange = null;
       container.innerHTML =
         '<div class="ds-he">' +
@@ -2026,29 +2438,40 @@
             '</div>' +
           '</aside>' +
           '<div class="ds-he-stage">' +
+            '<div class="ds-he-mobanner" id="dsHeMoBanner" style="display:none"><i class="fas fa-mobile-screen-button"></i> Editing the <b>mobile</b> view — changes here show on phones only.</div>' +
             '<iframe class="ds-he-frame" id="dsHeFrame" title="Block editor"></iframe>' +
-            '<textarea class="ds-he-src" id="dsHeSrc" spellcheck="false" style="display:none"></textarea>' +
+            '<div class="ds-he-srcbox" id="dsHeSrcBox" style="display:none">' +
+              '<pre class="ds-he-srchl" id="dsHeSrcHl" aria-hidden="true"></pre>' +
+              '<textarea class="ds-he-src" id="dsHeSrc" spellcheck="false"></textarea>' +
+            '</div>' +
           '</div>' +
           '<aside class="ds-he-inspector" id="dsHeInsp"></aside>' +
         '</div>';
       w.container = container.querySelector(".ds-he");
       w.frame = container.querySelector("#dsHeFrame");
+      w.banner = container.querySelector("#dsHeMoBanner");
       w.src = container.querySelector("#dsHeSrc");
+      w.srcBox = container.querySelector("#dsHeSrcBox");
+      w.srcHl = container.querySelector("#dsHeSrcHl");
       w.inspector = container.querySelector("#dsHeInsp");
       w.layers = container.querySelector("#dsHeLayers");
       w.insMenu = container.querySelector("#dsHeInsMenu");
-      w.src.addEventListener("input", function () { rememberSrcSel(); changed(); });
+      w.src.addEventListener("input", function () { rememberSrcSel(); renderSrcHighlight(); changed(); });
       w.src.addEventListener("keyup", rememberSrcSel);
       w.src.addEventListener("mouseup", rememberSrcSel);
       w.src.addEventListener("blur", rememberSrcSel);
+      w.src.addEventListener("scroll", syncSrcScroll);
       buildRail(container);
       fillInsertMenu(w.type);
       renderInspector();
+      applyDeviceChrome();
       // live section list for the link picker
       DS.api("link_targets", {}).then(function (j) { w.sections = j.sections || []; }).catch(function () { w.sections = []; });
     },
     setHtml: setHtml,
     getHtml: getTemplate,
+    setDevice: setDevice,
+    getDevice: function () { return w.device; },
     toggleSource: toggleSource,
     cancelPending: function () { clearTimeout(changeTimer); },
     isSourceMode: function () { return !!w.srcMode; },

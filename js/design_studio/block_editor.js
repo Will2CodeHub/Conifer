@@ -10,11 +10,25 @@
   var saveTimer = null;
   var msgBound = false;
 
+  // Pages this block can be previewed inside. Built-in blocks use their allowed
+  // pages from the registry; custom (blk_*) blocks can go on any page.
+  function previewPages(type) {
+    var slugs = (DS.isCustomBlock(type) || !DS.REG[type]) ? DS.PAGES : (DS.REG[type].pages || []);
+    return slugs.map(function (s) { return { slug: s, label: (DS.PAGE_LABELS[s] || s) }; });
+  }
+
   DS.renderBlockEditor = function (params) {
     var type = params && params.type;
     var name = (type && DS.REG[type] && DS.REG[type].label) || (params && params.name) || type || "block";
     bs = { type: type, name: name, store: { templates: {}, settings: {}, names: {} }, html: "", undo: null, lastHtml: "", dirty: false };
     DS.setDirty(false);
+
+    // Preview can show this block on its own, or inside one of the pages it can
+    // appear on (so you see it in real context). "Block only" is the default.
+    var pvOpts = '<option value="">Block only</option>' +
+      previewPages(type).map(function (p) {
+        return '<option value="' + DS.esc(p.slug) + '">In: ' + DS.esc(p.label) + '</option>';
+      }).join("");
 
     var root = document.getElementById("dsBlock");
     root.innerHTML =
@@ -31,6 +45,7 @@
         '<button class="ds-btn ds-btn-ghost" id="dsBeUndo"><i class="fas fa-rotate-left"></i> Undo</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeRedo"><i class="fas fa-rotate-right"></i> Redo</button>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBeHistory"><i class="fas fa-clock-rotate-left"></i> History</button>' +
+        '<select class="ds-be-pvctx" id="dsBePvCtx" title="What to show when you click Preview">' + pvOpts + '</select>' +
         '<button class="ds-btn ds-btn-ghost" id="dsBePreview"><i class="fas fa-up-right-from-square"></i> Preview</button>' +
         '<button class="ds-btn ds-btn-primary" id="dsBeSave"><i class="fas fa-floppy-disk"></i> Save</button>' +
       '</header>' +
@@ -70,7 +85,13 @@
       btn.classList.toggle("ds-on", src);
       btn.innerHTML = src ? '<i class="fas fa-eye"></i> Visual' : '<i class="fas fa-code"></i> Edit HTML';
     });
-    root.querySelector("#dsBePreview").addEventListener("click", function () { window.open(DS.previewUrl({ block: type }), "_blank"); });
+    root.querySelector("#dsBePreview").addEventListener("click", function () {
+      var sel = root.querySelector("#dsBePvCtx");
+      var page = sel ? sel.value : "";
+      // In-page preview shows the block in context (if that page's layout uses it);
+      // empty value previews the block on its own.
+      window.open(page ? DS.previewUrl({ page: page }) : DS.previewUrl({ block: type }), "_blank");
+    });
     root.querySelector("#dsBeUndo").addEventListener("click", function () {
       if (bs.undo && bs.undo.canUndo()) { bs.undo.undo(); DS.toast("Reverted"); } else { DS.toast("Nothing to undo"); }
     });
@@ -90,6 +111,9 @@
       b.addEventListener("click", function () {
         DS.ds.device = b.dataset.dev;
         root.querySelectorAll(".ds-seg button").forEach(function (x) { x.classList.toggle("on", x === b); });
+        // The toggle is also a real edit mode: switch the editor to design the
+        // chosen device (Mobile = phone-width canvas + phone-only overrides).
+        if (DS.HtmlEditor.setDevice) { DS.HtmlEditor.setDevice(DS.ds.device); }
         previewReload();
       });
     });
@@ -109,7 +133,7 @@
       DS.HtmlEditor.setHtml(h); saveAndRefresh();
     });
 
-    DS.HtmlEditor.mount(document.getElementById("dsBeEditor"), { host: DS.ds.host, type: type });
+    DS.HtmlEditor.mount(document.getElementById("dsBeEditor"), { host: DS.ds.host, type: type, device: DS.ds.device });
     DS.HtmlEditor.onChange(onEditorChange);
     // Cross-pane highlight: selecting in the editor outlines the same element in
     // the live Preview pane.

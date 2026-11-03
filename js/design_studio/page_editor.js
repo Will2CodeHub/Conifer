@@ -53,7 +53,7 @@
     // Load custom blocks so they appear in the palette (#1) and get proper labels.
     DS.api("list_blocks", {}).then(function (r) { DS.ingestBlocks(r); renderPalette(); }).catch(function () {});
     st.undo = DsUndo(function () { return st.layout; },
-      function (l) { st.layout = l; renderRail(); scheduleSave(0, true); });  // save THEN refresh, so the revert actually shows
+      function (l) { st.layout = l; renderRail(); renderSpaceSection(); scheduleSave(0, true); });  // save THEN refresh, so the revert actually shows
 
     var root = document.getElementById("dsPage");
     root.innerHTML =
@@ -66,6 +66,7 @@
               ? "Drag to reorder. Pages based on this template start from these blocks; edit each block’s content from Blocks on the home screen."
               : "Drag to reorder. The top menu and footer are the page frame — edit their contents from Blocks on the home screen.") + '</p>' +
           '</div>' +
+          '<div class="ds-pe-sec" id="dsPeSpaceSec"></div>' +
           '<div class="ds-pe-sec" id="' + (isT ? "dsPeStyleSec" : "dsPeTplSec") + '"></div>' +
         '</aside>' +
         '<main class="ds-pe-preview"><iframe id="dsPvFrame" title="Live preview"></iframe></main>' +
@@ -91,6 +92,7 @@
         if (!layout || !layout.blocks) { layout = { theme: {}, blocks: [] }; }
         st.layout = layout;
         renderRail();
+        renderSpaceSection();
         refreshPreview();
       }).catch(function (e) { DS.toast(e.message); });
     }
@@ -218,6 +220,7 @@
         (frame
           ? '<span class="ds-blk-lock"><i class="fas fa-lock"></i> Frame</span>'
           : '<span class="ds-blk-acts">' +
+              '<button data-a="space" title="Space around this block"><i class="fas fa-arrows-up-down"></i></button>' +
               '<button data-a="up" title="Move up"><i class="fas fa-chevron-up"></i></button>' +
               '<button data-a="down" title="Move down"><i class="fas fa-chevron-down"></i></button>' +
               '<button data-a="del" title="Remove"><i class="fas fa-trash"></i></button>' +
@@ -225,6 +228,7 @@
       list.appendChild(li);
 
       if (!frame) {
+        li.querySelector('[data-a="space"]').addEventListener("click", function () { openSpaceDialog(i); });
         li.querySelector('[data-a="up"]').addEventListener("click", function () { moveDir(i, -1); });
         li.querySelector('[data-a="down"]').addEventListener("click", function () { moveDir(i, 1); });
         li.querySelector('[data-a="del"]').addEventListener("click", function () { removeBlock(i); });
@@ -238,6 +242,80 @@
           dropMove(from, i);
         });
       }
+    });
+  }
+
+  // ------------------------------------------------------ spacing controls
+  // Page-wide "space between blocks" = the theme's section_gap token, which the
+  // engine emits as --section-gap and applies as margin-bottom on every .dl-block
+  // wrapper. Editing it here changes the gap below every block on THIS page.
+  // (Templates render with the default theme in preview, so this is pages-only.)
+  function renderSpaceSection() {
+    var sec = document.getElementById("dsPeSpaceSec");
+    if (!sec) { return; }
+    if (st.kind === "template") { sec.innerHTML = ""; return; }
+    st.layout.theme = st.layout.theme || {};
+    var val = numOf(st.layout.theme.section_gap, 64);
+    sec.innerHTML =
+      '<h3>Space between blocks</h3>' +
+      '<div class="ds-slider-row"><label>Vertical gap <span class="ds-slider-out" id="dsGap_out">' + val + 'px</span></label>' +
+        '<input type="range" id="dsGapSl" min="0" max="140" value="' + val + '"></div>' +
+      '<p class="ds-rail-hint">The space below every block on this page. To change it for just one block, use the <i class="fas fa-arrows-up-down"></i> button on that block above.</p>';
+    var sl = sec.querySelector("#dsGapSl");
+    sl.addEventListener("input", function () {
+      document.getElementById("dsGap_out").textContent = sl.value + "px";
+      st.layout.theme.section_gap = sl.value + "px";
+      scheduleSave(250, true);
+    });
+  }
+
+  // Per-block spacing override. Writes settings.spacing.margin_top / margin_bottom
+  // on THIS block instance; the engine applies them inline to the block's wrapper
+  // (see design/lib/registry.php). When a side is left on "page default" its key is
+  // removed, so the page-wide gap governs again.
+  function openSpaceDialog(i) {
+    var b = st.layout.blocks[i];
+    if (!b) { return; }
+    b.settings = b.settings || {};
+    var sp = (b.settings.spacing && typeof b.settings.spacing === "object") ? b.settings.spacing : {};
+    function row(key, label, cur) {
+      var has = cur != null && cur !== "";
+      var n = numOf(cur, 24);
+      return '<div class="ds-space-row" data-key="' + key + '">' +
+        '<label class="ds-f ds-f-chk"><input type="checkbox" class="ds-space-on"' + (has ? " checked" : "") + '> ' + label + '</label>' +
+        '<div class="ds-slider-row ds-space-sl"' + (has ? "" : ' style="display:none"') + '>' +
+          '<label>Gap <span class="ds-slider-out ds-space-out">' + n + 'px</span></label>' +
+          '<input type="range" class="ds-space-range" min="0" max="140" value="' + n + '"></div>' +
+      '</div>';
+    }
+    var dlg = DS.dialog({ title: "Spacing — " + blockLabel(b.type),
+      body:
+        row("margin_bottom", "Custom space after this block", sp.margin_bottom) +
+        row("margin_top", "Custom space before this block", sp.margin_top) +
+        '<p class="ds-rail-hint">When a box is unticked, this block uses the page’s “space between blocks”.</p>' +
+        '<div class="ds-dlg-actions"><button class="ds-btn ds-btn-primary" id="dsSpSave">Save spacing</button></div>' });
+    dlg.el.querySelectorAll(".ds-space-row").forEach(function (rowEl) {
+      var chk = rowEl.querySelector(".ds-space-on");
+      var slWrap = rowEl.querySelector(".ds-space-sl");
+      var rng = rowEl.querySelector(".ds-space-range");
+      var out = rowEl.querySelector(".ds-space-out");
+      chk.addEventListener("change", function () { slWrap.style.display = chk.checked ? "" : "none"; });
+      rng.addEventListener("input", function () { out.textContent = rng.value + "px"; });
+    });
+    dlg.el.querySelector("#dsSpSave").addEventListener("click", function () {
+      st.undo.push();
+      var spacing = {};
+      dlg.el.querySelectorAll(".ds-space-row").forEach(function (rowEl) {
+        if (rowEl.querySelector(".ds-space-on").checked) {
+          spacing[rowEl.dataset.key] = rowEl.querySelector(".ds-space-range").value + "px";
+        }
+      });
+      // Keep any padding override we don't edit in this dialog.
+      if (sp.padding) { spacing.padding = sp.padding; }
+      if (Object.keys(spacing).length) { b.settings.spacing = spacing; }
+      else { delete b.settings.spacing; }
+      renderRail(); scheduleSave(0, true);
+      dlg.close();
     });
   }
 

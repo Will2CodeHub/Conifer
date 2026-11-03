@@ -77,6 +77,13 @@ body {
 .ds-btn-danger:hover { background: #fef2f2; }
 .ds-btn.ds-sm { padding: 5px 11px; font-size: 13px; }
 .ds-btn:disabled { opacity: .55; cursor: default; }
+/* Block editor: "what to preview" context picker, styled to sit with the toolbar buttons. */
+.ds-be-pvctx {
+  font: inherit; font-weight: 600; color: var(--ds-ink-2);
+  background: var(--ds-surface); border: 1px solid var(--ds-line-2);
+  border-radius: 9px; padding: 8px 10px; cursor: pointer; max-width: 170px;
+}
+.ds-be-pvctx:hover { border-color: var(--ds-muted); color: var(--ds-ink); }
 
 /* ---- hub -------------------------------------------------------------- */
 .ds-hub {
@@ -589,6 +596,43 @@ body.ds-scrubbing { cursor: ew-resize !important; user-select: none; }
 .ds-ph-f-wide { flex-direction: column; align-items: stretch; gap: 5px; }
 .ds-ph-f-wide > span { font-size: 13px; color: var(--ds-ink-2); }
 .ds-ph-f-wide input[type="text"], .ds-ph-f-wide select { width: 100%; height: 34px; border: 1px solid var(--ds-line-2); border-radius: 8px; font: inherit; font-size: 14px; background: #fff; color: var(--ds-ink); padding: 0 8px; }
+/* Delete-element button in the inspector head */
+.ds-insp-del { border: 1px solid #fecaca; background: #fff; color: #b91c1c; border-radius: 7px; cursor: pointer;
+  font: inherit; font-size: 12px; padding: 5px 8px; display: inline-flex; align-items: center; }
+.ds-insp-del:hover { background: #fef2f2; border-color: #fca5a5; }
+
+/* Per-side border: which sides the border is on */
+.ds-bd-sides { margin-bottom: 9px; }
+.ds-bd-sides .ds-insp-note { margin: 0 0 7px; }
+.ds-bd-sidebtns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.ds-bd-side { border: 1px solid var(--ds-line-2); background: #fff; border-radius: 7px; cursor: pointer;
+  font: inherit; font-size: 11px; font-weight: 600; color: var(--ds-muted); padding: 6px 2px; }
+.ds-bd-side:hover { border-color: var(--ds-accent); color: var(--ds-accent-ink); }
+.ds-bd-side.on { background: var(--ds-accent); border-color: var(--ds-accent); color: #fff; }
+
+/* Raw-HTML (Edit HTML) view: transparent textarea over a highlighted backdrop */
+.ds-he-srcbox { position: absolute; inset: 14px; border: 1px solid var(--ds-line); border-radius: 10px; overflow: hidden; background: #fff; }
+.ds-he-srchl, .ds-he-srcbox .ds-he-src {
+  position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; border: 0; border-radius: 0;
+  padding: 16px; box-sizing: border-box; overflow: auto;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 13px; line-height: 1.6;
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; tab-size: 2;
+}
+.ds-he-srchl { z-index: 1; color: #0f172a; pointer-events: none; }
+.ds-he-srcbox .ds-he-src { z-index: 2; background: transparent; color: transparent; caret-color: #0f172a; resize: none; }
+.ds-he-srcbox .ds-he-src::selection { background: #bfdbfe; color: transparent; }
+.ds-he-srchl .ds-hl-tok { background: #fff3cd; color: #92610a; border-radius: 3px; }
+.ds-he-srchl .ds-hl-blk { background: #e0e7ff; color: #4338ca; border-radius: 3px; font-weight: 600; }
+
+/* Mobile editing mode: phone-width canvas + banner + mobile controls */
+.ds-he-dev-mobile .ds-he-stage { overflow: auto; display: flex; flex-direction: column; align-items: center; background: #334155; }
+.ds-he-dev-mobile .ds-he-frame { height: auto; flex: 1 1 auto; min-height: 420px; max-width: 100%; border-radius: 18px; box-shadow: 0 12px 44px rgba(0,0,0,.45); }
+.ds-he-mobanner { flex: 0 0 auto; align-self: stretch; background: #0f172a; color: #fff; font-size: 12px; font-weight: 600;
+  padding: 8px 12px; border-radius: 8px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.ds-he-mobanner i { opacity: .85; }
+.ds-he-mobanner b { color: #fff; }
+.ds-mob-chk input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--ds-accent); cursor: pointer; }
+
 /* Insert-image dialog: upload, crop, save */
 .ds-img-dlg { display: flex; flex-direction: column; gap: 12px; }
 .ds-img-drop { position: relative; border: 2px dashed var(--ds-line-2); border-radius: 12px; padding: 22px;
